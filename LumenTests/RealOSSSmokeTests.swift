@@ -126,7 +126,7 @@ struct RealOSSSmokeTests {
 
     private func clean(client: OSSClient, keys: [String]) async {
         for key in keys where key.hasPrefix(prefix) && key != prefix {
-            try? await client.deleteObject(key: key)
+            _ = try? await client.deleteObject(key: key)
         }
     }
 }

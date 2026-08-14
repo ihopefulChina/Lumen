@@ -57,6 +57,34 @@ struct OSSClientTests {
         #expect(await sleeper.recordedDelays().isEmpty)
     }
 
+    @Test func versionedDeleteReturnsAnUndoMarkerAndCanDeleteThatExactVersion() async throws {
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 204,
+                headers: [
+                    "X-Oss-Delete-Marker": "true",
+                    "x-oss-version-id": "CAEQExiBgMCf3Z2X2BciIGQ4YjU"
+                ],
+                data: Data()
+            ),
+            .response(status: 204, headers: [:], data: Data())
+        ])
+        let client = Self.client(transport: transport)
+
+        let receipt = try await client.deleteObject(key: "folder/file name.txt")
+        _ = try await client.deleteObject(
+            key: receipt.key,
+            versionID: receipt.versionID
+        )
+
+        #expect(receipt.isDeleteMarker)
+        #expect(receipt.versionID == "CAEQExiBgMCf3Z2X2BciIGQ4YjU")
+        let requests = await transport.recordedRequests()
+        #expect(requests.count == 2)
+        #expect(requests[0].url?.query == nil)
+        #expect(requests[1].url?.query?.contains("versionId=CAEQExiBgMCf3Z2X2BciIGQ4YjU") == true)
+    }
+
     @Test func downloadPreservesServiceErrorBody() async throws {
         let transport = StubOSSTransport(steps: [
             .response(

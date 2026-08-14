@@ -205,9 +205,21 @@ struct OSSClient: Sendable {
         return try Self.verifyCRC64(local: CRC64XZ.checksum(data), headers: response.headers)
     }
 
-    func deleteObject(key: String) async throws {
+    @discardableResult
+    func deleteObject(key: String, versionID: String? = nil) async throws -> OSSDeleteReceipt {
         guard let bucket else { throw Self.missingBucket }
-        _ = try await perform(method: "DELETE", bucket: bucket, key: key)
+        let query = versionID.map { [("versionId", $0)] } ?? []
+        let response = try await perform(
+            method: "DELETE",
+            bucket: bucket,
+            key: key,
+            query: query
+        )
+        return OSSDeleteReceipt(
+            key: key,
+            isDeleteMarker: response.headers.value("x-oss-delete-marker")?.lowercased() == "true",
+            versionID: response.headers.value("x-oss-version-id")
+        )
     }
 
     func copyObject(from sourceKey: String, to destKey: String, overwrite: Bool = true) async throws {
@@ -282,7 +294,7 @@ struct OSSClient: Sendable {
             }
         } catch {
             for mapping in copied.reversed() {
-                try? await deleteObject(key: mapping.destinationKey)
+                _ = try? await deleteObject(key: mapping.destinationKey)
             }
             throw error
         }

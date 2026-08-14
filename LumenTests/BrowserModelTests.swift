@@ -561,6 +561,45 @@ struct BrowserModelTests {
         #expect(await transport.methods == ["PUT", "DELETE", "GET", "HEAD", "PUT", "DELETE", "GET"])
     }
 
+    @Test func versionedDeleteCanUndoByRemovingTheExactDeleteMarker() async throws {
+        let emptyListing = Data("<ListBucketResult><IsTruncated>false</IsTruncated></ListBucketResult>".utf8)
+        let transport = RenameResultTransport(steps: [
+            .responseWithHeaders(
+                status: 204,
+                headers: [
+                    "x-oss-delete-marker": "true",
+                    "x-oss-version-id": "marker-version-7"
+                ],
+                data: Data()
+            ),
+            .response(status: 200, data: emptyListing),
+            .response(status: 204, data: Data()),
+            .response(status: 200, data: Self.listingXML(key: "old.txt"))
+        ])
+        let fixture = Self.renameModel(transport: transport)
+        fixture.model.browser.replaceSelection([fixture.object.key])
+
+        await fixture.model.deleteSelection()
+
+        #expect(fixture.model.lastDeleteUndoOperation == CloudDeleteUndoOperation(
+            accountID: fixture.model.selectedAccountID!,
+            bucketName: "bucket",
+            title: "撤销删除",
+            markers: [OSSDeleteMarker(key: "old.txt", versionID: "marker-version-7")],
+            sourceSelection: ["old.txt"]
+        ))
+        #expect(fixture.model.canUndoCloudOperation)
+        #expect(fixture.model.banner?.action == .undoCloudOperation)
+
+        await fixture.model.undoLastCloudOperation()
+
+        #expect(fixture.model.lastDeleteUndoOperation == nil)
+        #expect(fixture.model.browser.selectedKeys == ["old.txt"])
+        let requests = await transport.recordedRequests()
+        #expect(requests.map { $0.httpMethod ?? "" } == ["DELETE", "GET", "DELETE", "GET"])
+        #expect(requests[2].url?.query == "versionId=marker-version-7")
+    }
+
     @Test func undoConflictKeepsTheRecordAvailableForRetry() async {
         let transport = RenameResultTransport(steps: [
             .response(status: 200, data: Data()),
@@ -776,16 +815,18 @@ struct BrowserModelTests {
 private actor RenameResultTransport: OSSHTTPTransport {
     enum Step: Sendable {
         case response(status: Int, data: Data)
+        case responseWithHeaders(status: Int, headers: [String: String], data: Data)
     }
 
     private var steps: [Step]
-    private(set) var methods: [String] = []
+    private var requests: [URLRequest] = []
 
     init(steps: [Step]) {
         self.steps = steps
     }
 
-    var requestCount: Int { methods.count }
+    var requestCount: Int { requests.count }
+    var methods: [String] { requests.map { $0.httpMethod ?? "" } }
 
     func send(
         _ request: URLRequest,
@@ -793,7 +834,7 @@ private actor RenameResultTransport: OSSHTTPTransport {
         download: Bool,
         onProgress: (@Sendable (Int64, Int64) -> Void)?
     ) async throws -> OSSHTTPResult {
-        methods.append(request.httpMethod ?? "")
+        requests.append(request)
         guard !steps.isEmpty else {
             throw OSSServiceError(
                 statusCode: 0,
@@ -810,7 +851,18 @@ private actor RenameResultTransport: OSSHTTPTransport {
                 data: data,
                 temporaryDownloadURL: nil
             )
+        case .responseWithHeaders(let status, let headers, let data):
+            return OSSHTTPResult(
+                status: status,
+                headers: headers,
+                data: data,
+                temporaryDownloadURL: nil
+            )
         }
+    }
+
+    func recordedRequests() -> [URLRequest] {
+        requests
     }
 }
 

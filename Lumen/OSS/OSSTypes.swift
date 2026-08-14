@@ -238,6 +238,17 @@ struct ObjectHead: Sendable {
     var storageClass: String?
 }
 
+struct OSSDeleteReceipt: Equatable, Sendable {
+    var key: String
+    var isDeleteMarker: Bool
+    var versionID: String?
+
+    var undoMarker: OSSDeleteMarker? {
+        guard isDeleteMarker, let versionID, !versionID.isEmpty else { return nil }
+        return OSSDeleteMarker(key: key, versionID: versionID)
+    }
+}
+
 struct OSSServiceError: LocalizedError, Sendable {
     var statusCode: Int
     var code: String
