@@ -63,11 +63,17 @@ final class BrowserModel {
     var folders: [OSSFolder] = []
     var objects: [OSSObject] = []
     private(set) var selectedKeys: Set<String> = [] {
-        didSet { selectionEpoch += 1 }
+        didSet {
+            selectionEpoch += 1
+            if let renameSession, selectedKeys != [renameSession.key] {
+                self.renameSession = nil
+            }
+        }
     }
     var selectionEpoch = 0
     private(set) var selectionAnchorKey: String?
     private(set) var focusedKey: String?
+    private(set) var renameSession: BrowserRenameSession?
     var viewMode: BrowserViewMode = .grid
     var sortField: BrowserSortField {
         didSet { defaults.set(sortField.rawValue, forKey: Keys.sortField) }
@@ -232,6 +238,48 @@ final class BrowserModel {
         focusedKey = nil
     }
 
+    @discardableResult
+    func beginRenaming(key requestedKey: String? = nil) -> Bool {
+        guard !isLoading else { return false }
+        if let requestedKey {
+            guard visibleKeys.contains(requestedKey) else { return false }
+            select(key: requestedKey, modifiers: [])
+        }
+        guard selectedKeys.count == 1,
+              let key = selectedKeys.first,
+              visibleKeys.contains(key)
+        else { return false }
+        if renameSession?.key == key {
+            return true
+        }
+        if let folder = visibleFolders.first(where: { $0.prefix == key }) {
+            renameSession = BrowserRenameSession(key: key, name: folder.name, kind: .folder)
+            return true
+        }
+        if let object = visibleObjects.first(where: { $0.key == key }) {
+            renameSession = BrowserRenameSession(key: key, name: object.name, kind: .object)
+            return true
+        }
+        return false
+    }
+
+    func updateRenameDraft(_ draft: String) {
+        guard renameSession?.isCommitting == false else { return }
+        renameSession?.draft = draft
+    }
+
+    func setRenameCommitting(_ isCommitting: Bool) {
+        renameSession?.isCommitting = isCommitting
+    }
+
+    func cancelRenaming() {
+        renameSession = nil
+    }
+
+    func finishRenaming() {
+        renameSession = nil
+    }
+
     func reset() {
         prefix = ""
         folders = []
@@ -292,6 +340,9 @@ final class BrowserModel {
         }
         if let selectionAnchorKey, !visible.contains(selectionAnchorKey) {
             self.selectionAnchorKey = nil
+        }
+        if let renameSession, !visible.contains(renameSession.key) {
+            self.renameSession = nil
         }
     }
 
