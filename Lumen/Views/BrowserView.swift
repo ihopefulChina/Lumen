@@ -7,15 +7,13 @@ struct BrowserView: View {
     @Environment(AppModel.self) private var model
     @Binding var showFileImporter: Bool
     @State private var photos: [PhotosPickerItem] = []
-    @State private var renameTarget: BrowserRenameTarget?
-    @State private var renameText = ""
 
     var body: some View {
         @Bindable var model = model
         content
             .navigationTitle(title)
             .navigationSubtitle(subtitle)
-            .searchable(text: $model.browser.searchText, placement: .toolbar, prompt: "搜索")
+            .searchable(text: $model.browser.searchText, placement: .toolbar, prompt: "搜索当前文件夹")
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
                     Button {
@@ -63,28 +61,6 @@ struct BrowserView: View {
             }
             .onChange(of: photos) { _, items in
                 Task { await importPhotos(items) }
-            }
-            .alert("重命名", isPresented: Binding(
-                get: { renameTarget != nil },
-                set: { if !$0 { renameTarget = nil } }
-            )) {
-                TextField("名称", text: $renameText)
-                Button("取消", role: .cancel) { renameTarget = nil }
-                Button("重命名") {
-                    if let renameTarget {
-                        Task {
-                            switch renameTarget {
-                            case .object(let object):
-                                await model.rename(object, to: renameText)
-                            case .folder(let folder):
-                                await model.renameFolder(folder, to: renameText)
-                            }
-                        }
-                    }
-                    renameTarget = nil
-                }
-            } message: {
-                Text("不会覆盖已有同名项目。")
             }
             .overlay(alignment: .top) {
                 if model.isOrganizingCloud {
@@ -179,7 +155,11 @@ struct BrowserView: View {
                         FolderCell(
                             folder: folder,
                             selected: selected.contains(folder.prefix),
-                            dropTargeted: model.browser.activeDropPrefix == folder.prefix
+                            dropTargeted: model.browser.activeDropPrefix == folder.prefix,
+                            renameSession: renameSession(for: folder.prefix),
+                            renameText: renameTextBinding,
+                            onRenameCommit: commitRename,
+                            onRenameCancel: model.browser.cancelRenaming
                         ) {
                             selectFolder(folder, modifiers: currentSelectionModifiers)
                         } onOpen: {
@@ -212,7 +192,11 @@ struct BrowserView: View {
                     ForEach(model.browser.visibleObjects) { object in
                         AssetCell(
                             object: object,
-                            selected: selected.contains(object.key)
+                            selected: selected.contains(object.key),
+                            renameSession: renameSession(for: object.key),
+                            renameText: renameTextBinding,
+                            onRenameCommit: commitRename,
+                            onRenameCancel: model.browser.cancelRenaming
                         ) {
                             select(object, modifiers: currentSelectionModifiers)
                         } onOpen: {
@@ -268,8 +252,20 @@ struct BrowserView: View {
                             .foregroundStyle(.secondary)
                             .frame(width: 16)
                     }
-                    Text(row.name)
-                        .lineLimit(1)
+                    if let renameSession = renameSession(for: row.id) {
+                        FinderRenameField(
+                            text: renameTextBinding,
+                            initialSelection: renameSession.initialSelection,
+                            alignment: .left,
+                            isCommitting: renameSession.isCommitting,
+                            onCommit: commitRename,
+                            onCancel: model.browser.cancelRenaming
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 20)
+                    } else {
+                        Text(row.name)
+                            .lineLimit(1)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
@@ -398,9 +394,9 @@ struct BrowserView: View {
             model.copyCloudSelection(clickedKey: folder.prefix)
         }
         Button("重命名…") {
-            renameTarget = .folder(folder)
-            renameText = folder.name
+            beginRenaming(key: folder.prefix)
         }
+        .disabled(model.isOrganizingCloud)
         Divider()
         Button(deleteTitle(clickedKey: folder.prefix), role: .destructive) {
             selectForMenu(folder.prefix)
@@ -428,9 +424,9 @@ struct BrowserView: View {
             model.downloadSelection()
         }
         Button("重命名…") {
-            renameTarget = .object(object)
-            renameText = object.name
+            beginRenaming(key: object.key)
         }
+        .disabled(model.isOrganizingCloud)
         Divider()
         Button(deleteTitle(clickedKey: object.key), role: .destructive) {
             selectForMenu(object.key)
@@ -489,6 +485,55 @@ struct BrowserView: View {
         model.browser.select(key: object.key, modifiers: modifiers)
     }
 
+    private var renameTextBinding: Binding<String> {
+        Binding(
+            get: { model.browser.renameSession?.draft ?? "" },
+            set: { model.browser.updateRenameDraft($0) }
+        )
+    }
+
+    private func renameSession(for key: String) -> BrowserRenameSession? {
+        guard model.browser.renameSession?.key == key else { return nil }
+        return model.browser.renameSession
+    }
+
+    private func beginRenaming(key: String) {
+        guard !model.isOrganizingCloud else { return }
+        Task { @MainActor in
+            await Task.yield()
+            model.browser.beginRenaming(key: key)
+        }
+    }
+
+    private func commitRename() {
+        guard let session = model.browser.renameSession,
+              !session.isCommitting
+        else { return }
+        model.browser.setRenameCommitting(true)
+        Task { @MainActor in
+            let succeeded: Bool
+            switch session.kind {
+            case .object:
+                guard let object = model.browser.objects.first(where: { $0.key == session.key }) else {
+                    model.browser.cancelRenaming()
+                    return
+                }
+                succeeded = await model.rename(object, to: session.draft)
+            case .folder:
+                guard let folder = model.browser.folders.first(where: { $0.prefix == session.key }) else {
+                    model.browser.cancelRenaming()
+                    return
+                }
+                succeeded = await model.renameFolder(folder, to: session.draft)
+            }
+            if succeeded {
+                model.browser.finishRenaming()
+            } else {
+                model.browser.setRenameCommitting(false)
+            }
+        }
+    }
+
     private func dragPreview(name: String, symbol: String) -> some View {
         Label(name, systemImage: symbol)
             .lineLimit(1)
@@ -511,18 +556,6 @@ struct BrowserView: View {
         photos = []
         if !urls.isEmpty {
             model.upload(urls: urls, ownedTemporaryURLs: Set(urls))
-        }
-    }
-}
-
-private enum BrowserRenameTarget: Identifiable {
-    case object(OSSObject)
-    case folder(OSSFolder)
-
-    var id: String {
-        switch self {
-        case .object(let object): object.key
-        case .folder(let folder): folder.prefix
         }
     }
 }
@@ -618,7 +651,9 @@ private struct PathBar: View {
     private var statusText: String {
         let selected = model.browser.selectedKeys.count
         if selected > 0 { return "已选 \(selected) 项" }
-        return "\(model.browser.visibleFolders.count + model.browser.visibleObjects.count) 项"
+        let visible = model.browser.visibleFolders.count + model.browser.visibleObjects.count
+        let query = model.browser.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return query.isEmpty ? "\(visible) 项" : "找到 \(visible) 项"
     }
 
     @ViewBuilder
@@ -671,45 +706,65 @@ private struct FolderCell: View {
     let folder: OSSFolder
     var selected: Bool
     var dropTargeted: Bool
+    var renameSession: BrowserRenameSession?
+    @Binding var renameText: String
+    var onRenameCommit: () -> Void
+    var onRenameCancel: () -> Void
     var action: () -> Void
     var onOpen: () -> Void
     @State private var selectedDuringPress = false
 
     var body: some View {
         let highlighted = selected || dropTargeted
-        Button(action: selectOnRelease) {
-            VStack(spacing: 4) {
-                FinderFolderIcon(size: 64)
-                    .padding(8)
-                    .background {
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(highlighted ? Color.accentColor.opacity(dropTargeted ? 0.4 : 0.3) : Color.clear)
-                    }
-                    .overlay {
-                        if dropTargeted {
+        ZStack(alignment: .bottom) {
+            Button(action: selectOnRelease) {
+                VStack(spacing: 4) {
+                    FinderFolderIcon(size: 64)
+                        .padding(8)
+                        .background {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .strokeBorder(Color.accentColor, lineWidth: 2)
+                                .fill(highlighted ? Color.accentColor.opacity(dropTargeted ? 0.4 : 0.3) : Color.clear)
                         }
-                    }
+                        .overlay {
+                            if dropTargeted {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .strokeBorder(Color.accentColor, lineWidth: 2)
+                            }
+                        }
 
-                Text(folder.name)
-                    .font(.system(size: 12))
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background {
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(highlighted ? Color.accentColor : Color.clear)
-                    }
-                    .foregroundStyle(highlighted ? Color.white : Color.primary)
+                    Text(folder.name)
+                        .font(.system(size: 12))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background {
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(highlighted ? Color.accentColor : Color.clear)
+                        }
+                        .foregroundStyle(highlighted ? Color.white : Color.primary)
+                        .opacity(renameSession == nil ? 1 : 0)
+                }
+                .frame(maxWidth: .infinity)
+                .contentShape(Rectangle())
             }
-            .frame(maxWidth: .infinity)
+            .buttonStyle(FinderItemButtonStyle(onPress: selectOnPress))
             .contentShape(Rectangle())
+            .simultaneousGesture(TapGesture(count: 2).onEnded(onOpen))
+
+            if let renameSession {
+                FinderRenameField(
+                    text: $renameText,
+                    initialSelection: renameSession.initialSelection,
+                    alignment: .center,
+                    isCommitting: renameSession.isCommitting,
+                    onCommit: onRenameCommit,
+                    onCancel: onRenameCancel
+                )
+                .frame(height: 20)
+                .padding(.horizontal, 3)
+            }
         }
-        .buttonStyle(FinderItemButtonStyle(onPress: selectOnPress))
-        .contentShape(Rectangle())
-        .simultaneousGesture(TapGesture(count: 2).onEnded(onOpen))
         .help(folder.name)
         .accessibilityLabel("文件夹，\(folder.name)")
         .accessibilityValue(selected ? "已选择" : "未选择")
@@ -730,35 +785,55 @@ private struct FolderCell: View {
 private struct AssetCell: View {
     let object: OSSObject
     var selected: Bool
+    var renameSession: BrowserRenameSession?
+    @Binding var renameText: String
+    var onRenameCommit: () -> Void
+    var onRenameCancel: () -> Void
     var action: () -> Void
     var onOpen: () -> Void
     @State private var selectedDuringPress = false
 
     var body: some View {
-        Button(action: selectOnRelease) {
-            VStack(spacing: 4) {
-                ThumbnailView(object: object)
-                    .aspectRatio(1, contentMode: .fit)
-                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 3)
-                    }
-                    .clipped()
-                Text(object.name)
-                    .font(.caption)
-                    .lineLimit(2)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 4)
-                    .padding(.vertical, 1)
-                    .background(selected ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                    .foregroundStyle(selected ? Color.white : Color.primary)
-                    .frame(maxWidth: .infinity)
+        ZStack(alignment: .bottom) {
+            Button(action: selectOnRelease) {
+                VStack(spacing: 4) {
+                    ThumbnailView(object: object)
+                        .aspectRatio(1, contentMode: .fit)
+                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                        .overlay {
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
+                                .strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 3)
+                        }
+                        .clipped()
+                    Text(object.name)
+                        .font(.caption)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(selected ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                        .foregroundStyle(selected ? Color.white : Color.primary)
+                        .frame(maxWidth: .infinity)
+                        .opacity(renameSession == nil ? 1 : 0)
+                }
+            }
+            .buttonStyle(FinderItemButtonStyle(onPress: selectOnPress))
+            .simultaneousGesture(TapGesture(count: 2).onEnded { onOpen() })
+
+            if let renameSession {
+                FinderRenameField(
+                    text: $renameText,
+                    initialSelection: renameSession.initialSelection,
+                    alignment: .center,
+                    isCommitting: renameSession.isCommitting,
+                    onCommit: onRenameCommit,
+                    onCancel: onRenameCancel
+                )
+                .frame(height: 20)
+                .padding(.horizontal, 3)
             }
         }
-        .buttonStyle(FinderItemButtonStyle(onPress: selectOnPress))
         .help(object.name)
-        .simultaneousGesture(TapGesture(count: 2).onEnded { onOpen() })
         .accessibilityLabel("\(ImageKind.displayKind(for: object.key))，\(object.name)")
         .accessibilityValue(selected ? "已选择" : "未选择")
         .accessibilityHint("双击快速查看")

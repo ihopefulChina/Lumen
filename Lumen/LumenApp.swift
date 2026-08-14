@@ -132,6 +132,10 @@ struct LumenCommands: Commands {
             }
         }
         CommandMenu("浏览") {
+            Button("打开选中项") { actions?.openSelection() }
+                .keyboardShortcut(.downArrow, modifiers: [.command])
+            Button("重命名") { actions?.rename() }
+            Divider()
             Button("后退") { actions?.goBack() }
                 .keyboardShortcut("[", modifiers: [.command])
             Button("前进") { actions?.goForward() }
@@ -157,6 +161,8 @@ struct LumenActions {
     var copyLink: () -> Void
     var copyMarkdown: () -> Void
     var copyHTML: () -> Void
+    var rename: () -> Void
+    var openSelection: () -> Void
     var refresh: () -> Void
     var quickLook: () -> Void
     var grid: () -> Void

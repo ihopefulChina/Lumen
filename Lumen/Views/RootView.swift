@@ -42,6 +42,11 @@ struct RootView: View {
             copyLink: { model.copyURLs(style: .plain) },
             copyMarkdown: { model.copyURLs(style: .markdown) },
             copyHTML: { model.copyURLs(style: .html) },
+            rename: {
+                guard !model.isOrganizingCloud else { return }
+                model.browser.beginRenaming()
+            },
+            openSelection: { openFocusedItem(model) },
             refresh: { Task { await model.refreshListing() } },
             quickLook: { Task { await model.quickLookSelection() } },
             grid: { Motion.run(reduceMotion) { model.browser.viewMode = .grid } },
@@ -72,8 +77,19 @@ struct RootView: View {
                 model.browser.clearSelection()
                 return nil
             }
-            if event.keyCode == 53, flags.isEmpty, !model.browser.selectedKeys.isEmpty {
-                model.browser.clearSelection()
+            if event.keyCode == 53, flags.isEmpty {
+                if model.browser.renameSession != nil {
+                    model.browser.cancelRenaming()
+                    return nil
+                }
+                if !model.browser.selectedKeys.isEmpty {
+                    model.browser.clearSelection()
+                    return nil
+                }
+            }
+            if event.keyCode == 125, flags == .command,
+               !model.browser.selectedKeys.isEmpty {
+                openFocusedItem(model)
                 return nil
             }
             if [123, 124, 125, 126].contains(event.keyCode),
@@ -83,8 +99,10 @@ struct RootView: View {
                 return nil
             }
             if event.keyCode == 36, flags.isEmpty {
-                openFocusedItem(model)
-                return nil
+                guard !model.isOrganizingCloud else { return event }
+                if model.browser.beginRenaming() {
+                    return nil
+                }
             }
             if event.keyCode == 49, flags.isEmpty, model.previewItem == nil {
                 Task { await model.quickLookSelection() }
