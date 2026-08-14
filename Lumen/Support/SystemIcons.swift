@@ -2,6 +2,7 @@ import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
+@MainActor
 enum SystemIcons {
     static let folder: NSImage = {
         let image = NSWorkspace.shared.icon(for: UTType.folder).copy() as! NSImage
