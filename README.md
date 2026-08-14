@@ -107,6 +107,8 @@ Lumen 0.0.4 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
 
 当前公开 DMG 使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或完成 Apple 公证。如果 macOS 阻止首次打开，请前往「系统设置 → 隐私与安全性」确认打开。首次安装后的软件更新仍会经过 Lumen 内置的 Ed25519 签名验证。
 
+由于当前版本还没有 Developer ID 身份，原地更新后的首次启动中，macOS 可能再次询问是否允许 Lumen 读取钥匙串；确认允许后，原有 OSS 账号即可继续使用。
+
 ## 账号与权限
 
 - 建议创建权限最小化的 RAM 子用户，不要使用阿里云主账号 AccessKey。

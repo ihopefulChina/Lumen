@@ -37,8 +37,10 @@
 系统要求：Apple Silicon，macOS 15 或更高版本。公开 DMG 使用 ad-hoc 签名，尚未经过 Apple 公证。
 
 > 已安装 0.0.3 或更早版本的用户需要手动安装 0.0.4 一次；从 0.0.4 开始即可在软件内完成后续更新。
+
+DMG SHA-256：`26f4b5d13ce75e3bc0864d2a7bd1969ffa510de496a495acae03315c887c18bc`
 ]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.4/Lumen-0.0.4.dmg" length="3821899" type="application/octet-stream" sparkle:edSignature="KY66hfb4Up/xZuLIBOc7Gvc6cAgauC2PNwFMKlyf0pR3g5el6iBSN9CaDX6jnw7nMPGum7VOnuRO+omxJ9G6Dg=="/>
+            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.4/Lumen-0.0.4.dmg" length="3826935" type="application/octet-stream" sparkle:edSignature="Kk4CTeCJUvZZLppFd4eKtAecyMSS3rWdoiGqFQ3/2Y+4Ld6anHLRu8EgRTlBYGTJnjcL7lP50vM7frHpUIIxBQ=="/>
         </item>
     </channel>
 </rss>
