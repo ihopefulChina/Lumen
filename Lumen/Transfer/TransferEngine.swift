@@ -18,11 +18,14 @@ final class TransferEngine {
     private var running = 0
     private let journal: any TransferJournaling
     private let bookmarks: any TransferBookmarking
+    private let now: @MainActor @Sendable () -> Date
+    private var lastProgressPersistenceAt: Date?
     private let clientProvider: @MainActor @Sendable (OSSAccount, OSSBucket?) throws -> OSSClient
 
     init(
         journal: any TransferJournaling = NoopTransferJournal(),
         bookmarks: any TransferBookmarking = SecurityScopedTransferBookmarks(),
+        now: @escaping @MainActor @Sendable () -> Date = { .now },
         clientProvider: @escaping @MainActor @Sendable (OSSAccount, OSSBucket?) throws -> OSSClient = { account, bucket in
             OSSClient(
                 credentials: try AccountStore.credentials(for: account),
@@ -34,6 +37,7 @@ final class TransferEngine {
     ) {
         self.journal = journal
         self.bookmarks = bookmarks
+        self.now = now
         self.clientProvider = clientProvider
     }
 
@@ -482,10 +486,7 @@ final class TransferEngine {
         do {
             let integrityVerified = try await client.putObject(key: key, fileURL: fileURL, contentType: contentType, acl: acl) { [weak self] sent, total in
                 Task { @MainActor in
-                    self?.mutate(id, persist: false) { job in
-                        job.transferred = sent
-                        if total > 0 { job.total = total }
-                    }
+                    self?.recordProgress(id, transferred: sent, total: total)
                 }
             }
             mutate(id) { job in
@@ -530,10 +531,7 @@ final class TransferEngine {
         do {
             let integrityVerified = try await client.download(key: key, to: destination, within: root) { [weak self] sent, total in
                 Task { @MainActor in
-                    self?.mutate(id, persist: false) { job in
-                        job.transferred = sent
-                        if total > 0 { job.total = total }
-                    }
+                    self?.recordProgress(id, transferred: sent, total: total)
                 }
             }
             mutate(id) { job in
@@ -583,6 +581,20 @@ final class TransferEngine {
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
         body(&jobs[index])
         if persist { persistJournal() }
+    }
+
+    func recordProgress(_ id: UUID, transferred: Int64, total: Int64) {
+        guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].isActive else { return }
+        jobs[index].transferred = transferred
+        if total > 0 { jobs[index].total = total }
+
+        let timestamp = now()
+        if let lastProgressPersistenceAt,
+           timestamp.timeIntervalSince(lastProgressPersistenceAt) < 1 {
+            return
+        }
+        lastProgressPersistenceAt = timestamp
+        persistJournal()
     }
 
     private func updateDockBadge() {

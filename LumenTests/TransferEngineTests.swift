@@ -104,6 +104,21 @@ struct TransferEngineTests {
         #expect(engine.unavailableRetryReason(restored.id) == "原文件或文件夹权限已失效，请重新选择后再上传。")
     }
 
+    @Test func progressJournalWritesAreThrottled() {
+        let journal = CountingTransferJournal()
+        let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
+        let engine = TransferEngine(journal: journal, now: { fixedNow })
+        let job = Self.persistedJob(status: .running)
+        engine.jobs = [job]
+
+        engine.recordProgress(job.id, transferred: 4, total: 10)
+        engine.recordProgress(job.id, transferred: 5, total: 10)
+
+        #expect(engine.jobs.first?.transferred == 5)
+        #expect(journal.saveCount == 1)
+        #expect(journal.records.first?.job.transferred == 4)
+    }
+
     @Test func transferResourceFinishesOnlyOnceAndDeletesOwnedTemporaryFile() throws {
         let temporary = FileManager.default.temporaryDirectory
             .appending(path: "lumen-transfer-resource-\(UUID().uuidString)")
@@ -420,6 +435,18 @@ private final class MemoryTransferJournal: TransferJournaling, @unchecked Sendab
 
     func save(_ records: [PersistedTransfer]) throws {
         self.records = records
+    }
+}
+
+private final class CountingTransferJournal: TransferJournaling, @unchecked Sendable {
+    private(set) var records: [PersistedTransfer] = []
+    private(set) var saveCount = 0
+
+    func load() throws -> [PersistedTransfer] { records }
+
+    func save(_ records: [PersistedTransfer]) throws {
+        self.records = records
+        saveCount += 1
     }
 }
 
