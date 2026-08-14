@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Lumen — 像访达一样浏览阿里云 OSS</title>
+  <meta name="description" content="Lumen 是一款原生 macOS 阿里云 OSS 客户端，用访达熟悉的方式浏览、整理、上传和分享对象。">
+  <meta name="theme-color" content="#f4f6f9">
+  <link rel="canonical" href="https://ihopefulchina.github.io/Lumen/">
+  <link rel="icon" type="image/png" href="assets/lumen-favicon.png">
+  <link rel="apple-touch-icon" href="assets/lumen-icon.png">
+  <link rel="manifest" href="site.webmanifest">
+  <link rel="stylesheet" href="styles.css">
+
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Lumen — 像访达一样浏览阿里云 OSS">
+  <meta property="og:description" content="原生 macOS OSS 客户端。浏览、整理、传输和分享，都放进一个熟悉的窗口。">
+  <meta property="og:url" content="https://ihopefulchina.github.io/Lumen/">
+  <meta property="og:image" content="https://ihopefulchina.github.io/Lumen/assets/browser.png">
+  <meta property="og:image:width" content="2480">
+  <meta property="og:image:height" content="1600">
+  <meta property="og:locale" content="zh_CN">
+  <meta name="twitter:card" content="summary_large_image">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Lumen",
+    "applicationCategory": "UtilitiesApplication",
+    "operatingSystem": "macOS 15 or later",
+    "softwareVersion": "0.0.6",
+    "downloadUrl": "https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg",
+    "url": "https://ihopefulchina.github.io/Lumen/",
+    "description": "一款为 Mac 打造的阿里云 OSS 客户端。"
+  }
+  </script>
+</head>
+<body>
+  <a class="skip-link" href="#main">跳到主要内容</a>
+
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="#top" aria-label="Lumen 首页">
+        <img src="assets/lumen-favicon.png" width="64" height="64" alt="">
+        <span>Lumen</span>
+      </a>
+      <nav class="main-nav" aria-label="主导航">
+        <a href="#features">功能</a>
+        <a href="#security">安全</a>
+        <a href="#start">开始使用</a>
+        <a href="#faq">常见问题</a>
+      </nav>
+      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg">下载 0.0.6</a>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top" aria-labelledby="hero-title">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="status-dot" aria-hidden="true"></span> 原生 macOS · 阿里云 OSS</p>
+          <h1 id="hero-title">把 OSS 放回<br>熟悉的窗口里。</h1>
+          <p class="hero-lead">Lumen 用接近访达的方式浏览、整理、上传和分享对象。路径、选择、拖放和快捷键，都按 Mac 的习惯工作。</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg">
+              <span>下载 Lumen 0.0.6</span>
+              <span aria-hidden="true">↓</span>
+            </a>
+            <a class="button button-secondary" href="https://github.com/ihopefulChina/Lumen" rel="noopener">查看 GitHub</a>
+          </div>
+          <p class="requirements">Apple Silicon · macOS 15 或更高版本 · 当前版本可免费下载</p>
+        </div>
+
+        <div class="hero-visual" aria-label="Lumen 应用图标与 OSS 路径示意">
+          <div class="route-line route-line-one" aria-hidden="true"></div>
+          <div class="route-line route-line-two" aria-hidden="true"></div>
+          <span class="route-node node-one" aria-hidden="true"></span>
+          <span class="route-node node-two" aria-hidden="true"></span>
+          <img class="app-icon" src="assets/lumen-icon.png" width="512" height="512" alt="Lumen 应用图标">
+          <div class="mini-path" aria-hidden="true">
+            <span class="drive-mark"></span>
+            <span>OSS</span><b>/</b><span>lumen-assets</span><b>/</b><strong>发布素材</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="product-section" id="features" aria-labelledby="features-title">
+      <div class="container">
+        <div class="section-heading">
+          <p class="section-number">01 / 一个窗口</p>
+          <div>
+            <h2 id="features-title">先找到，再处理。</h2>
+            <p>账号、Bucket、路径和对象保持在同一视野里。单击选择，双击打开；从侧边栏收藏直接抵达常用目录。</p>
+          </div>
+        </div>
+
+        <figure class="app-window">
+          <div class="window-path" aria-hidden="true">
+            <span class="traffic-lights"><i></i><i></i><i></i></span>
+            <span class="path-copy"><b>OSS</b><em>/</em>lumen-studio-assets<em>/</em>campaigns<em>/</em><strong>2026-autumn</strong></span>
+            <span class="view-switch">≡</span>
+          </div>
+          <img src="assets/browser.png" width="2480" height="1600" alt="Lumen 的对象浏览窗口" fetchpriority="high">
+          <figcaption>
+            <span>原生 macOS 界面</span>
+            <span>Finder 式列表与路径</span>
+            <span>画面使用虚拟演示数据</span>
+          </figcaption>
+        </figure>
+
+        <div class="chapter chapter-browse">
+          <div class="chapter-copy">
+            <p class="chapter-kicker">浏览</p>
+            <h3>目录再深，也知道自己在哪里。</h3>
+            <p>在网格和列表之间切换，按名称、日期、大小或类型排序。搜索只过滤当前文件夹，不会让隐藏项目留在选择中。</p>
+          </div>
+          <div class="object-map" aria-label="Lumen 路径和对象列表示意">
+            <div class="object-map-path"><span>lumen-assets</span><b>›</b><span>campaigns</span><b>›</b><strong>2026-autumn</strong></div>
+            <div class="object-row"><span class="object-kind folder-kind"></span><strong>品牌规范</strong><small>文件夹</small></div>
+            <div class="object-row selected"><span class="object-kind folder-kind"></span><strong>发布素材</strong><small>文件夹</small></div>
+            <div class="object-row"><span class="object-kind file-kind"></span><strong>交付清单.pdf</strong><small>842 KB</small></div>
+            <div class="object-row"><span class="object-kind file-kind"></span><strong>片头动画.mov</strong><small>186.4 MB</small></div>
+          </div>
+        </div>
+
+        <div class="chapter chapter-organize">
+          <div class="chapter-copy">
+            <p class="chapter-kicker">整理</p>
+            <h3>可以大胆移动，也能及时回头。</h3>
+            <p>拖放、复制、移动和原地重命名会先检查冲突，绝不静默覆盖。最近一次成功的重命名或同 Bucket 移动可以安全撤销。</p>
+            <ul class="plain-list">
+              <li><span>Return</span> 原地重命名</li>
+              <li><span>⌘ Z</span> 撤销最近一次云端整理</li>
+              <li><span>Space</span> 快速查看选中对象</li>
+            </ul>
+          </div>
+          <div class="undo-scene" aria-label="撤销云端移动示意">
+            <div class="move-origin">
+              <span class="mini-folder"></span>
+              <p><strong>发布素材</strong><small>campaigns / 2026-autumn</small></p>
+            </div>
+            <div class="move-track" aria-hidden="true"><span>→</span></div>
+            <div class="move-origin destination">
+              <span class="mini-folder"></span>
+              <p><strong>待发布</strong><small>delivery / final</small></p>
+            </div>
+            <div class="undo-banner"><span class="check-mark">✓</span> 已移动 1 个项目 <b>撤销</b></div>
+          </div>
+        </div>
+
+        <div class="chapter chapter-transfer">
+          <div class="chapter-copy">
+            <p class="chapter-kicker">传输与分享</p>
+            <h3>文件夹进来，结构仍然完整。</h3>
+            <p>拖入文件或整个文件夹；大文件自动分片。下载通过 CRC64 校验后才写入最终位置，失败任务可以沿原路径重试。</p>
+          </div>
+          <div class="transfer-sheet" aria-label="文件传输任务示意">
+            <div class="transfer-head"><span>传输</span><small>3 个任务</small></div>
+            <div class="transfer-row">
+              <span class="transfer-icon">↑</span>
+              <p><strong>发布素材</strong><small>保留 18 个子目录</small></p>
+              <b class="transfer-done">完成</b>
+            </div>
+            <div class="transfer-row">
+              <span class="transfer-icon">↑</span>
+              <p><strong>片头动画.mov</strong><small>186.4 MB · 分片上传</small></p>
+              <span class="progress"><i></i></span>
+            </div>
+            <div class="share-line"><span>链接格式</span><b>原始链接</b><b>Markdown</b><b>HTML</b></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="security-section" id="security" aria-labelledby="security-title">
+      <div class="container security-inner">
+        <div class="security-intro">
+          <p class="section-number inverse">02 / 边界清楚</p>
+          <h2 id="security-title"><span>密钥留在钥匙串。</span><br><span>覆盖不会悄悄发生。</span></h2>
+          <p>Lumen 把云端操作当作文件操作来对待：先确认范围，再执行；信息不完整时，宁可停下来。</p>
+        </div>
+        <div class="security-points">
+          <article>
+            <span>01</span>
+            <h3>钥匙串存储</h3>
+            <p>AccessKey Secret 与 STS Token 保存在 macOS 钥匙串，不写入偏好设置。</p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>冲突保护</h3>
+            <p>复制、移动、重命名和撤销都会检查目标，不静默覆盖已有对象。</p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>完整性校验</h3>
+            <p>上传与下载核对 OSS 返回的 CRC64，校验通过后才完成任务。</p>
+          </article>
+          <article>
+            <span>04</span>
+            <h3>签名更新</h3>
+            <p>软件内更新使用 Ed25519 验证安装包，安装后自动退出并重新打开。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="start-section" id="start" aria-labelledby="start-title">
+      <div class="container start-grid">
+        <div class="start-copy">
+          <p class="section-number">03 / 开始使用</p>
+          <h2 id="start-title">三步，打开你的 OSS。</h2>
+          <ol class="steps">
+            <li><span>1</span><p><strong>下载并安装</strong><small>打开 DMG，把 Lumen 拖入“应用程序”。</small></p></li>
+            <li><span>2</span><p><strong>添加账号</strong><small>填写 RAM 子账号 AccessKey，选择地域和默认权限。</small></p></li>
+            <li><span>3</span><p><strong>双击 Bucket</strong><small>从侧边栏进入存储空间，然后拖入文件。</small></p></li>
+          </ol>
+          <a class="text-link" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg">下载 Lumen 0.0.6 <span aria-hidden="true">↗</span></a>
+          <p class="install-note">建议使用权限最小化的 RAM 子账号。Lumen 是独立项目，并非阿里云官方产品。</p>
+        </div>
+        <figure class="account-figure">
+          <div class="account-label"><span class="demo-badge">DEMO</span> 虚拟账号设置示例</div>
+          <img src="assets/account.png" width="2480" height="1600" alt="在 Lumen 中添加 OSS 账号" loading="lazy">
+        </figure>
+      </div>
+    </section>
+
+    <section class="faq-section" id="faq" aria-labelledby="faq-title">
+      <div class="container faq-grid">
+        <div>
+          <p class="section-number">04 / 常见问题</p>
+          <h2 id="faq-title">重要的事，<br>直接说明。</h2>
+        </div>
+        <div class="faq-list">
+          <details>
+            <summary>支持哪些 Mac？<span aria-hidden="true">＋</span></summary>
+            <p>Lumen 0.0.6 支持 Apple Silicon Mac，需要 macOS 15 或更高版本。</p>
+          </details>
+          <details>
+            <summary>为什么第一次打开可能被 macOS 阻止？<span aria-hidden="true">＋</span></summary>
+            <p>当前公开 DMG 使用 ad-hoc 签名，尚未完成 Apple Developer ID 签名和公证。如果系统阻止首次打开，请到“系统设置 → 隐私与安全性”确认打开。</p>
+          </details>
+          <details>
+            <summary>账号凭证保存在哪里？<span aria-hidden="true">＋</span></summary>
+            <p>AccessKey Secret 和 STS Token 保存到 macOS 钥匙串。账号名称、地域等非敏感设置保存在本机偏好设置中。</p>
+          </details>
+          <details>
+            <summary>软件会自动更新吗？<span aria-hidden="true">＋</span></summary>
+            <p>会。在“Lumen → 检查更新…”中可以立即检查；发现新版本后，点击安装即可完成签名验证、替换并自动重新打开。</p>
+          </details>
+          <details>
+            <summary>Lumen 是开源软件吗？<span aria-hidden="true">＋</span></summary>
+            <p>源码目前公开在 GitHub，但仓库尚未附带开源许可证。当前 Release 可以免费下载使用；代码的其他使用方式仍需获得作者授权。</p>
+          </details>
+          <details>
+            <summary>它会管理 Bucket 或控制台资源吗？<span aria-hidden="true">＋</span></summary>
+            <p>不会。Lumen 专注对象浏览、整理、上传、下载与分享，不创建 Bucket，也不管理未完成分片等控制台资源。</p>
+          </details>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta" aria-labelledby="final-title">
+      <div class="container final-inner">
+        <img src="assets/lumen-icon.png" width="512" height="512" alt="" loading="lazy">
+        <p class="eyebrow">Lumen 0.0.6</p>
+        <h2 id="final-title">下一次打开 OSS，<br>从熟悉的窗口开始。</h2>
+        <div class="hero-actions centered">
+          <a class="button button-primary" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg">下载 macOS 版本</a>
+          <a class="button button-secondary" href="https://github.com/ihopefulChina/Lumen/issues" rel="noopener">反馈问题</a>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand"><img src="assets/lumen-favicon.png" width="64" height="64" alt=""><span>Lumen</span></div>
+      <p>为 Mac 打造的阿里云 OSS 客户端。</p>
+      <nav aria-label="页脚导航">
+        <a href="https://github.com/ihopefulChina/Lumen" rel="noopener">GitHub</a>
+        <a href="https://github.com/ihopefulChina/Lumen/releases" rel="noopener">版本记录</a>
+        <a href="https://github.com/ihopefulChina/Lumen/issues" rel="noopener">问题反馈</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

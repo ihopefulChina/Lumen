@@ -10,7 +10,9 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg"><strong>下载 Lumen 0.0.6</strong></a>
+  <a href="https://ihopefulchina.github.io/Lumen/"><strong>访问官网</strong></a>
+  &nbsp;·&nbsp;
+  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg">下载 Lumen 0.0.6</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/ihopefulChina/Lumen/releases">版本记录</a>
   &nbsp;·&nbsp;
@@ -24,6 +26,8 @@
 <p align="center">
   <img src="docs/browser.png" alt="Lumen 的对象浏览窗口" width="920">
 </p>
+
+<p align="center"><sub>截图使用完全虚拟的演示账号、Bucket 与对象数据。</sub></p>
 
 ## OSS，也可以像访达一样自然
 
@@ -71,6 +75,8 @@ Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口�
 <p align="center">
   <img src="docs/account.png" alt="在 Lumen 中添加 OSS 账号" width="520">
 </p>
+
+<p align="center"><sub>示例 AccessKey 带有 DEMO 标记，不对应任何真实账号。</sub></p>
 
 账号还可配置 STS Token、传输加速、自定义 Endpoint、CDN 域名、默认 ACL 和上传路径模板。路径模板只在 Bucket 根目录生效，例如：
 
