@@ -1068,7 +1068,9 @@ final class AppModel {
         to dest: URL,
         extraPrefix: (prefix: String, folderName: String)? = nil
     ) async {
-        guard let client = makeClient() else { return }
+        guard let account = selectedAccount,
+              let bucket = selectedBucket,
+              let client = makeClient() else { return }
         var items: [(object: OSSObject, destination: URL)] = []
         var skippedLocal = 0
         var skippedUnsafe = 0
@@ -1133,7 +1135,13 @@ final class AppModel {
             }
             return
         }
-        transfers.enqueueDownloadJobs(items: items, client: client, scopedRoot: dest)
+        transfers.enqueueDownloadJobs(
+            items: items,
+            client: client,
+            account: account,
+            bucket: bucket,
+            scopedRoot: dest
+        )
         if truncated {
             present("已加入 \(items.count) 个下载，部分目录未列完")
         } else if skippedLocal + skippedUnsafe > 0 {

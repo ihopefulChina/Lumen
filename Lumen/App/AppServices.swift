@@ -11,7 +11,9 @@ enum AppLinks {
 @MainActor
 @Observable
 final class AppServices {
-    static let shared = AppServices()
+    static let shared = AppServices(
+        transfers: TransferEngine(journal: FileTransferJournal.live)
+    )
 
     var accounts: [OSSAccount]
     var accountRecovery: AccountRecovery?
@@ -77,6 +79,7 @@ final class AppServices {
     func bootstrapIfNeeded() {
         guard !didBootstrap else { return }
         didBootstrap = true
+        transfers.restore(accounts: accounts)
         updates.automaticallyChecksForUpdates = settings.checkUpdatesAutomatically
         transfers.onUploadFinished = { [weak self] in
             self?.sessions.forEach { $0.scheduleListingRefresh() }

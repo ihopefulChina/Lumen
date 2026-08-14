@@ -13,7 +13,29 @@ final class TransferEngine {
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var resources: [UUID: TransferResource] = [:]
     private var retryDescriptors: [UUID: RetryDescriptor] = [:]
+    private var persistedRetries: [UUID: PersistedTransferRetry] = [:]
+    private var unavailableRetryReasons: [UUID: String] = [:]
     private var running = 0
+    private let journal: any TransferJournaling
+    private let bookmarks: any TransferBookmarking
+    private let clientProvider: @MainActor @Sendable (OSSAccount, OSSBucket?) throws -> OSSClient
+
+    init(
+        journal: any TransferJournaling = NoopTransferJournal(),
+        bookmarks: any TransferBookmarking = SecurityScopedTransferBookmarks(),
+        clientProvider: @escaping @MainActor @Sendable (OSSAccount, OSSBucket?) throws -> OSSClient = { account, bucket in
+            OSSClient(
+                credentials: try AccountStore.credentials(for: account),
+                region: account.signingRegion(for: bucket),
+                endpointHost: account.apiHost(for: bucket),
+                bucket: bucket?.name
+            )
+        }
+    ) {
+        self.journal = journal
+        self.bookmarks = bookmarks
+        self.clientProvider = clientProvider
+    }
 
     var activeCount: Int { jobs.filter(\.isActive).count }
     var hasJobs: Bool { !jobs.isEmpty }
@@ -159,10 +181,18 @@ final class TransferEngine {
         plan.items.forEach { $0.resource.finish() }
     }
 
-    func enqueueDownloads(objects: [OSSObject], client: OSSClient, folder: URL) {
+    func enqueueDownloads(
+        objects: [OSSObject],
+        client: OSSClient,
+        account: OSSAccount? = nil,
+        bucket: OSSBucket? = nil,
+        folder: URL
+    ) {
         enqueueDownloadJobs(
             items: objects.map { ($0, folder.appending(path: $0.name)) },
             client: client,
+            account: account,
+            bucket: bucket,
             scopedRoot: folder
         )
     }
@@ -170,6 +200,8 @@ final class TransferEngine {
     func enqueueDownloadJobs(
         items: [(object: OSSObject, destination: URL)],
         client: OSSClient,
+        account: OSSAccount? = nil,
+        bucket: OSSBucket? = nil,
         scopedRoot: URL
     ) {
         guard !items.isEmpty else { return }
@@ -195,11 +227,26 @@ final class TransferEngine {
             retryDescriptors[jobID] = .download(
                 DownloadRetryDescriptor(
                     client: client,
+                    account: account,
+                    bucket: bucket,
                     object: item.object,
                     destination: dest,
                     scopedRoot: scopedRoot
                 )
             )
+            if let account,
+               let relativeDestination = Self.relativePath(from: scopedRoot, to: dest),
+               let rootBookmark = try? bookmarks.makeBookmark(for: scopedRoot) {
+                persistedRetries[jobID] = .download(
+                    PersistedDownloadRetry(
+                        accountID: account.id,
+                        bucket: bucket,
+                        rootBookmark: rootBookmark,
+                        object: item.object,
+                        relativeDestination: relativeDestination
+                    )
+                )
+            }
             resources[jobID] = TransferResource(
                 retainedResources: [rootLease].compactMap { $0 }
             )
@@ -213,6 +260,7 @@ final class TransferEngine {
                 )
             }
         }
+        persistJournal()
         updateDockBadge()
     }
 
@@ -238,7 +286,10 @@ final class TransferEngine {
         jobs.removeAll { !$0.isActive }
         for id in removedIDs {
             retryDescriptors[id] = nil
+            persistedRetries[id] = nil
+            unavailableRetryReasons[id] = nil
         }
+        persistJournal()
     }
 
     func canRetry(_ id: UUID) -> Bool {
@@ -249,6 +300,10 @@ final class TransferEngine {
         case .download:
             return true
         }
+    }
+
+    func unavailableRetryReason(_ id: UUID) -> String? {
+        unavailableRetryReasons[id]
     }
 
     func retry(_ id: UUID) {
@@ -281,9 +336,35 @@ final class TransferEngine {
             enqueueDownloadJobs(
                 items: [(download.object, download.destination)],
                 client: download.client,
+                account: download.account,
+                bucket: download.bucket,
                 scopedRoot: download.scopedRoot
             )
         }
+    }
+
+    func restore(accounts: [OSSAccount]) {
+        guard let records = try? journal.load() else { return }
+        jobs = records.map(\.job)
+        retryDescriptors.removeAll()
+        persistedRetries.removeAll()
+        unavailableRetryReasons.removeAll()
+
+        for record in records {
+            let id = record.job.id
+            if jobs.first(where: { $0.id == id })?.isActive == true {
+                mutate(id, persist: false) { job in
+                    job.status = .failed
+                    job.errorMessage = "上次退出时传输中断，可重试"
+                    job.finishedAt = .now
+                }
+            }
+            guard let retry = record.retry else { continue }
+            persistedRetries[id] = retry
+            restore(retry: retry, for: id, accounts: accounts)
+        }
+        persistJournal()
+        updateDockBadge()
     }
 
     private func enqueue(
@@ -349,6 +430,19 @@ final class TransferEngine {
                     playSound: playCompleteSound
                 )
             )
+            if let sourceBookmark = try? bookmarks.makeBookmark(for: item.sourceURL) {
+                persistedRetries[job.id] = .upload(
+                    PersistedUploadRetry(
+                        accountID: account.id,
+                        bucket: bucket,
+                        sourceBookmark: sourceBookmark,
+                        objectKey: item.objectKey,
+                        imagesOnly: plan.options.imagesOnly,
+                        convertHEIC: plan.options.convertHEIC,
+                        playSound: playCompleteSound
+                    )
+                )
+            }
             resources[job.id] = item.resource
             tasks[job.id] = Task { [weak self] in
                 await self?.runUpload(
@@ -362,6 +456,7 @@ final class TransferEngine {
                 )
             }
         }
+        persistJournal()
         updateDockBadge()
     }
 
@@ -387,7 +482,7 @@ final class TransferEngine {
         do {
             let integrityVerified = try await client.putObject(key: key, fileURL: fileURL, contentType: contentType, acl: acl) { [weak self] sent, total in
                 Task { @MainActor in
-                    self?.mutate(id) { job in
+                    self?.mutate(id, persist: false) { job in
                         job.transferred = sent
                         if total > 0 { job.total = total }
                     }
@@ -435,7 +530,7 @@ final class TransferEngine {
         do {
             let integrityVerified = try await client.download(key: key, to: destination, within: root) { [weak self] sent, total in
                 Task { @MainActor in
-                    self?.mutate(id) { job in
+                    self?.mutate(id, persist: false) { job in
                         job.transferred = sent
                         if total > 0 { job.total = total }
                     }
@@ -484,9 +579,10 @@ final class TransferEngine {
         resources.removeValue(forKey: id)?.finish()
     }
 
-    private func mutate(_ id: UUID, _ body: (inout TransferJob) -> Void) {
+    private func mutate(_ id: UUID, persist: Bool = true, _ body: (inout TransferJob) -> Void) {
         guard let index = jobs.firstIndex(where: { $0.id == id }) else { return }
         body(&jobs[index])
+        if persist { persistJournal() }
     }
 
     private func updateDockBadge() {
@@ -511,9 +607,93 @@ final class TransferEngine {
 
     private struct DownloadRetryDescriptor: Sendable {
         var client: OSSClient
+        var account: OSSAccount?
+        var bucket: OSSBucket?
         var object: OSSObject
         var destination: URL
         var scopedRoot: URL
+    }
+
+    private func restore(
+        retry: PersistedTransferRetry,
+        for id: UUID,
+        accounts: [OSSAccount]
+    ) {
+        switch retry {
+        case .upload(let upload):
+            guard let account = accounts.first(where: { $0.id == upload.accountID }) else {
+                unavailableRetryReasons[id] = "原账号已不存在，无法重试。"
+                return
+            }
+            guard let source = try? bookmarks.resolve(upload.sourceBookmark) else {
+                unavailableRetryReasons[id] = "原文件或文件夹权限已失效，请重新选择后再上传。"
+                return
+            }
+            guard FileManager.default.fileExists(atPath: source.path) else {
+                unavailableRetryReasons[id] = "原文件已移动或删除，请重新选择后再上传。"
+                return
+            }
+            guard let client = try? clientProvider(account, upload.bucket) else {
+                unavailableRetryReasons[id] = "账号密钥不可用，请重新编辑账号后再重试。"
+                return
+            }
+            retryDescriptors[id] = .upload(
+                UploadRetryDescriptor(
+                    client: client,
+                    account: account,
+                    bucket: upload.bucket,
+                    sourceURL: source,
+                    objectKey: upload.objectKey,
+                    options: UploadPreparationOptions(
+                        imagesOnly: upload.imagesOnly,
+                        convertHEIC: upload.convertHEIC
+                    ),
+                    playSound: upload.playSound
+                )
+            )
+        case .download(let download):
+            guard let account = accounts.first(where: { $0.id == download.accountID }) else {
+                unavailableRetryReasons[id] = "原账号已不存在，无法重试。"
+                return
+            }
+            guard let root = try? bookmarks.resolve(download.rootBookmark),
+                  let destination = try? FileSafety.destination(
+                    root: root,
+                    relativePath: download.relativeDestination
+                  ) else {
+                unavailableRetryReasons[id] = "下载目录权限已失效，请重新选择目录。"
+                return
+            }
+            guard let client = try? clientProvider(account, download.bucket) else {
+                unavailableRetryReasons[id] = "账号密钥不可用，请重新编辑账号后再重试。"
+                return
+            }
+            retryDescriptors[id] = .download(
+                DownloadRetryDescriptor(
+                    client: client,
+                    account: account,
+                    bucket: download.bucket,
+                    object: download.object,
+                    destination: destination,
+                    scopedRoot: root
+                )
+            )
+        }
+    }
+
+    private func persistJournal() {
+        let records = jobs.map { job in
+            PersistedTransfer(job: job, retry: persistedRetries[job.id])
+        }
+        try? journal.save(records)
+    }
+
+    nonisolated private static func relativePath(from root: URL, to destination: URL) -> String? {
+        let rootPath = root.standardizedFileURL.path
+        let destinationPath = destination.standardizedFileURL.path
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        guard destinationPath.hasPrefix(prefix) else { return nil }
+        return String(destinationPath.dropFirst(prefix.count))
     }
 
     private struct PreparedUpload {

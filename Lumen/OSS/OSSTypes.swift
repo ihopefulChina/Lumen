@@ -187,7 +187,7 @@ enum OSSEndpoint {
     }
 }
 
-struct OSSBucket: Identifiable, Hashable, Sendable {
+struct OSSBucket: Identifiable, Hashable, Codable, Sendable {
     var name: String
     var regionID: String
     var location: String
@@ -201,7 +201,7 @@ struct OSSBucket: Identifiable, Hashable, Sendable {
     }
 }
 
-struct OSSObject: Identifiable, Hashable, Sendable {
+struct OSSObject: Identifiable, Hashable, Codable, Sendable {
     var key: String
     var size: Int64
     var etag: String
