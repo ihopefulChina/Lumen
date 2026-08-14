@@ -23,19 +23,30 @@ final class TransferEngine {
 
     init(
         journal: any TransferJournaling = NoopTransferJournal(),
-        bookmarks: any TransferBookmarking = SecurityScopedTransferBookmarks(),
-        clientProvider: @escaping @MainActor @Sendable (OSSAccount, OSSBucket?) throws -> OSSClient = { account, bucket in
-            OSSClient(
-                credentials: try AccountStore.credentials(for: account),
-                region: account.signingRegion(for: bucket),
-                endpointHost: account.apiHost(for: bucket),
-                bucket: bucket?.name
-            )
-        }
+        bookmarks: any TransferBookmarking = SecurityScopedTransferBookmarks()
+    ) {
+        self.journal = journal
+        self.bookmarks = bookmarks
+        self.clientProvider = Self.defaultClient
+    }
+
+    init(
+        journal: any TransferJournaling,
+        bookmarks: any TransferBookmarking,
+        clientProvider: @escaping @MainActor @Sendable (OSSAccount, OSSBucket?) throws -> OSSClient
     ) {
         self.journal = journal
         self.bookmarks = bookmarks
         self.clientProvider = clientProvider
+    }
+
+    private static func defaultClient(account: OSSAccount, bucket: OSSBucket?) throws -> OSSClient {
+        OSSClient(
+            credentials: try AccountStore.credentials(for: account),
+            region: account.signingRegion(for: bucket),
+            endpointHost: account.apiHost(for: bucket),
+            bucket: bucket?.name
+        )
     }
 
     var activeCount: Int { jobs.filter(\.isActive).count }

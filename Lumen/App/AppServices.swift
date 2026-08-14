@@ -16,9 +16,15 @@ enum AppLinks {
 @MainActor
 @Observable
 final class AppServices {
-    static let shared = AppServices(
-        transfers: TransferEngine(journal: FileTransferJournal.live)
-    )
+    private static var sharedStorage: AppServices?
+    static var shared: AppServices {
+        if let sharedStorage { return sharedStorage }
+        let services = AppServices(
+            transfers: TransferEngine(journal: FileTransferJournal.live)
+        )
+        sharedStorage = services
+        return services
+    }
 
     var accounts: [OSSAccount]
     var accountRecovery: AccountRecovery?
