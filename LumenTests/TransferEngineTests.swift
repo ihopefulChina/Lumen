@@ -107,12 +107,12 @@ struct TransferEngineTests {
     @Test func progressJournalWritesAreThrottled() {
         let journal = CountingTransferJournal()
         let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
-        let engine = TransferEngine(journal: journal, now: { fixedNow })
+        let engine = TransferEngine(journal: journal)
         let job = Self.persistedJob(status: .running)
         engine.jobs = [job]
 
-        engine.recordProgress(job.id, transferred: 4, total: 10)
-        engine.recordProgress(job.id, transferred: 5, total: 10)
+        engine.recordProgress(job.id, transferred: 4, total: 10, at: fixedNow)
+        engine.recordProgress(job.id, transferred: 5, total: 10, at: fixedNow)
 
         #expect(engine.jobs.first?.transferred == 5)
         #expect(journal.saveCount == 1)

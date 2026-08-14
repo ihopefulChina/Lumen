@@ -18,14 +18,12 @@ final class TransferEngine {
     private var running = 0
     private let journal: any TransferJournaling
     private let bookmarks: any TransferBookmarking
-    private let now: @MainActor @Sendable () -> Date
     private var lastProgressPersistenceAt: Date?
     private let clientProvider: @MainActor @Sendable (OSSAccount, OSSBucket?) throws -> OSSClient
 
     init(
         journal: any TransferJournaling = NoopTransferJournal(),
         bookmarks: any TransferBookmarking = SecurityScopedTransferBookmarks(),
-        now: @escaping @MainActor @Sendable () -> Date = { .now },
         clientProvider: @escaping @MainActor @Sendable (OSSAccount, OSSBucket?) throws -> OSSClient = { account, bucket in
             OSSClient(
                 credentials: try AccountStore.credentials(for: account),
@@ -37,7 +35,6 @@ final class TransferEngine {
     ) {
         self.journal = journal
         self.bookmarks = bookmarks
-        self.now = now
         self.clientProvider = clientProvider
     }
 
@@ -583,12 +580,16 @@ final class TransferEngine {
         if persist { persistJournal() }
     }
 
-    func recordProgress(_ id: UUID, transferred: Int64, total: Int64) {
+    func recordProgress(
+        _ id: UUID,
+        transferred: Int64,
+        total: Int64,
+        at timestamp: Date = .now
+    ) {
         guard let index = jobs.firstIndex(where: { $0.id == id }), jobs[index].isActive else { return }
         jobs[index].transferred = transferred
         if total > 0 { jobs[index].total = total }
 
-        let timestamp = now()
         if let lastProgressPersistenceAt,
            timestamp.timeIntervalSince(lastProgressPersistenceAt) < 1 {
             return
