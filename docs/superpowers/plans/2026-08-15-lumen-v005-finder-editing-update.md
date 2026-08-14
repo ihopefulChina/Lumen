@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Target Apple Silicon and macOS 15 or later.
-- Keep the public app non-sandboxed and ad-hoc signed for 0.0.3/0.0.4 data-path compatibility.
+- Keep the public app non-sandboxed for 0.0.3/0.0.4 data-path compatibility.
 - Keep Sparkle exactly at 2.9.2 and the feed URL exactly `https://github.com/ihopefulChina/Lumen/releases/latest/download/appcast.xml`.
 - Never allow a hidden selection to reach delete, download, copy, move, drag, or inspector actions.
 - Never silently overwrite an OSS object during rename.
@@ -401,7 +401,7 @@ Change every app and test target configuration to `MARKETING_VERSION = 0.0.5` an
 
 - [ ] **Step 3: Update user-facing documentation**
 
-Update README download URLs, version requirements, Finder interaction section, shortcut table, and automatic-update compatibility wording. Create concise release notes covering inline rename, hidden-selection protection, keyboard changes, first 0.0.4-to-0.0.5 in-app update, system requirements, and ad-hoc-signing limitation.
+Update README download URLs, version requirements, Finder interaction section, shortcut table, and automatic-update compatibility wording. Create concise release notes covering inline rename, hidden-selection protection, keyboard changes, first 0.0.4-to-0.0.5 in-app update, and system requirements.
 
 Create a release checklist with explicit gates for selection safety, inline editing, full tests, real OSS availability, Release build/analyze, mounted DMG version/signature, Sparkle signature/feed, GitHub release state, and remote hashes.
 

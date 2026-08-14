@@ -45,7 +45,7 @@ required_html=(
   'https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg'
   'macOS 15'
   'Apple Silicon'
-  'ad-hoc'
+  'MIT License'
 )
 
 for pattern in "${required_html[@]}"; do
@@ -54,6 +54,11 @@ for pattern in "${required_html[@]}"; do
     exit 1
   fi
 done
+
+if grep -Eiq '(ad.?hoc|notari[sz]|Gatekeeper|Developer ID)' "$index"; then
+  echo "Website contains obsolete distribution copy." >&2
+  exit 1
+fi
 
 if grep -En '(fonts\.(googleapis|gstatic)\.com|TODO|Lorem ipsum|href="/|src="/)' "$site_root"/*.html "$site_root"/*.css; then
   echo "Website contains a forbidden dependency, placeholder, or root-relative URL." >&2

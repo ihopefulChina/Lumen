@@ -137,7 +137,7 @@ Motion uses the existing critically damped `Motion.settle` behavior and respects
 
 Advance every project and packaging version to 0.0.6/build 6. Update README shortcuts and organization documentation, add `docs/releases/v0.0.6.md`, regenerate the signed appcast while retaining builds 5 and 4, package and launch-test the DMG, then publish GitHub tag and Latest Release `v0.0.6`.
 
-The app remains non-sandboxed, ad-hoc signed, and unnotarized to preserve the established data and Keychain path. Sparkle stays pinned to 2.9.2, and the update feed remains `https://github.com/ihopefulChina/Lumen/releases/latest/download/appcast.xml`.
+The app remains non-sandboxed to preserve the established data and Keychain path. Sparkle stays pinned to 2.9.2, and the update feed remains `https://github.com/ihopefulChina/Lumen/releases/latest/download/appcast.xml`.
 
 No application icon bitmap, canvas size, or subject footprint changes in this release.
 
@@ -150,5 +150,4 @@ No application icon bitmap, canvas size, or subject footprint changes in this re
 - cross-Bucket operations;
 - recursive/global search;
 - drag-out downloads;
-- Developer ID signing or notarization;
 - website implementation, which starts only after v0.0.6 is published.

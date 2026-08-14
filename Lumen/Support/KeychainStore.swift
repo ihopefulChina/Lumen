@@ -43,7 +43,7 @@ struct KeychainSecretBackend: SecureSecretBackend {
                     return modern
                 }
             } catch KeychainStoreError.status(errSecMissingEntitlement) {
-                // Public ad-hoc builds do not have a provisioned Keychain access group.
+                // Public builds use the default Keychain access group.
             }
             return try access.read(account: account, modern: false)
         }

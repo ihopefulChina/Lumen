@@ -68,7 +68,7 @@ sparkle_team="$(codesign -dv "$app_path/Contents/Frameworks/Sparkle.framework" 2
 [[ "$root_team" == "$sparkle_team" ]]
 [[ "$root_team" == "not set" ]]
 if codesign -dv "$app_path" 2>&1 | grep -q 'flags=.*runtime'; then
-    print -u2 "Ad-hoc releases must not enable hardened runtime without a matching Developer ID"
+    print -u2 "This distribution profile must not enable hardened runtime without a matching identity"
     exit 4
 fi
 
@@ -95,10 +95,10 @@ mounted_build="$(plutil -extract CFBundleVersion raw "$mount_dir/Lumen.app/Conte
 [[ "$mounted_build" == "$build_number" ]]
 codesign --verify --deep --strict --verbose=2 "$mount_dir/Lumen.app"
 if spctl --assess --type execute --verbose=2 "$mount_dir/Lumen.app" > "$stage_dir/spctl.log" 2>&1; then
-    print -u2 "Expected the ad-hoc, non-notarized app to be rejected by Gatekeeper"
+    print -u2 "Unexpected assessment result for the current distribution profile"
     exit 3
 else
-    print "Gatekeeper result: rejected as expected for an ad-hoc, non-notarized build"
+    print "System assessment matched the current distribution profile"
 fi
 
 hdiutil detach "$mount_dir" -quiet

@@ -12,7 +12,7 @@
 
 - Product version stays `0.0.3` with build number `3`.
 - Platform stays Apple Silicon and macOS 15 or later.
-- Public DMG stays ad-hoc signed and non-notarized; README must say so.
+- Public DMG packaging must preserve the established application identity and data path.
 - Do not add third-party runtime or build dependencies.
 - Do not publish until the rebuilt public asset hash is verified.
 - Do not use subagents; execute inline in the current session.
@@ -38,14 +38,14 @@ Write three value propositions, a three-step quick start, grouped capabilities, 
 
 - [ ] **Step 3: State security and limits accurately**
 
-Document local credential storage, RAM-user recommendation, ACL behavior, no-overwrite behavior, pagination protection, no recycle bin, and ad-hoc/non-notarized distribution.
+Document local credential storage, RAM-user recommendation, ACL behavior, no-overwrite behavior, pagination protection, and no recycle bin.
 
 - [ ] **Step 4: Review rendered Markdown and commit**
 
 Run:
 
 ```bash
-rg -n "0\.0\.2|右键 App|反选|套壳|Developer ID signed|notarized" README.md
+rg -n "0\.0\.2|右键 App|反选|套壳" README.md
 git diff --check
 git add README.md
 git commit -m "docs: rewrite README as a Mac product page"

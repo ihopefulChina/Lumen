@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Target Apple Silicon and macOS 15 or later.
-- Keep the public app non-sandboxed, ad-hoc signed, and unnotarized for compatibility with the established Keychain and data path.
+- Keep the public app non-sandboxed for compatibility with the established Keychain and data path.
 - Keep Sparkle exactly at 2.9.2 and the feed URL exactly `https://github.com/ihopefulChina/Lumen/releases/latest/download/appcast.xml`.
 - Support undo only for object rename, folder rename, and same-Bucket move. Copy, upload, create-folder, and delete remain non-undoable.
 - Keep one in-memory undo level with no redo and no persistence across relaunch.
@@ -329,7 +329,7 @@ Change all app/test build settings from build `5` to `6` and marketing version `
 
 - [ ] **Step 2: Update user-facing documentation**
 
-Update README features and shortcuts with the one-level rename/move `⌘Z` behavior. State precisely that delete, copy, upload, and create-folder are not undoable. Link the new release notes, record Apple Silicon/macOS 15 requirements, and keep the existing Gatekeeper guidance honest about ad-hoc signing and lack of notarization.
+Update README features and shortcuts with the one-level rename/move `⌘Z` behavior. State precisely that delete, copy, upload, and create-folder are not undoable. Link the new release notes and record Apple Silicon/macOS 15 requirements.
 
 Write `docs/releases/v0.0.6.md` with the safe-undo behavior, safety limits, upgrade behavior, system requirements, download filename, and public SHA placeholder represented in the checklist until packaging provides the final digest. The committed release notes themselves must not contain `TODO` or `TBD`.
 
@@ -339,7 +339,7 @@ Copy the established v0.0.5 package/release script to a v0.0.6-specific path onl
 
 - [ ] **Step 4: Add a complete release checklist**
 
-The checklist must cover clean tree, resolved Sparkle 2.9.2, full tests, Analyze, archive/build, ad-hoc signature verification, icon hash/dimension comparison against v0.0.5, DMG mount and launch, appcast signature/build ordering, git tag, GitHub Release, public redownload SHA, and Sparkle feed response.
+The checklist must cover clean tree, resolved Sparkle 2.9.2, full tests, Analyze, archive/build, strict signature verification, icon hash/dimension comparison against v0.0.5, DMG mount and launch, appcast signature/build ordering, git tag, GitHub Release, public redownload SHA, and Sparkle feed response.
 
 - [ ] **Step 5: Validate the prepared metadata**
 

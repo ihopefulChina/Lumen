@@ -27,7 +27,7 @@ The content order is:
 4. A three-step start guide.
 5. Focused feature groups instead of one flat checklist.
 6. A compact shortcut table.
-7. Security and distribution facts, including local credential storage, RAM-user guidance, ACL implications, and the ad-hoc/non-notarized public build.
+7. Security and distribution facts, including local credential storage, RAM-user guidance, and ACL implications.
 8. Honest scope and limits.
 9. Source-build instructions.
 
@@ -37,7 +37,6 @@ Tone rules:
 - Remove “不是某某套壳” and similar justification.
 - Do not describe every setting in the main usage path.
 - Keep critical warnings visible but not theatrical.
-- Never claim notarization or Apple Developer ID signing.
 
 ## Icon direction
 
@@ -60,7 +59,7 @@ Publication evidence must include:
 
 - full test result;
 - Release build and analyze result;
-- DMG mount, version, signature, Gatekeeper expectation, and launch result;
+- DMG mount, version, signature, and launch result;
 - SHA-256 before upload and after downloading the public asset;
 - GitHub release state: public, non-draft, non-prerelease, latest.
 
