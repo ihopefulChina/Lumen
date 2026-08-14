@@ -61,6 +61,7 @@ final class AppModel {
     var wantsDeleteConfirmation = false
     var wantsNewFolder = false
     var isOrganizingCloud = false
+    private(set) var lastCloudUndoOperation: CloudUndoOperation?
     var cloudClipboard: CloudDragPayload?
     var pendingOpenURLs: [URL] = []
     private var pendingOwnedTemporaryURLs: Set<URL> = []
@@ -750,7 +751,10 @@ final class AppModel {
             present("请等待当前云端整理完成", error: true)
             return false
         }
-        guard let client = makeClient() else { return false }
+        guard let client = makeClient(),
+              let accountID = selectedAccountID,
+              let bucketName = selectedBucketName
+        else { return false }
         let name: String
         do {
             name = try ObjectNameValidator.validate(raw)
@@ -766,6 +770,17 @@ final class AppModel {
             try await client.renameObject(from: object.key, to: dest, overwrite: false)
             await refreshListing()
             browser.select(key: dest, modifiers: [])
+            lastCloudUndoOperation = CloudUndoOperation(
+                accountID: accountID,
+                bucketName: bucketName,
+                title: "撤销重命名",
+                mappings: [
+                    CloudObjectMapping(sourceKey: object.key, destinationKey: dest)
+                ],
+                favoriteMoves: [],
+                sourceSelection: [object.key],
+                destinationSelection: [dest]
+            )
             return true
         } catch {
             present(error.localizedDescription, error: true)
@@ -799,7 +814,11 @@ final class AppModel {
         isOrganizingCloud = true
         defer { isOrganizingCloud = false }
         do {
-            try await client.movePrefix(from: folder.prefix, to: destination)
+            let mappings = try await client.prefixMappings(
+                from: folder.prefix,
+                to: destination
+            )
+            try await client.performCloudOperation(mappings, mode: .move)
             favorites.replacePrefix(
                 accountID: accountID,
                 bucketName: bucketName,
@@ -808,6 +827,20 @@ final class AppModel {
             )
             await refreshListing()
             browser.select(key: destination, modifiers: [])
+            lastCloudUndoOperation = CloudUndoOperation(
+                accountID: accountID,
+                bucketName: bucketName,
+                title: "撤销重命名",
+                mappings: mappings,
+                favoriteMoves: [
+                    CloudFavoriteMove(
+                        sourcePrefix: folder.prefix,
+                        destinationPrefix: destination
+                    )
+                ],
+                sourceSelection: [folder.prefix],
+                destinationSelection: [destination]
+            )
             present("已重命名“\(folder.name)”")
             return true
         } catch {

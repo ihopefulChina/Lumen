@@ -376,6 +376,7 @@ struct BrowserModelTests {
         #expect(!succeeded)
         #expect(fixture.model.browser.selectedKeys == [fixture.object.key])
         #expect(fixture.model.browser.renameSession?.draft == "new.txt")
+        #expect(fixture.model.lastCloudUndoOperation == nil)
         #expect(await transport.methods == ["PUT"])
     }
 
@@ -400,7 +401,77 @@ struct BrowserModelTests {
 
         #expect(succeeded)
         #expect(fixture.model.browser.selectedKeys == ["new.txt"])
+        #expect(fixture.model.lastCloudUndoOperation == CloudUndoOperation(
+            accountID: fixture.model.selectedAccountID!,
+            bucketName: "bucket",
+            title: "撤销重命名",
+            mappings: [
+                CloudObjectMapping(sourceKey: "old.txt", destinationKey: "new.txt")
+            ],
+            favoriteMoves: [],
+            sourceSelection: ["old.txt"],
+            destinationSelection: ["new.txt"]
+        ))
         #expect(await transport.methods == ["PUT", "DELETE", "GET"])
+    }
+
+    @Test func successfulFolderRenameRecordsExactMappingsAndFavoriteMove() async {
+        let sourceListing = Data("""
+        <ListBucketResult>
+          <IsTruncated>false</IsTruncated>
+          <Contents>
+            <Key>folder/素材 2x.png</Key><Size>1</Size><ETag>old</ETag><StorageClass>Standard</StorageClass>
+          </Contents>
+        </ListBucketResult>
+        """.utf8)
+        let refreshedListing = Data("""
+        <ListBucketResult>
+          <IsTruncated>false</IsTruncated>
+          <CommonPrefixes><Prefix>renamed/</Prefix></CommonPrefixes>
+        </ListBucketResult>
+        """.utf8)
+        let transport = RenameResultTransport(steps: [
+            .response(status: 200, data: sourceListing),
+            .response(status: 404, data: Data()),
+            .response(status: 200, data: Data()),
+            .response(status: 204, data: Data()),
+            .response(status: 200, data: refreshedListing)
+        ])
+        let fixture = Self.renameModel(transport: transport)
+        let accountID = fixture.model.selectedAccountID!
+        fixture.model.browser.folders = [OSSFolder(prefix: "folder/")]
+        fixture.model.favorites.add(FavoriteLocation(
+            accountID: accountID,
+            bucketName: "bucket",
+            prefix: "folder/nested/",
+            name: "nested"
+        ))
+
+        let succeeded = await fixture.model.renameFolder(
+            OSSFolder(prefix: "folder/"),
+            to: "renamed"
+        )
+
+        #expect(succeeded)
+        #expect(fixture.model.browser.selectedKeys == ["renamed/"])
+        #expect(fixture.model.favorites.items.first?.prefix == "renamed/nested/")
+        #expect(fixture.model.lastCloudUndoOperation == CloudUndoOperation(
+            accountID: accountID,
+            bucketName: "bucket",
+            title: "撤销重命名",
+            mappings: [
+                CloudObjectMapping(
+                    sourceKey: "folder/素材 2x.png",
+                    destinationKey: "renamed/素材 2x.png"
+                )
+            ],
+            favoriteMoves: [
+                CloudFavoriteMove(sourcePrefix: "folder/", destinationPrefix: "renamed/")
+            ],
+            sourceSelection: ["folder/"],
+            destinationSelection: ["renamed/"]
+        ))
+        #expect(await transport.methods == ["GET", "HEAD", "PUT", "DELETE", "GET"])
     }
 
     private static func model() -> BrowserModel {
