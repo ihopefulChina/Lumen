@@ -106,4 +106,63 @@ struct SafetyAndVersionTests {
                 == "<img src=\"https://example.test/a.png\" alt=\"a&quot;&lt;&amp;.png\" />"
         )
     }
+
+    @Test func keychainMigrationKeepsLegacyValueUntilWriteAndReadBackSucceed() throws {
+        let backend = MemorySecretBackend(failingAccounts: ["broken"])
+
+        let result = SecretMigration.migrate(
+            legacy: ["ok": "one", "broken": "two"],
+            backend: backend
+        )
+
+        #expect(result.remainingLegacy == ["broken": "two"])
+        #expect(result.migratedAccounts == ["ok"])
+        #expect(try backend.get("ok") == "one")
+        #expect(try backend.get("broken") == nil)
+    }
+
+    @Test func keychainMigrationRejectsAWriteThatCannotBeReadBack() throws {
+        let backend = MemorySecretBackend(unreadableAccounts: ["unreadable"])
+
+        let result = SecretMigration.migrate(
+            legacy: ["unreadable": "secret"],
+            backend: backend
+        )
+
+        #expect(result.remainingLegacy == ["unreadable": "secret"])
+        #expect(result.migratedAccounts.isEmpty)
+    }
+}
+
+private final class MemorySecretBackend: SecureSecretBackend {
+    private var values: [String: String] = [:]
+    private let failingAccounts: Set<String>
+    private let unreadableAccounts: Set<String>
+
+    init(
+        failingAccounts: Set<String> = [],
+        unreadableAccounts: Set<String> = []
+    ) {
+        self.failingAccounts = failingAccounts
+        self.unreadableAccounts = unreadableAccounts
+    }
+
+    func get(_ account: String) throws -> String? {
+        unreadableAccounts.contains(account) ? nil : values[account]
+    }
+
+    func set(_ value: String, for account: String) throws {
+        if failingAccounts.contains(account) {
+            throw MemorySecretError.writeFailed
+        }
+        values[account] = value
+    }
+
+    func delete(_ account: String) throws {
+        values.removeValue(forKey: account)
+    }
+}
+
+private enum MemorySecretError: Error {
+    case writeFailed
 }

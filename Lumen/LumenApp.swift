@@ -38,6 +38,11 @@ private struct WorkspaceRoot: View {
             .environment(model)
             .background(WindowFocusProbe { model.becomeFocused() })
             .onAppear {
+                do {
+                    try SecretStore.migrateLegacySecrets()
+                } catch {
+                    model.present(error.localizedDescription, error: true)
+                }
                 model.bootstrap()
                 model.becomeFocused()
             }

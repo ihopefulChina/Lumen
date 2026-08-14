@@ -1,34 +1,82 @@
 import Foundation
 import Security
 
-enum KeychainStore {
-    static let service = "studio.lumen.oss"
+protocol SecureSecretBackend {
+    func get(_ account: String) throws -> String?
+    func set(_ value: String, for account: String) throws
+    func delete(_ account: String) throws
+}
 
-    static func recover(account: String) -> String? {
-        if let modern = readQuiet(account: account, modern: true) {
+struct KeychainSecretBackend: SecureSecretBackend {
+    func get(_ account: String) throws -> String? {
+        if let modern = try read(account: account, modern: true) {
             return modern
         }
-        return readQuiet(account: account, modern: false)
+        return try read(account: account, modern: false)
     }
 
-    static func delete(account: String) {
-        SecItemDelete(query(account: account, modern: true) as CFDictionary)
-        SecItemDelete(query(account: account, modern: false) as CFDictionary)
+    func set(_ value: String, for account: String) throws {
+        let data = Data(value.utf8)
+        let lookup = KeychainStore.query(account: account, modern: true)
+        let changes = [kSecValueData as String: data]
+        let updateStatus = SecItemUpdate(lookup as CFDictionary, changes as CFDictionary)
+        if updateStatus == errSecSuccess { return }
+        guard updateStatus == errSecItemNotFound else {
+            throw KeychainStoreError(status: updateStatus)
+        }
+
+        var item = lookup
+        item[kSecValueData as String] = data
+        item[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+        let addStatus = SecItemAdd(item as CFDictionary, nil)
+        guard addStatus == errSecSuccess else {
+            throw KeychainStoreError(status: addStatus)
+        }
     }
 
-    private static func readQuiet(account: String, modern: Bool) -> String? {
-        var lookup = query(account: account, modern: modern)
+    func delete(_ account: String) throws {
+        for modern in [true, false] {
+            let status = SecItemDelete(KeychainStore.query(account: account, modern: modern) as CFDictionary)
+            guard status == errSecSuccess || status == errSecItemNotFound else {
+                throw KeychainStoreError(status: status)
+            }
+        }
+    }
+
+    private func read(account: String, modern: Bool) throws -> String? {
+        var lookup = KeychainStore.query(account: account, modern: modern)
         lookup[kSecReturnData as String] = true
         lookup[kSecMatchLimit as String] = kSecMatchLimitOne
         var item: CFTypeRef?
         let status = SecItemCopyMatching(lookup as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else {
-            return nil
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else {
+            throw KeychainStoreError(status: status)
         }
-        return String(data: data, encoding: .utf8)
+        guard let data = item as? Data, let value = String(data: data, encoding: .utf8) else {
+            throw KeychainStoreError.invalidData
+        }
+        return value
+    }
+}
+
+enum KeychainStore {
+    static let service = "studio.lumen.oss"
+    private static let backend = KeychainSecretBackend()
+
+    static func recover(account: String) -> String? {
+        try? backend.get(account)
     }
 
-    private static func query(account: String, modern: Bool) -> [String: Any] {
+    static func store(_ value: String, account: String) throws {
+        try backend.set(value, for: account)
+    }
+
+    static func delete(account: String) {
+        try? backend.delete(account)
+    }
+
+    fileprivate static func query(account: String, modern: Bool) -> [String: Any] {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -38,5 +86,24 @@ enum KeychainStore {
             query[kSecUseDataProtectionKeychain as String] = true
         }
         return query
+    }
+}
+
+enum KeychainStoreError: LocalizedError {
+    case status(OSStatus)
+    case invalidData
+
+    init(status: OSStatus) {
+        self = .status(status)
+    }
+
+    var errorDescription: String? {
+        switch self {
+        case .status(let status):
+            let detail = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
+            return "无法访问 macOS 钥匙串：\(detail)"
+        case .invalidData:
+            return "钥匙串中的凭证格式无效"
+        }
     }
 }
