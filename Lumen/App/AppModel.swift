@@ -98,6 +98,18 @@ final class AppModel {
         selectedAccount != nil && selectedBucket != nil
     }
 
+    var canUndoCloudOperation: Bool {
+        guard let operation = lastCloudUndoOperation else { return false }
+        return !isOrganizingCloud && isCurrentScope(for: operation)
+    }
+
+    var undoCloudOperationTitle: String {
+        guard let operation = lastCloudUndoOperation,
+              isCurrentScope(for: operation)
+        else { return "撤销" }
+        return operation.title
+    }
+
     init(
         kind: Kind = .window,
         services: AppServices = .shared,
@@ -946,10 +958,63 @@ final class AppModel {
             await refreshListing()
             browser.replaceSelection(selection)
             let count = payload.objectKeys.count + payload.folderPrefixes.count
+            if mode == .move {
+                lastCloudUndoOperation = CloudUndoOperation(
+                    accountID: accountID,
+                    bucketName: bucketName,
+                    title: "撤销移动",
+                    mappings: mappings,
+                    favoriteMoves: movedPrefixes.map {
+                        CloudFavoriteMove(
+                            sourcePrefix: $0.source,
+                            destinationPrefix: $0.destination
+                        )
+                    },
+                    sourceSelection: Set(payload.objectKeys + payload.folderPrefixes),
+                    destinationSelection: selection
+                )
+            }
             present(mode == .move ? "已移动 \(count) 项" : "已复制 \(count) 项")
         } catch {
             present(error.localizedDescription, error: true)
         }
+    }
+
+    func undoLastCloudOperation() async {
+        guard !isOrganizingCloud,
+              let operation = lastCloudUndoOperation,
+              isCurrentScope(for: operation),
+              let client = makeClient()
+        else { return }
+
+        isOrganizingCloud = true
+        defer { isOrganizingCloud = false }
+        do {
+            try await client.performCloudOperation(
+                operation.inverseMappings,
+                mode: .move
+            )
+            for move in operation.inverseFavoriteMoves {
+                favorites.replacePrefix(
+                    accountID: operation.accountID,
+                    bucketName: operation.bucketName,
+                    source: move.sourcePrefix,
+                    destination: move.destinationPrefix
+                )
+            }
+            lastCloudUndoOperation = nil
+            browser.clearSelection()
+            await refreshListing()
+            browser.replaceSelection(operation.sourceSelection)
+            present("已撤销上一步操作")
+        } catch {
+            present(error.localizedDescription, error: true)
+        }
+    }
+
+    private func isCurrentScope(for operation: CloudUndoOperation) -> Bool {
+        selectedAccountID == operation.accountID
+            && selectedBucketName == operation.bucketName
     }
 
     func downloadSelection() {
