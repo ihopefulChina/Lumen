@@ -56,6 +56,22 @@ actual_build="$(plutil -extract CFBundleVersion raw "$app_path/Contents/Info.pli
 codesign --force --deep --sign - "$app_path"
 codesign --verify --deep --strict --verbose=2 "$app_path"
 
+signed_entitlements="$(codesign -d --entitlements :- "$app_path" 2>/dev/null || true)"
+[[ -z "$signed_entitlements" ]]
+if plutil -extract SUEnableInstallerLauncherService raw "$app_path/Contents/Info.plist" >/dev/null 2>&1; then
+    print -u2 "Non-sandboxed builds must use Sparkle's in-process installer launcher"
+    exit 3
+fi
+
+root_team="$(codesign -dv "$app_path" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+sparkle_team="$(codesign -dv "$app_path/Contents/Frameworks/Sparkle.framework" 2>&1 | sed -n 's/^TeamIdentifier=//p')"
+[[ "$root_team" == "$sparkle_team" ]]
+[[ "$root_team" == "not set" ]]
+if codesign -dv "$app_path" 2>&1 | grep -q 'flags=.*runtime'; then
+    print -u2 "Ad-hoc releases must not enable hardened runtime without a matching Developer ID"
+    exit 4
+fi
+
 mkdir -p "$stage_dir/volume" "$dist_dir"
 ditto "$app_path" "$stage_dir/volume/Lumen.app"
 ln -s /Applications "$stage_dir/volume/Applications"

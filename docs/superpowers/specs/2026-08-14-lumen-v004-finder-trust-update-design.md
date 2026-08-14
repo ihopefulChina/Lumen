@@ -43,12 +43,14 @@
 ### 5. Sparkle 自动更新
 
 - 使用 Sparkle 2.9.2，通过 Swift Package Manager 固定精确版本。
-- 沙盒应用启用 Sparkle Installer XPC 服务和官方要求的 Mach lookup 例外；应用保留现有网络客户端权限。
+- 公开版延续 0.0.3 的非沙盒数据位置，避免升级后账号配置被隔离到新容器；Sparkle 使用其官方支持的非沙盒安装路径。
 - 更新 Feed 固定为 `https://github.com/ihopefulChina/Lumen/releases/latest/download/appcast.xml`。
 - 发布包使用 Sparkle EdDSA 私钥签名，公钥嵌入 `Info.plist`，并开启提取前签名验证。
 - 菜单和设置中的“检查更新”统一调用 Sparkle。发现版本后，用户点击安装即由 Sparkle 下载、替换应用并自动退出重启，不再只打开 DMG。
 - 自动检查开关继续由 Lumen 设置控制；关闭后不做后台检查，手动检查仍可用。
 - 0.0.4 是首个包含 Sparkle 的版本，因此从 0.0.4 开始支持后续原地更新；0.0.3 用户仍需手动安装 0.0.4 一次。
+
+> 发布审查修正：原设计计划启用沙盒 Installer XPC，但 0.0.3 的公开 DMG 在最终签名时并未携带沙盒 entitlement。直接切换会改变 Application Support 目录并让现有账号不可见，因此 0.0.4 保持分发兼容性；待具备 Developer ID 签名和显式容器迁移后再单独启用沙盒。
 
 ### 6. 发布
 
@@ -79,4 +81,3 @@
 - HTTP 传输测试覆盖普通上传、分片完成、下载 CRC64 成功、不一致和缺失响应头。
 - 真实 OSS 冒烟测试增加同 Bucket 复制、移动、文件夹重命名与清理，所有键限制在 `lumen-v004-smoke/`。
 - 发布前执行 Debug 全量测试、Release clean build、analyze、DMG 挂载、代码签名、启动、Sparkle 签名与 appcast 解析验证。
-

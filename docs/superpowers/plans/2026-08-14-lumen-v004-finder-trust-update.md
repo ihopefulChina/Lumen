@@ -269,7 +269,7 @@ git commit -m "feat: organize OSS objects like Finder"
 - Modify: `Lumen/Views/SettingsView.swift`
 - Modify: `Lumen/Views/RootView.swift`
 - Modify: `Info.plist`
-- Modify: `Lumen/Lumen.entitlements`
+- Delete: `Lumen/Lumen.entitlements`
 - Replace: `LumenTests/UpdateServiceTests.swift`
 
 **Interfaces:**
@@ -298,9 +298,9 @@ Run: `xcodebuild -project Lumen.xcodeproj -scheme Lumen -destination 'platform=m
 
 项目加入 `https://github.com/sparkle-project/Sparkle` 精确版本 `2.9.2` 和 `Sparkle` 产品。`AppUpdater` 使用 `SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)`；菜单和设置按钮调用 `checkForUpdates(nil)`。
 
-- [ ] **Step 4: 配置沙盒、安全键和 Feed**
+- [ ] **Step 4: 配置分发兼容性、安全键和 Feed**
 
-`Info.plist` 增加 `SUFeedURL`、`SUPublicEDKey`、`SUEnableInstallerLauncherService=true`、`SUVerifyUpdateBeforeExtraction=true`；entitlements 增加 `studio.lumen.oss-spks` 与 `studio.lumen.oss-spki` Mach lookup 例外。
+`Info.plist` 增加 `SUFeedURL`、`SUPublicEDKey`、`SUVerifyUpdateBeforeExtraction=true`。公开版保持与 0.0.3 DMG 一致的非沙盒数据位置，删除沙盒 entitlement，并使用 Sparkle 的非沙盒安装路径，避免升级后已有账号不可见。
 
 - [ ] **Step 5: 解析依赖、构建、运行测试并提交**
 
@@ -385,4 +385,3 @@ gh release create v0.0.4 dist/Lumen-0.0.4.dmg dist/appcast.xml --repo ihopefulCh
 - [ ] **Step 6: 从公开 Release 回验**
 
 下载 DMG 与 appcast 到新临时目录，比较 SHA-256 与字节内容；确认 Release 非草稿、非预发布、Latest，远端 `main` 与 `v0.0.4^{}` 指向最终提交。
-

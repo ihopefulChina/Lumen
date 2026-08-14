@@ -8,16 +8,54 @@ protocol SecureSecretBackend {
 }
 
 struct KeychainSecretBackend: SecureSecretBackend {
+    enum Storage {
+        case automatic
+        case dataProtection
+        case fileBased
+    }
+
+    private let storage: Storage
+
+    init(storage: Storage = .automatic) {
+        self.storage = storage
+    }
+
     func get(_ account: String) throws -> String? {
-        if let modern = try read(account: account, modern: true) {
-            return modern
+        switch storage {
+        case .dataProtection:
+            return try read(account: account, modern: true)
+        case .fileBased:
+            return try read(account: account, modern: false)
+        case .automatic:
+            do {
+                if let modern = try read(account: account, modern: true) {
+                    return modern
+                }
+            } catch KeychainStoreError.status(errSecMissingEntitlement) {
+                // Public ad-hoc builds do not have a provisioned Keychain access group.
+            }
+            return try read(account: account, modern: false)
         }
-        return try read(account: account, modern: false)
     }
 
     func set(_ value: String, for account: String) throws {
+        switch storage {
+        case .dataProtection:
+            try set(value, for: account, modern: true)
+        case .fileBased:
+            try set(value, for: account, modern: false)
+        case .automatic:
+            do {
+                try set(value, for: account, modern: true)
+            } catch KeychainStoreError.status(errSecMissingEntitlement) {
+                try set(value, for: account, modern: false)
+            }
+        }
+    }
+
+    private func set(_ value: String, for account: String, modern: Bool) throws {
         let data = Data(value.utf8)
-        let lookup = KeychainStore.query(account: account, modern: true)
+        let lookup = KeychainStore.query(account: account, modern: modern)
         let changes = [kSecValueData as String: data]
         let updateStatus = SecItemUpdate(lookup as CFDictionary, changes as CFDictionary)
         if updateStatus == errSecSuccess { return }
@@ -35,8 +73,15 @@ struct KeychainSecretBackend: SecureSecretBackend {
     }
 
     func delete(_ account: String) throws {
-        for modern in [true, false] {
+        let modes: [Bool]
+        switch storage {
+        case .automatic: modes = [true, false]
+        case .dataProtection: modes = [true]
+        case .fileBased: modes = [false]
+        }
+        for modern in modes {
             let status = SecItemDelete(KeychainStore.query(account: account, modern: modern) as CFDictionary)
+            if modern, status == errSecMissingEntitlement { continue }
             guard status == errSecSuccess || status == errSecItemNotFound else {
                 throw KeychainStoreError(status: status)
             }

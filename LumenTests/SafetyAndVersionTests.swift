@@ -132,6 +132,26 @@ struct SafetyAndVersionTests {
         #expect(result.remainingLegacy == ["unreadable": "secret"])
         #expect(result.migratedAccounts.isEmpty)
     }
+
+    @Test func distributionBuildCanRoundTripAKeychainSecret() throws {
+        let backend = KeychainSecretBackend()
+        let account = "lumen-keychain-test-\(UUID().uuidString)"
+
+        try backend.set("temporary-secret", for: account)
+        defer { try? backend.delete(account) }
+
+        #expect(try backend.get(account) == "temporary-secret")
+    }
+
+    @Test func fileBasedKeychainFallbackCanRoundTripASecret() throws {
+        let backend = KeychainSecretBackend(storage: .fileBased)
+        let account = "lumen-keychain-fallback-test-\(UUID().uuidString)"
+
+        try backend.set("temporary-secret", for: account)
+        defer { try? backend.delete(account) }
+
+        #expect(try backend.get(account) == "temporary-secret")
+    }
 }
 
 private final class MemorySecretBackend: SecureSecretBackend {
