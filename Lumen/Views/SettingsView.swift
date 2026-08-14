@@ -22,8 +22,8 @@ struct SettingsView: View {
                     Toggle("传输时显示菜单栏图标", isOn: $model.settings.showMenuBarWhileTransferring)
                 }
                 Section("关于") {
-                    LabeledContent("Lumen", value: "1.0")
-                    Text("为素材图片准备的阿里云 OSS 客户端。密钥保存在钥匙串，对象浏览与上传走官方 REST API（签名 V4）。")
+                    LabeledContent("Lumen", value: "0.0.1")
+                    Text("为素材图片准备的阿里云 OSS 客户端。密钥保存在本机沙盒，对象浏览与上传走官方 REST API（签名 V4）。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
