@@ -22,8 +22,8 @@ struct SettingsView: View {
                     Toggle("传输时显示菜单栏图标", isOn: $model.settings.showMenuBarWhileTransferring)
                 }
                 Section("关于") {
-                    LabeledContent("Lumen", value: "0.0.1")
-                    Text("为素材图片准备的阿里云 OSS 客户端。密钥保存在本机沙盒，对象浏览与上传走官方 REST API（签名 V4）。")
+                    LabeledContent("Lumen", value: Self.shortVersion)
+                    Text("传图片和文本去阿里云 OSS。密钥只存在这台 Mac 上。")
                         .font(.callout)
                         .foregroundStyle(.secondary)
                 }
@@ -59,5 +59,9 @@ struct SettingsView: View {
             .tabItem { Label("账号", systemImage: "person.crop.circle") }
         }
         .padding(8)
+    }
+
+    private static var shortVersion: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0.0.1"
     }
 }
