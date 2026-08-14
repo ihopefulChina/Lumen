@@ -6,7 +6,9 @@ struct InspectorView: View {
 
     var body: some View {
         Group {
-            if let object = model.browser.primarySelection {
+            if model.browser.selectedKeys.count > 1 {
+                selectionInfo
+            } else if let object = model.browser.primarySelection {
                 objectInfo(object)
             } else if model.selectedBucket != nil {
                 folderInfo
@@ -16,6 +18,41 @@ struct InspectorView: View {
         }
         .padding(12)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+
+    private var selectionInfo: some View {
+        let keys = model.browser.selectedKeys
+        let folders = model.browser.folders.filter { keys.contains($0.prefix) }.count
+        let objects = model.browser.objects.filter { keys.contains($0.key) }
+        let bytes = objects.reduce(Int64(0)) { $0 + $1.size }
+
+        return VStack(alignment: .leading, spacing: 16) {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 42, weight: .light))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
+
+            Text("已选择 \(keys.count) 项")
+                .font(.title3.weight(.semibold))
+
+            Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 8) {
+                if folders > 0 { infoRow("文件夹", "\(folders)") }
+                if !objects.isEmpty { infoRow("文件", "\(objects.count)") }
+                if bytes > 0 { infoRow("文件大小", Formatters.bytes(bytes)) }
+            }
+            .font(.callout)
+
+            HStack(spacing: 8) {
+                Button("下载") { model.downloadSelection() }
+                Spacer()
+                Button("删除", role: .destructive) { model.requestDeleteSelection() }
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .contain)
     }
 
     private func objectInfo(_ object: OSSObject) -> some View {

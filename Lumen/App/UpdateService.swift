@@ -19,6 +19,7 @@ final class UpdateService {
     var available: AppRelease?
     var lastChecked: Date?
     var lastMessage: String?
+    var lastOperationFailed = false
     var surface: Surface = .workspace
 
     enum Surface: Equatable {
@@ -51,6 +52,7 @@ final class UpdateService {
         self.surface = surface
         isChecking = true
         lastMessage = nil
+        lastOperationFailed = false
         defer { isChecking = false }
 
         do {
@@ -100,6 +102,7 @@ final class UpdateService {
         guard !isDownloading else { return }
         isDownloading = true
         lastMessage = "正在下载 \(available.dmgName)…"
+        lastOperationFailed = false
         defer { isDownloading = false }
         do {
             var request = URLRequest(url: remote)
@@ -116,6 +119,7 @@ final class UpdateService {
             self.available = nil
         } catch {
             lastMessage = error.localizedDescription
+            lastOperationFailed = true
         }
     }
 
@@ -145,6 +149,9 @@ final class UpdateService {
     }
 
     private func moveToDownloads(_ temp: URL, name: String) throws -> URL {
+        guard let name = Self.safeAssetName(name) else {
+            throw UpdateError.unsafeAsset
+        }
         let folder = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask)[0]
         var dest = folder.appending(path: name)
         if FileManager.default.fileExists(atPath: dest.path) {
@@ -164,13 +171,39 @@ final class UpdateService {
         "Lumen/\(AppVersion.current) (macOS)"
     }
 
-    private static func preferredDMG(in assets: [GitHubAsset], version: String) -> GitHubAsset? {
-        let dmg = assets.filter { $0.name.lowercased().hasSuffix(".dmg") }
-        let exact = "lumen-\(version).dmg"
-        if let match = dmg.first(where: { $0.name.lowercased() == exact }) {
-            return match
+    nonisolated static func preferredDMG(in assets: [GitHubAsset], version: String) -> GitHubAsset? {
+        let exact = "Lumen-\(version).dmg"
+        return assets.first { asset in
+            guard asset.name == exact,
+                  safeAssetName(asset.name) == exact,
+                  let url = URL(string: asset.browserDownloadURL)
+            else { return false }
+            return isTrustedAssetURL(url, version: version, name: exact)
         }
-        return dmg.first(where: { $0.name.lowercased().hasPrefix("lumen-") })
+    }
+
+    nonisolated static func safeAssetName(_ name: String) -> String? {
+        guard !name.isEmpty,
+              name != ".",
+              name != "..",
+              !name.contains("/"),
+              !name.contains("\\"),
+              !name.unicodeScalars.contains(where: { $0.value == 0 })
+        else { return nil }
+        return name
+    }
+
+    nonisolated static func isTrustedAssetURL(_ url: URL, version: String, name: String) -> Bool {
+        guard url.scheme?.lowercased() == "https",
+              url.host?.lowercased() == "github.com",
+              url.port == nil,
+              url.user == nil,
+              url.password == nil,
+              url.query == nil,
+              url.fragment == nil
+        else { return false }
+        return url.path(percentEncoded: false)
+            == "/ihopefulChina/Lumen/releases/download/v\(version)/\(name)"
     }
 
     private static let latestURL = URL(string: "https://api.github.com/repos/ihopefulChina/Lumen/releases/latest")!
@@ -197,7 +230,7 @@ private struct GitHubRelease: Decodable {
     }
 }
 
-private struct GitHubAsset: Decodable {
+struct GitHubAsset: Decodable, Equatable, Sendable {
     var name: String
     var browserDownloadURL: String
 
@@ -210,11 +243,13 @@ private struct GitHubAsset: Decodable {
 private enum UpdateError: LocalizedError {
     case http(Int)
     case none
+    case unsafeAsset
 
     var errorDescription: String? {
         switch self {
         case .http(let code): "检查更新失败（\(code)）"
         case .none: "还没有可用的正式版本"
+        case .unsafeAsset: "安装包文件名不安全，已停止下载"
         }
     }
 }

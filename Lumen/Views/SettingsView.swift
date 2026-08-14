@@ -77,7 +77,7 @@ struct SettingsView: View {
                             HStack {
                                 VStack(alignment: .leading) {
                                     Text(account.displayName)
-                                    Text("\(account.region.name) · \(account.accessKeyId)")
+                                    Text(account.region.name)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
                                 }

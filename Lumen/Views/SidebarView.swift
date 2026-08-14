@@ -33,7 +33,7 @@ struct SidebarView: View {
                         }
                     }
                     .buttonStyle(.plain)
-                    .listRowBackground(account.id == model.selectedAccountID ? Color.accentColor.opacity(0.14) : Color.clear)
+                    .accessibilityValue(account.id == model.selectedAccountID ? "当前账号" : "")
                     .contextMenu {
                         Button("编辑…") {
                             model.editingAccount = account

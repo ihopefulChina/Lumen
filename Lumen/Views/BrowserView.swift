@@ -607,6 +607,9 @@ private struct FolderCell: View {
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture(count: 2).onEnded(onOpen))
         .help(folder.name)
+        .accessibilityLabel("文件夹，\(folder.name)")
+        .accessibilityValue(selected ? "已选择" : "未选择")
+        .accessibilityHint("双击打开")
     }
 
     private func selectOnPress() {
@@ -652,6 +655,9 @@ private struct AssetCell: View {
         .buttonStyle(FinderItemButtonStyle(onPress: selectOnPress))
         .help(object.name)
         .simultaneousGesture(TapGesture(count: 2).onEnded { onOpen() })
+        .accessibilityLabel("\(ImageKind.displayKind(for: object.key))，\(object.name)")
+        .accessibilityValue(selected ? "已选择" : "未选择")
+        .accessibilityHint("双击快速查看")
     }
 
     private func selectOnPress() {

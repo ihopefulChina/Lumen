@@ -51,6 +51,13 @@ struct AccountSheet: View {
                     Text(draft.defaultACL.detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
+                    if draft.defaultACL != .private {
+                        Label("公开权限会让对象可通过公网链接读取，请确认这符合你的发布用途。", systemImage: "exclamationmark.triangle.fill")
+                            .font(.callout)
+                            .foregroundStyle(.orange)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityLabel("权限警告：对象可通过公网链接读取")
+                    }
                 }
 
                 Section("上传路径") {

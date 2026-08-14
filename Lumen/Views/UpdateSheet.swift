@@ -31,10 +31,14 @@ struct UpdateSheet: View {
                 .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
             }
 
-            if let message = model.updates.lastMessage, model.updates.isDownloading || message.contains("失败") {
-                Text(message)
-                    .font(.callout)
-                    .foregroundStyle(model.updates.isDownloading ? Color.secondary : Color.red)
+            if let message = model.updates.lastMessage,
+               model.updates.isDownloading || model.updates.lastOperationFailed {
+                Label(
+                    message,
+                    systemImage: model.updates.lastOperationFailed ? "exclamationmark.triangle" : "arrow.down.circle"
+                )
+                .font(.callout)
+                .foregroundStyle(model.updates.lastOperationFailed ? Color.red : Color.secondary)
             }
 
             HStack {
