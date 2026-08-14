@@ -4,6 +4,65 @@ import Testing
 @testable import Lumen
 
 struct SafetyAndVersionTests {
+    @Test func corruptPrimaryRecoversTheLastKnownGoodAccounts() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-account-recovery-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = AccountRepository(directory: directory)
+        let original = Self.account(name: "Original")
+        var updated = original
+        updated.name = "Updated"
+
+        try repository.save([original])
+        try repository.save([updated])
+        try Data("not-json".utf8).write(to: repository.primaryURL, options: .atomic)
+
+        let loaded = repository.load()
+
+        #expect(loaded.accounts == [original])
+        #expect(loaded.recovery?.kind == .restoredBackup)
+        let restored = try JSONDecoder().decode(
+            [OSSAccount].self,
+            from: Data(contentsOf: repository.primaryURL)
+        )
+        #expect(restored == [original])
+        let preservedCorruptFiles = try FileManager.default.contentsOfDirectory(
+            at: directory,
+            includingPropertiesForKeys: nil
+        ).filter { $0.lastPathComponent.hasPrefix("accounts.corrupt-") }
+        #expect(preservedCorruptFiles.count == 1)
+    }
+
+    @Test func twoCorruptAccountFilesArePreservedAndReported() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-account-unrecoverable-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let repository = AccountRepository(directory: directory)
+        try Data("broken-primary".utf8).write(to: repository.primaryURL)
+        try Data("broken-backup".utf8).write(to: repository.backupURL)
+
+        let loaded = repository.load()
+
+        #expect(loaded.accounts.isEmpty)
+        #expect(loaded.recovery?.kind == .unrecoverable)
+        #expect(try Data(contentsOf: repository.primaryURL) == Data("broken-primary".utf8))
+        #expect(try Data(contentsOf: repository.backupURL) == Data("broken-backup".utf8))
+    }
+
+    @Test func aNewAccountStartsPrivate() {
+        #expect(AccountDraft.fresh().defaultACL == .private)
+    }
+
+    @Test func newlyPublicPermissionsRequireConfirmation() {
+        #expect(AccountACLConfirmation.requiresConfirmation(from: .private, to: .publicRead))
+        #expect(AccountACLConfirmation.requiresConfirmation(from: .publicRead, to: .publicReadWrite))
+        #expect(AccountACLConfirmation.requiresConfirmation(from: nil, to: .publicRead))
+        #expect(!AccountACLConfirmation.requiresConfirmation(from: .publicRead, to: .publicRead))
+        #expect(!AccountACLConfirmation.requiresConfirmation(from: .publicRead, to: .private))
+        #expect(!AccountACLConfirmation.requiresConfirmation(from: nil, to: .default))
+    }
+
     @Test func malformedVersionsAreRejected() {
         #expect(AppVersion.parts("1.two.3") == nil)
         #expect(AppVersion.parts("1..3") == nil)
@@ -147,6 +206,21 @@ struct SafetyAndVersionTests {
         #expect(access.readModes == [true, false])
         #expect(access.deleteModes == [true, false])
         #expect(access.values.isEmpty)
+    }
+
+    private static func account(name: String) -> OSSAccount {
+        OSSAccount(
+            id: UUID(uuidString: "0A3DB3D9-5721-46B9-AC8A-4D17CA76093B")!,
+            name: name,
+            accessKeyId: "redacted",
+            regionID: "cn-hangzhou",
+            endpointOverride: "",
+            cdnDomain: "",
+            defaultACL: .private,
+            prefixTemplate: "",
+            useTransferAccelerate: false,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
     }
 }
 

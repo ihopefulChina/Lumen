@@ -14,6 +14,7 @@ final class AppServices {
     static let shared = AppServices()
 
     var accounts: [OSSAccount]
+    var accountRecovery: AccountRecovery?
     var settings = AppSettings()
     var transfers = TransferEngine()
     var updates = AppUpdater()
@@ -24,6 +25,7 @@ final class AppServices {
     private var didBootstrap = false
     private var sessionBoxes: [WeakSession] = []
     private var pendingIncomingURLs: [URL] = []
+    private var didPresentAccountRecovery = false
 
     init(
         accounts: [OSSAccount]? = nil,
@@ -32,7 +34,9 @@ final class AppServices {
         updates: AppUpdater = AppUpdater(),
         favorites: FavoriteStore = FavoriteStore()
     ) {
-        self.accounts = accounts ?? AccountStore.load()
+        let loaded = accounts.map { AccountLoadResult(accounts: $0, recovery: nil) } ?? AccountStore.load()
+        self.accounts = loaded.accounts
+        self.accountRecovery = loaded.recovery
         self.settings = settings
         self.transfers = transfers
         self.updates = updates
@@ -49,6 +53,13 @@ final class AppServices {
             sessionBoxes.append(WeakSession(session))
         }
         focused = session
+        if !didPresentAccountRecovery, let accountRecovery {
+            didPresentAccountRecovery = true
+            session.present(
+                accountRecovery.message,
+                error: accountRecovery.kind == .unrecoverable
+            )
+        }
         if !pendingIncomingURLs.isEmpty {
             let queued = pendingIncomingURLs
             pendingIncomingURLs = []

@@ -1391,7 +1391,7 @@ struct AccountDraft: Identifiable {
             regionID: "cn-hangzhou",
             endpointOverride: "",
             cdnDomain: "",
-            defaultACL: .publicRead,
+            defaultACL: .private,
             prefixTemplate: "",
             useTransferAccelerate: false,
             createdAt: .now
