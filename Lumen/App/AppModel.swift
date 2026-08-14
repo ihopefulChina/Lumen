@@ -744,53 +744,57 @@ final class AppModel {
         try? await client.deleteObject(key: prefix)
     }
 
-    func rename(_ object: OSSObject, to raw: String) async {
+    @discardableResult
+    func rename(_ object: OSSObject, to raw: String) async -> Bool {
         guard !isOrganizingCloud else {
             present("请等待当前云端整理完成", error: true)
-            return
+            return false
         }
-        guard let client = makeClient() else { return }
+        guard let client = makeClient() else { return false }
         let name: String
         do {
             name = try ObjectNameValidator.validate(raw)
         } catch {
             present(error.localizedDescription, error: true)
-            return
+            return false
         }
         let dest = PathTemplate.join(PathTemplate.parentPrefix(object.key), key: name)
-        guard dest != object.key else { return }
+        guard dest != object.key else { return true }
         isOrganizingCloud = true
         defer { isOrganizingCloud = false }
         do {
             try await client.renameObject(from: object.key, to: dest, overwrite: false)
             await refreshListing()
             browser.select(key: dest, modifiers: [])
+            return true
         } catch {
             present(error.localizedDescription, error: true)
+            return false
         }
     }
 
-    func renameFolder(_ folder: OSSFolder, to raw: String) async {
+    @discardableResult
+    func renameFolder(_ folder: OSSFolder, to raw: String) async -> Bool {
         guard !isOrganizingCloud else {
             present("请等待当前云端整理完成", error: true)
-            return
+            return false
         }
         guard let client = makeClient(),
               let accountID = selectedAccountID,
               let bucketName = selectedBucketName
-        else { return }
+        else { return false }
         let name: String
         do {
             name = try ObjectNameValidator.validate(raw)
         } catch {
             present(error.localizedDescription, error: true)
-            return
+            return false
         }
         let destination = PathTemplate.join(
             PathTemplate.parentPrefix(folder.prefix),
             key: name
         ) + "/"
-        guard destination != folder.prefix else { return }
+        guard destination != folder.prefix else { return true }
 
         isOrganizingCloud = true
         defer { isOrganizingCloud = false }
@@ -805,8 +809,10 @@ final class AppModel {
             await refreshListing()
             browser.select(key: destination, modifiers: [])
             present("已重命名“\(folder.name)”")
+            return true
         } catch {
             present(error.localizedDescription, error: true)
+            return false
         }
     }
 

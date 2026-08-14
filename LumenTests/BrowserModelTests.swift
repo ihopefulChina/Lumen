@@ -313,6 +313,75 @@ struct BrowserModelTests {
         #expect(!FileManager.default.fileExists(atPath: temporary.path))
     }
 
+    @Test func invalidObjectRenameReportsFailureWithoutSendingARequest() async {
+        let transport = RenameResultTransport(steps: [])
+        let fixture = Self.renameModel(transport: transport)
+
+        let succeeded = await fixture.model.rename(fixture.object, to: "nested/name")
+
+        #expect(!succeeded)
+        #expect(fixture.model.banner?.isError == true)
+        #expect(await transport.requestCount == 0)
+    }
+
+    @Test func invalidFolderRenameReportsFailureWithoutSendingARequest() async {
+        let transport = RenameResultTransport(steps: [])
+        let fixture = Self.renameModel(transport: transport)
+
+        let succeeded = await fixture.model.renameFolder(
+            OSSFolder(prefix: "folder/"),
+            to: "nested/name"
+        )
+
+        #expect(!succeeded)
+        #expect(fixture.model.banner?.isError == true)
+        #expect(await transport.requestCount == 0)
+    }
+
+    @Test func objectRenameConflictKeepsSourceSelectionAndEditSession() async {
+        let conflict = Data(
+            "<Error><Code>FileAlreadyExists</Code><Message>Exists</Message><RequestId>rename</RequestId></Error>".utf8
+        )
+        let transport = RenameResultTransport(steps: [
+            .response(status: 409, data: conflict)
+        ])
+        let fixture = Self.renameModel(transport: transport)
+        fixture.model.browser.replaceSelection([fixture.object.key])
+        #expect(fixture.model.browser.beginRenaming())
+        fixture.model.browser.updateRenameDraft("new.txt")
+
+        let succeeded = await fixture.model.rename(fixture.object, to: "new.txt")
+
+        #expect(!succeeded)
+        #expect(fixture.model.browser.selectedKeys == [fixture.object.key])
+        #expect(fixture.model.browser.renameSession?.draft == "new.txt")
+        #expect(await transport.methods == ["PUT"])
+    }
+
+    @Test func successfulObjectRenameReturnsSuccessAndSelectsNewKey() async {
+        let listing = Data("""
+        <ListBucketResult>
+          <IsTruncated>false</IsTruncated>
+          <Contents>
+            <Key>new.txt</Key><Size>1</Size><ETag>new</ETag><StorageClass>Standard</StorageClass>
+          </Contents>
+        </ListBucketResult>
+        """.utf8)
+        let transport = RenameResultTransport(steps: [
+            .response(status: 200, data: Data()),
+            .response(status: 204, data: Data()),
+            .response(status: 200, data: listing)
+        ])
+        let fixture = Self.renameModel(transport: transport)
+        fixture.model.browser.replaceSelection([fixture.object.key])
+
+        let succeeded = await fixture.model.rename(fixture.object, to: "new.txt")
+
+        #expect(succeeded)
+        #expect(fixture.model.browser.selectedKeys == ["new.txt"])
+        #expect(await transport.methods == ["PUT", "DELETE", "GET"])
+    }
+
     private static func model() -> BrowserModel {
         let model = BrowserModel(defaults: defaults())
         model.folders = [OSSFolder(prefix: "folder/")]
@@ -328,6 +397,57 @@ struct BrowserModelTests {
     private static func defaults() -> UserDefaults {
         let suite = "LumenTests.BrowserModel.\(UUID().uuidString)"
         return UserDefaults(suiteName: suite)!
+    }
+
+    private static func renameModel(
+        transport: RenameResultTransport
+    ) -> (model: AppModel, object: OSSObject) {
+        let account = OSSAccount(
+            id: UUID(),
+            name: "Rename Test",
+            accessKeyId: "test",
+            regionID: "cn-hangzhou",
+            endpointOverride: "",
+            cdnDomain: "",
+            defaultACL: .private,
+            prefixTemplate: "",
+            useTransferAccelerate: false,
+            createdAt: .now
+        )
+        let bucket = OSSBucket(
+            name: "bucket",
+            regionID: "cn-hangzhou",
+            location: "oss-cn-hangzhou",
+            extranetEndpoint: "oss-cn-hangzhou.aliyuncs.com",
+            createdAt: nil
+        )
+        let object = OSSObject(
+            key: "old.txt",
+            size: 1,
+            etag: "old",
+            lastModified: nil,
+            storageClass: "Standard"
+        )
+        let services = AppServices(accounts: [account])
+        let model = AppModel(kind: .settings, services: services) { _, selectedBucket in
+            OSSClient(
+                credentials: OSSCredentials(
+                    accessKeyId: "test",
+                    accessKeySecret: "secret",
+                    securityToken: nil
+                ),
+                region: "cn-hangzhou",
+                endpointHost: "oss-cn-hangzhou.aliyuncs.com",
+                bucket: selectedBucket?.name,
+                transport: transport
+            )
+        }
+        model.selectedAccountID = account.id
+        model.buckets = [bucket]
+        model.selectedBucketName = bucket.name
+        model.browser.objects = [object]
+        model.browser.imagesOnly = false
+        return (model, object)
     }
 
     private static func waitForRequests(
@@ -350,6 +470,47 @@ struct BrowserModelTests {
           </Contents>
         </ListBucketResult>
         """.utf8)
+    }
+}
+
+private actor RenameResultTransport: OSSHTTPTransport {
+    enum Step: Sendable {
+        case response(status: Int, data: Data)
+    }
+
+    private var steps: [Step]
+    private(set) var methods: [String] = []
+
+    init(steps: [Step]) {
+        self.steps = steps
+    }
+
+    var requestCount: Int { methods.count }
+
+    func send(
+        _ request: URLRequest,
+        body: OSSHTTPBody,
+        download: Bool,
+        onProgress: (@Sendable (Int64, Int64) -> Void)?
+    ) async throws -> OSSHTTPResult {
+        methods.append(request.httpMethod ?? "")
+        guard !steps.isEmpty else {
+            throw OSSServiceError(
+                statusCode: 0,
+                code: "MissingStub",
+                message: "Missing rename response",
+                requestId: ""
+            )
+        }
+        switch steps.removeFirst() {
+        case .response(let status, let data):
+            return OSSHTTPResult(
+                status: status,
+                headers: [:],
+                data: data,
+                temporaryDownloadURL: nil
+            )
+        }
     }
 }
 
