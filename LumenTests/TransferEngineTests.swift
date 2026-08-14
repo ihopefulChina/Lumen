@@ -222,7 +222,8 @@ struct TransferEngineTests {
             region: "cn-hangzhou",
             endpointHost: "oss-cn-hangzhou.aliyuncs.com",
             bucket: "bucket",
-            transport: transport
+            transport: transport,
+            retryPolicy: OSSRetryPolicy(maxAttempts: 1, jitter: { 0 })
         )
     }
 

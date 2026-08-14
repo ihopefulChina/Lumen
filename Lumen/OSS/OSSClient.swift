@@ -6,6 +6,8 @@ struct OSSClient: Sendable {
     var endpointHost: String
     var bucket: String?
     var transport: any OSSHTTPTransport
+    var retryPolicy: OSSRetryPolicy
+    var retrySleeper: any OSSRetrySleeping
 
     static let multipartThreshold: Int64 = 8 * 1024 * 1024
     static let partSize: Int64 = 8 * 1024 * 1024
@@ -16,13 +18,17 @@ struct OSSClient: Sendable {
         region: String,
         endpointHost: String,
         bucket: String?,
-        transport: any OSSHTTPTransport = URLSessionOSSHTTPTransport()
+        transport: any OSSHTTPTransport = URLSessionOSSHTTPTransport(),
+        retryPolicy: OSSRetryPolicy = OSSRetryPolicy(),
+        retrySleeper: any OSSRetrySleeping = TaskOSSRetrySleeper()
     ) {
         self.credentials = credentials
         self.region = region
         self.endpointHost = endpointHost
         self.bucket = bucket
         self.transport = transport
+        self.retryPolicy = retryPolicy
+        self.retrySleeper = retrySleeper
     }
 
     var requestHost: String {
@@ -479,31 +485,8 @@ struct OSSClient: Sendable {
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil,
         checksCancellation: Bool = true
     ) async throws -> HTTPResponse {
-        if checksCancellation {
-            try Task.checkCancellation()
-        }
         guard let url = makeURL(bucket: bucket, key: key, query: query) else {
             throw OSSServiceError(statusCode: 0, code: "InvalidURL", message: "无法构造请求地址", requestId: "")
-        }
-
-        var request = URLRequest(url: url)
-        request.httpMethod = method
-        request.timeoutInterval = 60
-        if body != nil || fileURL != nil {
-            request.timeoutInterval = 60 * 30
-        }
-
-        let signed = OSSSigner.signedHeaders(
-            method: method,
-            bucket: bucket,
-            key: key,
-            region: region,
-            credentials: credentials,
-            query: query,
-            extraHeaders: extra
-        )
-        for (name, value) in signed {
-            request.setValue(value, forHTTPHeaderField: name)
         }
 
         let httpBody: OSSHTTPBody
@@ -514,43 +497,95 @@ struct OSSClient: Sendable {
         } else {
             httpBody = .none
         }
-        let result = try await transport.send(
-            request,
-            body: httpBody,
-            download: downloadTo != nil,
-            onProgress: onProgress
-        )
-        let http = try validated(result)
 
-        if let downloadTo {
-            guard let temp = http.temporaryDownloadURL else {
-                throw OSSServiceError(statusCode: 0, code: "MissingDownload", message: "下载没有返回文件", requestId: "")
+        var attempt = 1
+        while true {
+            if checksCancellation {
+                try Task.checkCancellation()
             }
+            var request = URLRequest(url: url)
+            request.httpMethod = method
+            request.timeoutInterval = body != nil || fileURL != nil ? 60 * 30 : 60
+            let signed = OSSSigner.signedHeaders(
+                method: method,
+                bucket: bucket,
+                key: key,
+                region: region,
+                credentials: credentials,
+                query: query,
+                extraHeaders: extra
+            )
+            for (name, value) in signed {
+                request.setValue(value, forHTTPHeaderField: name)
+            }
+
             do {
-                if let downloadRoot {
-                    try FileSafety.validate(destination: downloadTo, root: downloadRoot)
+                let result = try await transport.send(
+                    request,
+                    body: httpBody,
+                    download: downloadTo != nil,
+                    onProgress: onProgress
+                )
+                if let delay = retryPolicy.delay(
+                    afterAttempt: attempt,
+                    outcome: .httpStatus(result.status)
+                ) {
+                    if let temporaryURL = result.temporaryDownloadURL {
+                        try? FileManager.default.removeItem(at: temporaryURL)
+                    }
+                    try await retrySleeper.sleep(for: delay)
+                    attempt += 1
+                    continue
                 }
-                guard !FileManager.default.fileExists(atPath: downloadTo.path) else {
-                    throw OSSServiceError(
-                        statusCode: 0,
-                        code: "LocalFileExists",
-                        message: "本地已有同名文件，未覆盖",
-                        requestId: ""
-                    )
+
+                let http: HTTPResponse
+                do {
+                    http = try validated(result)
+                } catch {
+                    if let temporaryURL = result.temporaryDownloadURL {
+                        try? FileManager.default.removeItem(at: temporaryURL)
+                    }
+                    throw error
                 }
-                let localCRC64 = try CRC64XZ.checksum(fileURL: temp)
-                _ = try Self.verifyCRC64(local: localCRC64, headers: http.headers)
-                try FileManager.default.createDirectory(at: downloadTo.deletingLastPathComponent(), withIntermediateDirectories: true)
-                if let downloadRoot {
-                    try FileSafety.validate(destination: downloadTo, root: downloadRoot)
+
+                if let downloadTo {
+                    guard let temp = http.temporaryDownloadURL else {
+                        throw OSSServiceError(statusCode: 0, code: "MissingDownload", message: "下载没有返回文件", requestId: "")
+                    }
+                    do {
+                        if let downloadRoot {
+                            try FileSafety.validate(destination: downloadTo, root: downloadRoot)
+                        }
+                        guard !FileManager.default.fileExists(atPath: downloadTo.path) else {
+                            throw OSSServiceError(
+                                statusCode: 0,
+                                code: "LocalFileExists",
+                                message: "本地已有同名文件，未覆盖",
+                                requestId: ""
+                            )
+                        }
+                        let localCRC64 = try CRC64XZ.checksum(fileURL: temp)
+                        _ = try Self.verifyCRC64(local: localCRC64, headers: http.headers)
+                        try FileManager.default.createDirectory(at: downloadTo.deletingLastPathComponent(), withIntermediateDirectories: true)
+                        if let downloadRoot {
+                            try FileSafety.validate(destination: downloadTo, root: downloadRoot)
+                        }
+                        try FileManager.default.moveItem(at: temp, to: downloadTo)
+                    } catch {
+                        try? FileManager.default.removeItem(at: temp)
+                        throw error
+                    }
                 }
-                try FileManager.default.moveItem(at: temp, to: downloadTo)
+                return http
             } catch {
-                try? FileManager.default.removeItem(at: temp)
-                throw error
+                if error is CancellationError { throw error }
+                guard let outcome = retryPolicy.outcome(for: error),
+                      let delay = retryPolicy.delay(afterAttempt: attempt, outcome: outcome)
+                else { throw error }
+                try await retrySleeper.sleep(for: delay)
+                attempt += 1
             }
         }
-        return http
     }
 
     private static func verifyCRC64(local: UInt64, headers: [String: String]) throws -> Bool {
