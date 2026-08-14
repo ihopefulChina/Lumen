@@ -93,6 +93,13 @@ struct LumenCommands: Commands {
     @FocusedValue(\.lumenActions) private var actions
 
     var body: some Commands {
+        CommandGroup(replacing: .undoRedo) {
+            Button(actions?.undoTitle ?? "撤销") {
+                actions?.undo()
+            }
+            .keyboardShortcut("z", modifiers: [.command])
+            .disabled(actions?.canUndo != true)
+        }
         CommandGroup(replacing: .newItem) {
             Button("上传图片…") { actions?.upload() }
                 .keyboardShortcut("o", modifiers: [.command])
@@ -154,6 +161,9 @@ struct LumenCommands: Commands {
 }
 
 struct LumenActions {
+    var undoTitle: String
+    var canUndo: Bool
+    var undo: () -> Void
     var upload: () -> Void
     var paste: () -> Void
     var addAccount: () -> Void

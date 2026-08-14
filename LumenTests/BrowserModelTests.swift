@@ -412,6 +412,7 @@ struct BrowserModelTests {
             sourceSelection: ["old.txt"],
             destinationSelection: ["new.txt"]
         ))
+        #expect(fixture.model.banner?.action == .undoCloudOperation)
         #expect(await transport.methods == ["PUT", "DELETE", "GET"])
     }
 
@@ -471,6 +472,7 @@ struct BrowserModelTests {
             sourceSelection: ["folder/"],
             destinationSelection: ["renamed/"]
         ))
+        #expect(fixture.model.banner?.action == .undoCloudOperation)
         #expect(await transport.methods == ["GET", "HEAD", "PUT", "DELETE", "GET"])
     }
 
@@ -505,6 +507,7 @@ struct BrowserModelTests {
             destinationSelection: ["archive/old.txt"]
         ))
         #expect(fixture.model.browser.selectedKeys == ["archive/old.txt"])
+        #expect(fixture.model.banner?.action == .undoCloudOperation)
         #expect(await transport.methods == ["HEAD", "PUT", "DELETE", "GET"])
     }
 
@@ -531,6 +534,7 @@ struct BrowserModelTests {
         await fixture.model.organizeCloud(payload, to: "copies/", mode: .copy)
 
         #expect(fixture.model.lastCloudUndoOperation == renameUndo)
+        #expect(fixture.model.banner?.action == nil)
         #expect(await transport.methods == ["PUT", "DELETE", "GET", "HEAD", "PUT", "GET"])
     }
 

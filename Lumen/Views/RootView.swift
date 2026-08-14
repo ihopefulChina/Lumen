@@ -35,6 +35,18 @@ struct RootView: View {
 
     private var actions: LumenActions {
         LumenActions(
+            undoTitle: model.browser.renameSession == nil
+                ? model.undoCloudOperationTitle
+                : "撤销编辑",
+            canUndo: model.browser.renameSession != nil || model.canUndoCloudOperation,
+            undo: {
+                if let undoManager = NSApp.keyWindow?.firstResponder?.undoManager,
+                   undoManager.canUndo {
+                    undoManager.undo()
+                } else {
+                    Task { await model.undoLastCloudOperation() }
+                }
+            },
             upload: { showFileImporter = true },
             paste: { model.pasteFromClipboard() },
             addAccount: { model.editingAccount = nil; model.showAccountSheet = true },
@@ -302,13 +314,21 @@ private struct WorkspaceView: View {
         }
         .overlay(alignment: .top) {
             if let banner = model.banner {
-                BannerView(banner: banner) {
-                    model.banner = nil
-                }
+                BannerView(
+                    banner: banner,
+                    dismiss: { model.banner = nil },
+                    perform: { action in
+                        model.banner = nil
+                        switch action {
+                        case .undoCloudOperation:
+                            Task { await model.undoLastCloudOperation() }
+                        }
+                    }
+                )
                 .padding(.top, 10)
                 .transition(.move(edge: .top).combined(with: .opacity))
                 .task(id: banner.id) {
-                    try? await Task.sleep(for: .seconds(2.4))
+                    try? await Task.sleep(for: banner.displayDuration)
                     if model.banner?.id == banner.id {
                         Motion.run(reduceMotion) { model.banner = nil }
                     }
@@ -322,19 +342,38 @@ private struct WorkspaceView: View {
 private struct BannerView: View {
     let banner: BannerMessage
     var dismiss: () -> Void
+    var perform: (BannerAction) -> Void
 
     var body: some View {
-        Button(action: dismiss) {
-            HStack(spacing: 8) {
-                Image(systemName: banner.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
-                    .foregroundStyle(banner.isError ? .yellow : .green)
-                Text(banner.text)
-                    .font(.callout.weight(.medium))
+        HStack(spacing: 8) {
+            Image(systemName: banner.isError ? "exclamationmark.triangle.fill" : "checkmark.circle.fill")
+                .foregroundStyle(banner.isError ? .yellow : .green)
+            Text(banner.text)
+                .font(.callout.weight(.medium))
+
+            if let action = banner.action {
+                Divider()
+                    .frame(height: 14)
+                Button("撤销") {
+                    perform(action)
+                }
+                .buttonStyle(.borderless)
+                .font(.callout.weight(.semibold))
+                .accessibilityHint("恢复上一次重命名或移动")
             }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 8)
+
+            Button(action: dismiss) {
+                Image(systemName: "xmark")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 16, height: 16)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("关闭提示")
         }
-        .buttonStyle(.plain)
+        .padding(.leading, 14)
+        .padding(.trailing, 9)
+        .padding(.vertical, 8)
         .lumenGlass(in: Capsule())
         .shadow(color: .black.opacity(0.12), radius: 18, y: 6)
     }

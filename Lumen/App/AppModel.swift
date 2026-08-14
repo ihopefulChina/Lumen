@@ -3,10 +3,19 @@ import Foundation
 import Observation
 import UniformTypeIdentifiers
 
+enum BannerAction: Equatable {
+    case undoCloudOperation
+}
+
 struct BannerMessage: Identifiable, Equatable {
     var id = UUID()
     var text: String
     var isError: Bool
+    var action: BannerAction? = nil
+
+    var displayDuration: Duration {
+        action == nil ? .milliseconds(2_400) : .milliseconds(5_500)
+    }
 }
 
 @MainActor
@@ -793,6 +802,7 @@ final class AppModel {
                 sourceSelection: [object.key],
                 destinationSelection: [dest]
             )
+            present("已重命名“\(name)”", action: .undoCloudOperation)
             return true
         } catch {
             present(error.localizedDescription, error: true)
@@ -853,7 +863,7 @@ final class AppModel {
                 sourceSelection: [folder.prefix],
                 destinationSelection: [destination]
             )
-            present("已重命名“\(folder.name)”")
+            present("已重命名“\(folder.name)”", action: .undoCloudOperation)
             return true
         } catch {
             present(error.localizedDescription, error: true)
@@ -974,7 +984,10 @@ final class AppModel {
                     destinationSelection: selection
                 )
             }
-            present(mode == .move ? "已移动 \(count) 项" : "已复制 \(count) 项")
+            present(
+                mode == .move ? "已移动 \(count) 项" : "已复制 \(count) 项",
+                action: mode == .move ? .undoCloudOperation : nil
+            )
         } catch {
             present(error.localizedDescription, error: true)
         }
@@ -1253,8 +1266,12 @@ final class AppModel {
         present("已复制链接")
     }
 
-    func present(_ text: String, error: Bool = false) {
-        banner = BannerMessage(text: text, isError: error)
+    func present(
+        _ text: String,
+        error: Bool = false,
+        action: BannerAction? = nil
+    ) {
+        banner = BannerMessage(text: text, isError: error, action: action)
     }
 
     func pasteFromClipboard() {
