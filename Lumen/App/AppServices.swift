@@ -16,7 +16,7 @@ final class AppServices {
     var accounts: [OSSAccount]
     var settings = AppSettings()
     var transfers = TransferEngine()
-    var updates = UpdateService()
+    var updates = AppUpdater()
     var favorites = FavoriteStore()
     var showMenuBarExtra = false
     weak var focused: AppModel?
@@ -29,7 +29,7 @@ final class AppServices {
         accounts: [OSSAccount]? = nil,
         settings: AppSettings = AppSettings(),
         transfers: TransferEngine = TransferEngine(),
-        updates: UpdateService = UpdateService(),
+        updates: AppUpdater = AppUpdater(),
         favorites: FavoriteStore = FavoriteStore()
     ) {
         self.accounts = accounts ?? AccountStore.load()
@@ -66,14 +66,9 @@ final class AppServices {
     func bootstrapIfNeeded() {
         guard !didBootstrap else { return }
         didBootstrap = true
+        updates.automaticallyChecksForUpdates = settings.checkUpdatesAutomatically
         transfers.onUploadFinished = { [weak self] in
             self?.sessions.forEach { $0.scheduleListingRefresh() }
-        }
-        if settings.checkUpdatesAutomatically {
-            Task {
-                try? await Task.sleep(for: .seconds(2.4))
-                await updates.checkIfDue()
-            }
         }
     }
 

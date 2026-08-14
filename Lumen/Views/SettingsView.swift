@@ -28,31 +28,15 @@ struct SettingsView: View {
                 }
                 Section("更新") {
                     LabeledContent("当前版本", value: AppVersion.current)
-                    Toggle("自动检查更新", isOn: $model.settings.checkUpdatesAutomatically)
-                    HStack {
-                        Button("检查更新…") {
-                            Task {
-                                await model.updates.check(manual: true, surface: .settings)
-                                if model.updates.available == nil {
-                                    WindowActions.notify(model.updates.lastMessage ?? "检查完成")
-                                }
-                            }
+                    Toggle("自动检查更新", isOn: Binding(
+                        get: { model.settings.checkUpdatesAutomatically },
+                        set: { enabled in
+                            model.settings.checkUpdatesAutomatically = enabled
+                            model.updates.automaticallyChecksForUpdates = enabled
                         }
-                        .disabled(model.updates.isChecking || model.updates.isDownloading)
-                        if model.updates.isChecking {
-                            ProgressView()
-                                .controlSize(.small)
-                        }
-                    }
-                    if let message = model.updates.lastMessage {
-                        Text(message)
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                    if let checked = model.updates.lastChecked {
-                        Text("上次检查：\(Formatters.date(checked))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
+                    ))
+                    Button("检查更新…") {
+                        model.updates.checkForUpdates()
                     }
                 }
                 Section("关于") {
@@ -95,12 +79,5 @@ struct SettingsView: View {
             .tabItem { Label("账号", systemImage: "person.crop.circle") }
         }
         .padding(8)
-        .sheet(item: Binding(
-            get: { model.updates.surface == .settings ? model.updates.available : nil },
-            set: { if $0 == nil { model.updates.dismissAvailable() } }
-        )) { release in
-            UpdateSheet(release: release)
-                .environment(model)
-        }
     }
 }

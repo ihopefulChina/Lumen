@@ -2,51 +2,41 @@ import Foundation
 import Testing
 @testable import Lumen
 
+@MainActor
 struct UpdateServiceTests {
-    @Test func acceptsOnlyTheExactVersionedDMG() throws {
-        let expected = GitHubAsset(
-            name: "Lumen-0.0.3.dmg",
-            browserDownloadURL: "https://github.com/ihopefulChina/Lumen/releases/download/v0.0.3/Lumen-0.0.3.dmg"
+    @Test func updateFeedIsPinnedToTheLatestLumenReleaseAsset() {
+        #expect(
+            AppUpdater.feedURL.absoluteString
+                == "https://github.com/ihopefulChina/Lumen/releases/latest/download/appcast.xml"
         )
-        let assets = [
-            GitHubAsset(
-                name: "Lumen-0.0.2.dmg",
-                browserDownloadURL: "https://github.com/ihopefulChina/Lumen/releases/download/v0.0.3/Lumen-0.0.2.dmg"
-            ),
-            GitHubAsset(
-                name: "Other-0.0.3.dmg",
-                browserDownloadURL: "https://github.com/ihopefulChina/Lumen/releases/download/v0.0.3/Other-0.0.3.dmg"
-            ),
-            expected,
-        ]
-
-        #expect(UpdateService.preferredDMG(in: assets, version: "0.0.3") == expected)
-        #expect(UpdateService.preferredDMG(in: [assets[0]], version: "0.0.3") == nil)
-        #expect(UpdateService.preferredDMG(in: [assets[1]], version: "0.0.3") == nil)
     }
 
-    @Test func assetNameCannotEscapeDownloads() {
-        #expect(UpdateService.safeAssetName("Lumen-0.0.3.dmg") == "Lumen-0.0.3.dmg")
-        #expect(UpdateService.safeAssetName("../Lumen-0.0.3.dmg") == nil)
-        #expect(UpdateService.safeAssetName("folder/Lumen-0.0.3.dmg") == nil)
-        #expect(UpdateService.safeAssetName("Lumen-0.0.3.dmg\u{0}") == nil)
+    @Test func automaticCheckPreferenceIsForwardedToTheUpdaterDriver() {
+        let driver = RecordingUpdaterDriver()
+        let updater = AppUpdater(driver: driver)
+
+        updater.automaticallyChecksForUpdates = false
+
+        #expect(!driver.automaticallyChecksForUpdates)
     }
 
-    @Test func assetURLMustPointAtThisRepositoriesExactReleaseAsset() {
-        #expect(UpdateService.isTrustedAssetURL(
-            URL(string: "https://github.com/ihopefulChina/Lumen/releases/download/v0.0.3/Lumen-0.0.3.dmg")!,
-            version: "0.0.3",
-            name: "Lumen-0.0.3.dmg"
-        ))
-        #expect(!UpdateService.isTrustedAssetURL(
-            URL(string: "http://github.com/ihopefulChina/Lumen/releases/download/v0.0.3/Lumen-0.0.3.dmg")!,
-            version: "0.0.3",
-            name: "Lumen-0.0.3.dmg"
-        ))
-        #expect(!UpdateService.isTrustedAssetURL(
-            URL(string: "https://example.com/Lumen-0.0.3.dmg")!,
-            version: "0.0.3",
-            name: "Lumen-0.0.3.dmg"
-        ))
+    @Test func manualCheckIsForwardedExactlyOnce() {
+        let driver = RecordingUpdaterDriver()
+        let updater = AppUpdater(driver: driver)
+
+        updater.checkForUpdates()
+
+        #expect(driver.checkCount == 1)
+    }
+}
+
+@MainActor
+private final class RecordingUpdaterDriver: AppUpdaterDriving {
+    var automaticallyChecksForUpdates = true
+    var canCheckForUpdates = true
+    private(set) var checkCount = 0
+
+    func checkForUpdates() {
+        checkCount += 1
     }
 }

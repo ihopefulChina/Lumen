@@ -29,7 +29,7 @@ final class AppModel {
     }
     var transfers: TransferEngine
     var settings: AppSettings
-    var updates: UpdateService
+    var updates: AppUpdater
     var favorites: FavoriteStore
     var showMenuBarExtra: Bool {
         get { services.showMenuBarExtra }

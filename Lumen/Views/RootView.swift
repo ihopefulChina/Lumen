@@ -127,17 +127,6 @@ private struct RootPresentation: ViewModifier {
             .sheet(isPresented: $model.showAccountSheet) {
                 AccountSheet(draft: AccountDraft.fresh())
             }
-            .sheet(item: Binding(
-                get: {
-                    AppServices.shared.focused === model && model.updates.surface == .workspace
-                        ? model.updates.available
-                        : nil
-                },
-                set: { if $0 == nil { model.updates.dismissAvailable() } }
-            )) { release in
-                UpdateSheet(release: release)
-                    .environment(model)
-            }
             .fileImporter(
                 isPresented: $showFileImporter,
                 allowedContentTypes: ImageKind.importTypes,

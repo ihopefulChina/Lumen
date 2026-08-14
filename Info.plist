@@ -36,5 +36,13 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSSupportsSuddenTermination</key>
 	<true/>
+	<key>SUEnableInstallerLauncherService</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/ihopefulChina/Lumen/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>t3G3muUZZk8E7GyTMKNQq5J3ggoNFSNndT+qCMXV26E=</string>
+	<key>SUVerifyUpdateBeforeExtraction</key>
+	<true/>
 </dict>
 </plist>

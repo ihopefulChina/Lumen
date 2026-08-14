@@ -110,13 +110,7 @@ struct LumenCommands: Commands {
         }
         CommandGroup(after: .appInfo) {
             Button("检查更新…") {
-                Task {
-                    let updates = AppServices.shared.updates
-                    await updates.check(manual: true, surface: .workspace)
-                    if updates.available == nil {
-                        WindowActions.notify(updates.lastMessage ?? "检查完成")
-                    }
-                }
+                AppServices.shared.updates.checkForUpdates()
             }
         }
         CommandGroup(replacing: .help) {
