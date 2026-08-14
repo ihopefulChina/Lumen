@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.5.dmg"><strong>下载 Lumen 0.0.5</strong></a>
+  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg"><strong>下载 Lumen 0.0.6</strong></a>
   &nbsp;·&nbsp;
   <a href="https://github.com/ihopefulChina/Lumen/releases">版本记录</a>
   &nbsp;·&nbsp;
@@ -41,6 +41,7 @@ Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口�
 
 - 在同一 Bucket 内复制、移动或拖放文件与文件夹。
 - 像访达一样在网格或列表中原地重命名；文件默认只选中主名，扩展名保持不动。
+- 重命名或移动完成后可点顶部提示中的「撤销」，也可按 `⌘Z` 恢复到原位置。
 - 重命名文件夹时保留完整子目录结构。
 - 所有目标会先做冲突检查；Lumen 不会静默覆盖已有对象。
 - 云端移动会在复制全部成功后才删除源对象，失败时尽量回滚新建目标。
@@ -62,7 +63,7 @@ Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口�
 
 ## 开始使用
 
-1. [下载 Lumen 0.0.5](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.5.dmg)。
+1. [下载 Lumen 0.0.6](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg)。
 2. 打开 DMG，把 Lumen 拖到「应用程序」。
 3. 添加阿里云 OSS 账号，选择地域，然后双击进入 Bucket。
 4. 把文件拖进窗口，或按 `⌘O` 开始上传。
@@ -85,7 +86,7 @@ assets/{yyyy}/{MM}/{dd}/
 
 在菜单栏选择「Lumen → 检查更新…」，或在「设置 → 通用」开启自动检查。发现新版本后，点击安装即可完成下载与签名验证；安装结束后 Lumen 会自动退出并重新打开。
 
-已安装 0.0.4 的用户可以直接在软件内升级到 0.0.5。0.0.3 及更早版本尚未内置更新器，需要先手动安装一次当前版本。
+已安装 0.0.4 或 0.0.5 的用户可以直接在软件内升级到 0.0.6。0.0.3 及更早版本尚未内置更新器，需要先手动安装一次当前版本。
 
 ## 快捷键
 
@@ -101,12 +102,13 @@ assets/{yyyy}/{MM}/{dd}/
 | 网格 / 列表 | `⌘1` / `⌘2` |
 | 快速查看 | `Space` |
 | 重命名 | `Return` |
+| 撤销最近一次重命名或移动 | `⌘Z` |
 | 打开选中项 | `⌘↓` 或双击 |
 | 取消重命名或选择 / 删除 | `Esc` / `Delete` |
 
 ## 安装与系统要求
 
-Lumen 0.0.5 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
+Lumen 0.0.6 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
 
 当前公开 DMG 使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或完成 Apple 公证。如果 macOS 阻止首次打开，请前往「系统设置 → 隐私与安全性」确认打开。首次安装后的软件更新仍会经过 Lumen 内置的 Ed25519 签名验证。
 
@@ -125,6 +127,8 @@ Lumen 0.0.5 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
 - OSS 没有真正的文件夹；新建文件夹实际创建空目录占位对象。
 - 单个目录最多读取 30 页，通常约 3 万条对象。达到上限时会显示未完整加载，并阻止可能遗漏内容的批量操作。
 - 删除直接作用于 OSS，没有本地回收站；执行前会要求确认。
+- 撤销只保留当前会话内最近一次成功的重命名或同 Bucket 移动；复制、上传、新建文件夹和删除不能撤销。
+- 如果原位置已被其他客户端创建同名对象，Lumen 会拒绝撤销，绝不会覆盖该对象。
 - 云端复制与移动目前限定在同一 Bucket 内。
 - 图片缩略图依赖 Bucket 已开通 OSS 图片处理。
 
