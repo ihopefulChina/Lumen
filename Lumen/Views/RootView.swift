@@ -155,7 +155,7 @@ private struct RootPresentation: ViewModifier {
         @Bindable var model = model
         content
             .sheet(isPresented: $model.showAccountSheet) {
-                AccountSheet(draft: AccountDraft.fresh())
+                AccountSheet(draft: initialAccountDraft)
             }
             .fileImporter(
                 isPresented: $showFileImporter,
@@ -225,6 +225,15 @@ private struct RootPresentation: ViewModifier {
             .onChange(of: model.browser.selectedKeys) { _, _ in
                 Task { await model.loadInspector() }
             }
+    }
+
+    private var initialAccountDraft: AccountDraft {
+        #if DEBUG
+        if ScreenshotDemo.currentMode == .account {
+            return ScreenshotDemo.accountDraft
+        }
+        #endif
+        return AccountDraft.fresh()
     }
 }
 

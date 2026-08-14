@@ -1,0 +1,35 @@
+#if DEBUG
+import Testing
+@testable import Lumen
+
+@MainActor
+struct ScreenshotDemoTests {
+    @Test func browserFixtureUsesSyntheticIsolatedWorkspace() {
+        let model = ScreenshotDemo.makeModel(for: .browser)
+
+        #expect(model.accounts.count == 1)
+        #expect(model.selectedAccount?.name == "Lumen 演示工作室")
+        #expect(model.selectedAccount?.accessKeyId == "LTAI5tDEMO0000000000")
+        #expect(model.selectedBucketName == "lumen-studio-assets")
+        #expect(model.browser.prefix == "campaigns/2026-autumn/")
+        #expect(model.browser.viewMode == .list)
+        #expect(model.browser.folders.count == 4)
+        #expect(model.browser.objects.count == 7)
+        #expect(model.browser.selectedKeys == ["campaigns/2026-autumn/发布素材/"])
+        #expect(model.favorites.items.map(\.name) == ["品牌素材", "待发布"])
+        #expect(!model.showAccountSheet)
+    }
+
+    @Test func accountFixtureIsClearlyNonProduction() {
+        let model = ScreenshotDemo.makeModel(for: .account)
+        let draft = ScreenshotDemo.accountDraft
+
+        #expect(model.showAccountSheet)
+        #expect(draft.name == "Lumen 演示工作室")
+        #expect(draft.accessKeyId.contains("DEMO"))
+        #expect(draft.secret == "demo-secret-never-used")
+        #expect(draft.defaultACL == .private)
+        #expect(draft.prefixTemplate == "assets/{yyyy}/{MM}/{dd}/")
+    }
+}
+#endif

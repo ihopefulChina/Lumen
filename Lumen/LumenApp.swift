@@ -31,13 +31,30 @@ struct LumenApp: App {
 }
 
 private struct WorkspaceRoot: View {
-    @State private var model = AppModel()
+    @State private var model: AppModel
+
+    init() {
+        #if DEBUG
+        if let mode = ScreenshotDemo.currentMode {
+            _model = State(initialValue: ScreenshotDemo.makeModel(for: mode))
+            return
+        }
+        #endif
+        _model = State(initialValue: AppModel())
+    }
 
     var body: some View {
         RootView()
             .environment(model)
+            .modifier(ScreenshotActiveState())
             .background(WindowFocusProbe { model.becomeFocused() })
             .onAppear {
+                #if DEBUG
+                if ScreenshotDemo.currentMode != nil {
+                    ScreenshotDemo.prepareWindow()
+                    return
+                }
+                #endif
                 guard !AppRuntime.isRunningTests else { return }
                 do {
                     try SecretStore.migrateLegacySecrets()
@@ -47,6 +64,21 @@ private struct WorkspaceRoot: View {
                 model.bootstrap()
                 model.becomeFocused()
             }
+    }
+}
+
+private struct ScreenshotActiveState: ViewModifier {
+    @ViewBuilder
+    func body(content: Content) -> some View {
+        #if DEBUG
+        if ScreenshotDemo.currentMode != nil {
+            content.environment(\.controlActiveState, .active)
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
     }
 }
 
