@@ -4,17 +4,17 @@ import UniformTypeIdentifiers
 
 @MainActor
 enum SystemIcons {
-    static let folder: NSImage = {
+    static var folder: NSImage {
         let image = NSWorkspace.shared.icon(for: UTType.folder).copy() as! NSImage
         image.size = NSSize(width: 128, height: 128)
         return image
-    }()
+    }
 
-    static let folderSmall: NSImage = {
+    static var folderSmall: NSImage {
         let image = NSWorkspace.shared.icon(for: UTType.folder).copy() as! NSImage
         image.size = NSSize(width: 16, height: 16)
         return image
-    }()
+    }
 
     static func fileIcon(for key: String, size: CGFloat = 128) -> NSImage {
         let ext = (key as NSString).pathExtension
