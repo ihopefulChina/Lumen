@@ -23,7 +23,21 @@ final class BrowserModel {
     var searchText = ""
     var isLoading = false
     var errorMessage: String?
-    var isDropTargeted = false
+    var dropTargets: Set<String> = []
+
+    var isDropTargeted: Bool { !dropTargets.isEmpty }
+
+    var activeDropPrefix: String? {
+        dropTargets.max(by: { $0.count < $1.count })
+    }
+
+    func setDropTarget(_ prefix: String, active: Bool) {
+        if active {
+            dropTargets.insert(prefix)
+        } else {
+            dropTargets.remove(prefix)
+        }
+    }
     var lastRefresh: Date?
     var backStack: [String] = []
     var forwardStack: [String] = []
@@ -43,6 +57,22 @@ final class BrowserModel {
 
     var selectedObjects: [OSSObject] {
         objects.filter { selectedKeys.contains($0.key) }
+    }
+
+    var selectedFolders: [OSSFolder] {
+        folders.filter { selectedKeys.contains($0.prefix) }
+    }
+
+    var visibleKeys: Set<String> {
+        Set(visibleFolders.map(\.prefix)).union(visibleObjects.map(\.key))
+    }
+
+    func selectAllVisible() {
+        selectedKeys = visibleKeys
+    }
+
+    func invertVisibleSelection() {
+        selectedKeys = visibleKeys.subtracting(selectedKeys)
     }
 
     var primarySelection: OSSObject? {

@@ -9,7 +9,6 @@ struct BrowserView: View {
     @State private var photos: [PhotosPickerItem] = []
     @State private var renameTarget: OSSObject?
     @State private var renameText = ""
-    @State private var folderToDelete: OSSFolder?
 
     var body: some View {
         @Bindable var model = model
@@ -42,17 +41,17 @@ struct BrowserView: View {
                 }
             }
             .overlay {
-                if model.browser.isDropTargeted {
-                    dropScrim
+                if let prefix = model.browser.activeDropPrefix, prefix == model.browser.prefix {
+                    dropScrim(title: "放到当前文件夹")
                 }
             }
             .dropDestination(for: URL.self) { urls, _ in
-                model.upload(urls: urls)
+                model.upload(urls: urls, to: model.browser.prefix, applyTemplate: false)
                 return true
             } isTargeted: { targeted in
-                model.browser.isDropTargeted = targeted
+                model.browser.setDropTarget(model.browser.prefix, active: targeted)
             }
-            .onPasteCommand(of: [.image, .fileURL]) { _ in
+            .onPasteCommand(of: [.image, .fileURL, .gif, .webP, .png, .jpeg]) { _ in
                 model.pasteFromClipboard()
             }
             .onChange(of: photos) { _, items in
@@ -70,23 +69,6 @@ struct BrowserView: View {
                     }
                     renameTarget = nil
                 }
-            }
-            .confirmationDialog(
-                "删除文件夹“\(folderToDelete?.name ?? "")”？",
-                isPresented: Binding(
-                    get: { folderToDelete != nil },
-                    set: { if !$0 { folderToDelete = nil } }
-                )
-            ) {
-                Button("删除全部内容", role: .destructive) {
-                    if let folderToDelete {
-                        Task { await model.deleteFolder(folderToDelete) }
-                    }
-                    folderToDelete = nil
-                }
-                Button("取消", role: .cancel) { folderToDelete = nil }
-            } message: {
-                Text("文件夹里的对象会一并从 OSS 删除。")
             }
     }
 
@@ -154,42 +136,70 @@ struct BrowserView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .contextMenu { backgroundMenu() }
     }
 
     private var grid: some View {
         let selected = model.browser.selectedKeys
         let _ = model.browser.selectionEpoch
-        return ScrollView {
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 140), spacing: 8)], spacing: 12) {
-                ForEach(model.browser.visibleFolders) { folder in
-                    FolderCell(
-                        folder: folder,
-                        selected: selected.contains(folder.prefix)
-                    ) {
-                        selectFolder(folder, additive: NSEvent.modifierFlags.contains(.command))
-                    } onOpen: {
-                        model.openFolder(folder)
+        return GeometryReader { geo in
+            ScrollView {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 140), spacing: 8)], spacing: 12) {
+                    ForEach(model.browser.visibleFolders) { folder in
+                        FolderCell(
+                            folder: folder,
+                            selected: selected.contains(folder.prefix),
+                            dropTargeted: model.browser.activeDropPrefix == folder.prefix
+                        ) {
+                            selectFolder(folder, additive: NSEvent.modifierFlags.contains(.command))
+                        } onOpen: {
+                            model.openFolder(folder)
+                        }
+                        .contextMenu {
+                            Button("打开") {
+                                model.openFolder(folder)
+                            }
+                            .onAppear { selectForMenu(folder.prefix) }
+                            folderMenu(folder)
+                        }
+                        .dropDestination(for: URL.self) { urls, _ in
+                            model.upload(urls: urls, to: folder.prefix, applyTemplate: false)
+                            return true
+                        } isTargeted: { targeted in
+                            model.browser.setDropTarget(folder.prefix, active: targeted)
+                        }
                     }
-                    .contextMenu {
-                        Button("打开") { model.openFolder(folder) }
-                        Button("删除…", role: .destructive) { folderToDelete = folder }
+                    ForEach(model.browser.visibleObjects) { object in
+                        AssetCell(
+                            object: object,
+                            selected: selected.contains(object.key)
+                        ) {
+                            select(object, additive: NSEvent.modifierFlags.contains(.command))
+                        } onOpen: {
+                            Task { await model.quickLookSelection() }
+                        }
+                        .contextMenu {
+                            Button("快速查看") {
+                                selectForMenu(object.key)
+                                Task { await model.quickLookSelection() }
+                            }
+                            .onAppear { selectForMenu(object.key) }
+                            objectMenu(object)
+                        }
                     }
                 }
-                ForEach(model.browser.visibleObjects) { object in
-                    AssetCell(
-                        object: object,
-                        selected: selected.contains(object.key)
-                    ) {
-                        select(object, additive: NSEvent.modifierFlags.contains(.command))
-                    } onOpen: {
-                        Task { await model.quickLookSelection() }
-                    }
-                    .contextMenu { objectMenu(object) }
-                }
+                .padding(.horizontal, 10)
+                .padding(.top, 8)
+                .padding(.bottom, 12)
+                .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
             }
-            .padding(.horizontal, 10)
-            .padding(.top, 8)
-            .padding(.bottom, 12)
+            .background {
+                Color.clear
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .contentShape(Rectangle())
+                    .contextMenu { backgroundMenu() }
+            }
         }
         .contentMargins(.all, 0, for: .scrollContent)
         .scrollContentBackground(.hidden)
@@ -202,7 +212,11 @@ struct BrowserView: View {
                 HStack(spacing: 6) {
                     if row.isFolder {
                         FinderFolderIcon(size: 16)
-                    } else if let object = row.object, !object.isImage {
+                    } else if let object = row.object, object.isImage {
+                        ThumbnailView(object: object, style: .row)
+                            .frame(width: 18, height: 18)
+                            .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
+                    } else if let object = row.object {
                         FinderFileIcon(key: object.key, size: 16)
                     } else {
                         Image(systemName: row.symbol)
@@ -211,6 +225,26 @@ struct BrowserView: View {
                     }
                     Text(row.name)
                         .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+                .onTapGesture(count: 2) {
+                    if let folder = row.folder {
+                        model.openFolder(folder)
+                    } else {
+                        Task { await model.quickLookSelection() }
+                    }
+                }
+                .background {
+                    if let folder = row.folder {
+                        Color.clear
+                            .dropDestination(for: URL.self) { urls, _ in
+                                model.upload(urls: urls, to: folder.prefix, applyTemplate: false)
+                                return true
+                            } isTargeted: { targeted in
+                                model.browser.setDropTarget(folder.prefix, active: targeted)
+                            }
+                    }
                 }
             }
             TableColumn("大小") { row in
@@ -234,27 +268,21 @@ struct BrowserView: View {
                 TableRow(row)
                     .contextMenu {
                         if let object = row.object {
+                            Button("快速查看") {
+                                selectForMenu(object.key)
+                                Task { await model.quickLookSelection() }
+                            }
+                            .onAppear { selectForMenu(object.key) }
                             objectMenu(object)
                         } else if let folder = row.folder {
                             Button("打开") { model.openFolder(folder) }
-                            Button("删除…", role: .destructive) { folderToDelete = folder }
+                                .onAppear { selectForMenu(folder.prefix) }
+                            folderMenu(folder)
                         }
                     }
             }
         }
-        .onTapGesture(count: 2) {
-            if let key = model.browser.selectedKeys.first,
-               let folder = model.browser.folders.first(where: { $0.prefix == key }) {
-                model.openFolder(folder)
-            } else {
-                Task { await model.quickLookSelection() }
-            }
-        }
-        .contextMenu {
-            if let object = model.browser.primarySelection {
-                objectMenu(object)
-            }
-        }
+        .contextMenu { backgroundMenu() }
     }
 
     private var tableRows: [BrowserRow] {
@@ -268,11 +296,11 @@ struct BrowserView: View {
         )
     }
 
-    private var dropScrim: some View {
+    private func dropScrim(title: String) -> some View {
         Rectangle()
             .fill(Color.accentColor.opacity(0.08))
             .overlay {
-                Text("放到当前文件夹")
+                Text(title)
                     .font(.headline)
                     .padding(.horizontal, 14)
                     .padding(.vertical, 7)
@@ -282,22 +310,44 @@ struct BrowserView: View {
     }
 
     @ViewBuilder
-    private func objectMenu(_ object: OSSObject) -> some View {
-        Button("快速查看") {
-            model.browser.selectedKeys = [object.key]
-            Task { await model.quickLookSelection() }
+    private func backgroundMenu() -> some View {
+        Button("上传…") { showFileImporter = true }
+        Button("从剪贴板上传") { model.pasteFromClipboard() }
+        Button("新建文件夹…") { model.wantsNewFolder = true }
+        Divider()
+        Button("下载当前文件夹…") { model.downloadCurrentPrefix() }
+        Button("刷新") { Task { await model.refreshListing() } }
+        Divider()
+        Button("全选") { model.browser.selectAllVisible() }
+        Button("反选") { model.browser.invertVisibleSelection() }
+    }
+
+    @ViewBuilder
+    private func folderMenu(_ folder: OSSFolder) -> some View {
+        Button(downloadTitle(clickedKey: folder.prefix)) {
+            selectForMenu(folder.prefix)
+            model.downloadSelection()
         }
+        Divider()
+        Button(deleteTitle(clickedKey: folder.prefix), role: .destructive) {
+            selectForMenu(folder.prefix)
+            model.requestDeleteSelection()
+        }
+    }
+
+    @ViewBuilder
+    private func objectMenu(_ object: OSSObject) -> some View {
         Button("复制链接") {
-            model.browser.selectedKeys = [object.key]
+            selectForMenu(object.key)
             model.copyURLs(style: .plain)
         }
         Button("复制 Markdown") {
-            model.browser.selectedKeys = [object.key]
+            selectForMenu(object.key)
             model.copyURLs(style: .markdown)
         }
         Divider()
-        Button("下载…") {
-            model.browser.selectedKeys = [object.key]
+        Button(downloadTitle(clickedKey: object.key)) {
+            selectForMenu(object.key)
             model.downloadSelection()
         }
         Button("重命名…") {
@@ -305,10 +355,45 @@ struct BrowserView: View {
             renameText = object.name
         }
         Divider()
-        Button("删除…", role: .destructive) {
-            model.browser.selectedKeys = [object.key]
+        Button(deleteTitle(clickedKey: object.key), role: .destructive) {
+            selectForMenu(object.key)
             model.requestDeleteSelection()
         }
+    }
+
+    private func selectForMenu(_ key: String) {
+        if !model.browser.selectedKeys.contains(key) {
+            model.browser.selectedKeys = [key]
+        }
+    }
+
+    private func downloadTitle(clickedKey: String) -> String {
+        let keys: Set<String> = model.browser.selectedKeys.contains(clickedKey)
+            ? model.browser.selectedKeys
+            : [clickedKey]
+        let files = model.browser.objects.filter { keys.contains($0.key) }.count
+        let folders = model.browser.folders.filter { keys.contains($0.prefix) }.count
+        if folders == 1 && files == 0 && keys.count == 1 {
+            return "下载文件夹…"
+        }
+        if files + folders > 1 {
+            return "下载 \(files + folders) 项…"
+        }
+        return "下载…"
+    }
+
+    private func deleteTitle(clickedKey: String) -> String {
+        let keys: Set<String> = model.browser.selectedKeys.contains(clickedKey)
+            ? model.browser.selectedKeys
+            : [clickedKey]
+        let count = keys.count
+        if count > 1 {
+            return "删除 \(count) 项…"
+        }
+        if model.browser.folders.contains(where: { $0.prefix == clickedKey }) {
+            return "删除文件夹…"
+        }
+        return "删除…"
     }
 
     private func selectFolder(_ folder: OSSFolder, additive: Bool) {
@@ -391,8 +476,20 @@ private struct PathBar: View {
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(index == crumbs.count - 1 ? .primary : .secondary)
+                        .background {
+                            if model.browser.activeDropPrefix == crumb.prefix, crumb.prefix != model.browser.prefix {
+                                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                    .fill(Color.accentColor.opacity(0.2))
+                            }
+                        }
                         .contextMenu {
                             pathMenu(prefix: crumb.prefix, isCurrent: crumb.prefix == model.browser.prefix)
+                        }
+                        .dropDestination(for: URL.self) { urls, _ in
+                            model.upload(urls: urls, to: crumb.prefix, applyTemplate: false)
+                            return true
+                        } isTargeted: { targeted in
+                            model.browser.setDropTarget(crumb.prefix, active: targeted)
                         }
                     }
                 }
@@ -439,23 +536,38 @@ private struct PathBar: View {
             }
             model.wantsNewFolder = true
         }
+        Button("下载此文件夹…") {
+            if isCurrent {
+                model.downloadCurrentPrefix()
+            } else {
+                model.downloadFolder(OSSFolder(prefix: prefix))
+            }
+        }
     }
 }
 
 private struct FolderCell: View {
     let folder: OSSFolder
     var selected: Bool
+    var dropTargeted: Bool
     var action: () -> Void
     var onOpen: () -> Void
 
     var body: some View {
+        let highlighted = selected || dropTargeted
         Button(action: action) {
             VStack(spacing: 4) {
                 FinderFolderIcon(size: 64)
                     .padding(8)
                     .background {
                         RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(selected ? Color.accentColor.opacity(0.3) : Color.clear)
+                            .fill(highlighted ? Color.accentColor.opacity(dropTargeted ? 0.4 : 0.3) : Color.clear)
+                    }
+                    .overlay {
+                        if dropTargeted {
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                .strokeBorder(Color.accentColor, lineWidth: 2)
+                        }
                     }
 
                 Text(folder.name)
@@ -466,15 +578,16 @@ private struct FolderCell: View {
                     .padding(.vertical, 1)
                     .background {
                         RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(selected ? Color.accentColor : Color.clear)
+                            .fill(highlighted ? Color.accentColor : Color.clear)
                     }
-                    .foregroundStyle(selected ? Color.white : Color.primary)
+                    .foregroundStyle(highlighted ? Color.white : Color.primary)
             }
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .simultaneousGesture(TapGesture(count: 2).onEnded { onOpen() })
+        .contentShape(Rectangle())
+        .simultaneousGesture(TapGesture(count: 2).onEnded(onOpen))
         .help(folder.name)
     }
 }

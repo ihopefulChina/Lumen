@@ -47,18 +47,29 @@ struct RootView: View {
             grid: { Motion.run(reduceMotion) { model.browser.viewMode = .grid } },
             list: { Motion.run(reduceMotion) { model.browser.viewMode = .list } },
             goBack: { model.goBack() },
-            goForward: { model.goForward() }
+            goForward: { model.goForward() },
+            selectAll: { model.browser.selectAllVisible() },
+            invertSelection: { model.browser.invertVisibleSelection() }
         )
     }
 
     private func installKeyMonitor() {
-        KeyMonitor.install { [model] event in
+        KeyMonitor.install { event in
+            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
             if let responder = NSApp.keyWindow?.firstResponder, responder is NSTextView {
                 return event
             }
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard let model = AppServices.shared.focused else { return event }
             if event.keyCode == 51, flags.isEmpty, !model.browser.selectedKeys.isEmpty {
                 model.requestDeleteSelection()
+                return nil
+            }
+            if event.keyCode == 0, flags == .command {
+                model.browser.selectAllVisible()
+                return nil
+            }
+            if event.keyCode == 0, flags == [.command, .shift] {
+                model.browser.invertVisibleSelection()
                 return nil
             }
             if event.keyCode == 49, flags.isEmpty, model.previewItem == nil {
@@ -91,9 +102,20 @@ private struct RootPresentation: ViewModifier {
             .sheet(isPresented: $model.showAccountSheet) {
                 AccountSheet(draft: AccountDraft.fresh())
             }
+            .sheet(item: Binding(
+                get: {
+                    AppServices.shared.focused === model && model.updates.surface == .workspace
+                        ? model.updates.available
+                        : nil
+                },
+                set: { if $0 == nil { model.updates.dismissAvailable() } }
+            )) { release in
+                UpdateSheet(release: release)
+                    .environment(model)
+            }
             .fileImporter(
                 isPresented: $showFileImporter,
-                allowedContentTypes: [.image, .json, .text, .plainText, .folder],
+                allowedContentTypes: ImageKind.importTypes,
                 allowsMultipleSelection: true
             ) { result in
                 if case .success(let urls) = result {
@@ -117,13 +139,27 @@ private struct RootPresentation: ViewModifier {
             } message: {
                 Text("文件夹会出现在当前路径下。")
             }
-            .confirmationDialog("删除所选对象？", isPresented: $model.wantsDeleteConfirmation, titleVisibility: .visible) {
+            .confirmationDialog(model.deleteDialogTitle, isPresented: $model.wantsDeleteConfirmation, titleVisibility: .visible) {
                 Button("删除", role: .destructive) {
                     Task { await model.deleteSelection() }
                 }
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("对象会从存储空间中永久移除。")
+                Text(model.deleteDialogMessage)
+            }
+            .confirmationDialog(
+                model.overwritePrompt?.title ?? "文件已存在",
+                isPresented: Binding(
+                    get: { model.overwritePrompt != nil },
+                    set: { if !$0 { model.cancelOverwrite() } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("覆盖") { model.confirmOverwrite() }
+                Button("跳过这些文件") { model.skipOverwriteConflicts() }
+                Button("取消", role: .cancel) { model.cancelOverwrite() }
+            } message: {
+                Text(model.overwritePrompt?.message ?? "")
             }
             .confirmationDialog(
                 "上传 \(model.pendingOpenURLs.count) 个文件到当前文件夹？",

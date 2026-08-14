@@ -12,15 +12,32 @@ struct BannerMessage: Identifiable, Equatable {
 @MainActor
 @Observable
 final class AppModel {
-    static let shared = AppModel()
+    static let settingsSession = AppModel(kind: .settings)
 
-    var accounts: [OSSAccount] = []
+    enum Kind {
+        case window
+        case settings
+    }
+
+    private let services: AppServices
+    private let kind: Kind
+
+    var accounts: [OSSAccount] {
+        get { services.accounts }
+        set { services.accounts = newValue }
+    }
+    var transfers: TransferEngine
+    var settings: AppSettings
+    var updates: UpdateService
+    var showMenuBarExtra: Bool {
+        get { services.showMenuBarExtra }
+        set { services.showMenuBarExtra = newValue }
+    }
+
     var selectedAccountID: OSSAccount.ID?
     var buckets: [OSSBucket] = []
     var selectedBucketName: String?
     var browser = BrowserModel()
-    var transfers = TransferEngine()
-    var settings = AppSettings()
 
     var showInspector = false
     var showAccountSheet = false
@@ -31,11 +48,12 @@ final class AppModel {
     var inspectorHead: ObjectHead?
     var inspectorText: String?
     var isLoadingHead = false
-    var showMenuBarExtra = false
     var wantsDeleteConfirmation = false
     var wantsNewFolder = false
     var pendingOpenURLs: [URL] = []
-    private var didBootstrap = false
+    var overwritePrompt: OverwritePrompt?
+    private var uploadGeneration = 0
+    private var didLoadWindow = false
     private var listingRefreshTask: Task<Void, Never>?
 
     private var lastAccountID: String {
@@ -59,25 +77,62 @@ final class AppModel {
         selectedAccount != nil && selectedBucket != nil
     }
 
-    init() {
-        accounts = AccountStore.load()
-        if let stored = UUID(uuidString: lastAccountID), accounts.contains(where: { $0.id == stored }) {
+    init(kind: Kind = .window, services: AppServices = .shared) {
+        self.kind = kind
+        self.services = services
+        self.transfers = services.transfers
+        self.settings = services.settings
+        self.updates = services.updates
+        if kind == .window, let source = services.focused {
+            selectedAccountID = source.selectedAccountID
+            buckets = source.buckets
+            selectedBucketName = source.selectedBucketName
+            browser.prefix = source.browser.prefix
+            browser.viewMode = source.browser.viewMode
+            browser.imagesOnly = services.settings.imagesOnly
+        } else if let stored = UUID(uuidString: lastAccountID), services.accounts.contains(where: { $0.id == stored }) {
             selectedAccountID = stored
         } else {
-            selectedAccountID = accounts.first?.id
+            selectedAccountID = services.accounts.first?.id
+        }
+        if kind == .window {
+            services.register(self)
         }
     }
 
+    deinit {
+        if kind == .window {
+            // unregister is MainActor; session list is compacted on next register
+        }
+    }
+
+    func becomeFocused() {
+        services.register(self)
+    }
+
     func bootstrap() {
-        guard !didBootstrap else { return }
-        didBootstrap = true
+        services.bootstrapIfNeeded()
+        guard !didLoadWindow else { return }
+        didLoadWindow = true
         browser.imagesOnly = settings.imagesOnly
-        transfers.onUploadFinished = { [weak self] in
-            self?.scheduleListingRefresh()
-        }
-        if selectedAccount != nil {
+        if selectedAccount != nil, buckets.isEmpty {
             Task { await refreshBuckets(selecting: lastBucketName.isEmpty ? nil : lastBucketName) }
+        } else if selectedBucket != nil {
+            Task { await refreshListing() }
         }
+    }
+
+    func pruneIfNeeded() {
+        if let id = selectedAccountID, !accounts.contains(where: { $0.id == id }) {
+            selectedAccountID = accounts.first?.id
+            buckets = []
+            selectedBucketName = nil
+            browser.reset()
+            if selectedAccount != nil {
+                Task { await refreshBuckets() }
+            }
+        }
+        browser.imagesOnly = settings.imagesOnly
     }
 
     func selectAccount(_ account: OSSAccount) {
@@ -253,36 +308,149 @@ final class AppModel {
         accounts.removeAll { $0.id == account.id }
         AccountStore.deleteSecrets(id: account.id)
         AccountStore.save(accounts)
-        if selectedAccountID == account.id {
-            selectedAccountID = accounts.first?.id
-            buckets = []
-            selectedBucketName = nil
-            browser.reset()
-            if selectedAccount != nil {
-                Task { await refreshBuckets() }
-            }
-        }
+        services.sessions.forEach { $0.pruneIfNeeded() }
+        pruneIfNeeded()
     }
 
-    func upload(urls: [URL]) {
-        guard let client = makeClient(), let account = selectedAccount else {
+    func upload(urls: [URL], to prefix: String? = nil, applyTemplate: Bool? = nil) {
+        guard makeClient() != nil, selectedAccount != nil else {
             pendingOpenURLs.append(contentsOf: urls)
             showAccountSheet = accounts.isEmpty
             present("先添加账号并选择存储空间", error: true)
             return
         }
-        let skipped = transfers.enqueueUploads(
+        let dest = prefix ?? browser.prefix
+        let useTemplate = applyTemplate ?? dest.isEmpty
+        Task { await beginUpload(urls: urls, prefix: dest, applyTemplate: useTemplate) }
+    }
+
+    func confirmOverwrite() {
+        guard let prompt = overwritePrompt else { return }
+        overwritePrompt = nil
+        commit(plan: prompt.plan, client: prompt.client, account: prompt.account, bucket: prompt.bucket)
+    }
+
+    func skipOverwriteConflicts() {
+        guard let prompt = overwritePrompt else { return }
+        overwritePrompt = nil
+        commit(
+            plan: prompt.plan,
+            client: prompt.client,
+            account: prompt.account,
+            bucket: prompt.bucket,
+            excludingSources: prompt.skipSources
+        )
+    }
+
+    func cancelOverwrite() {
+        guard let prompt = overwritePrompt else { return }
+        overwritePrompt = nil
+        transfers.abandon(plan: prompt.plan)
+    }
+
+    private func beginUpload(urls: [URL], prefix: String, applyTemplate: Bool) async {
+        guard let client = makeClient(), let account = selectedAccount else { return }
+        uploadGeneration += 1
+        let generation = uploadGeneration
+        if overwritePrompt != nil {
+            cancelOverwrite()
+        }
+        let plan = TransferEngine.planUploads(
             urls: urls,
+            prefix: prefix,
+            template: account.prefixTemplate,
+            applyTemplate: applyTemplate,
+            settings: settings
+        )
+        if plan.skipped > 0 {
+            present("已跳过 \(plan.skipped) 个不支持的文件")
+        }
+        let viable = plan.items.filter { $0.failure == nil }
+        guard !viable.isEmpty else {
+            transfers.enqueue(plan: plan, client: client, account: account, bucket: selectedBucket, settings: settings)
+            return
+        }
+        let existing: Set<String>
+        do {
+            existing = try await existingKeys(among: viable.map(\.objectKey))
+        } catch {
+            transfers.abandon(plan: plan)
+            present("无法确认目标是否已有同名文件，已取消上传", error: true)
+            return
+        }
+        guard generation == uploadGeneration else {
+            transfers.abandon(plan: plan)
+            return
+        }
+        var seen = Set<String>()
+        var conflicts: [String] = []
+        var skipSources: Set<URL> = []
+        for item in viable {
+            if existing.contains(item.objectKey) || seen.contains(item.objectKey) {
+                let label = PathTemplate.relative(item.objectKey, under: prefix)
+                if !conflicts.contains(label) {
+                    conflicts.append(label)
+                }
+                skipSources.insert(item.sourceURL)
+            }
+            seen.insert(item.objectKey)
+        }
+        if conflicts.isEmpty {
+            commit(plan: plan, client: client, account: account, bucket: selectedBucket)
+            return
+        }
+        overwritePrompt = OverwritePrompt(
+            plan: plan,
             client: client,
             account: account,
             bucket: selectedBucket,
-            prefix: browser.prefix,
-            settings: settings
+            conflicts: conflicts,
+            skipSources: skipSources
         )
-        if skipped > 0 {
-            present("已跳过 \(skipped) 个不支持的文件")
-        }
+    }
+
+    private func commit(
+        plan: TransferEngine.UploadPlan,
+        client: OSSClient,
+        account: OSSAccount,
+        bucket: OSSBucket?,
+        excludingSources: Set<URL> = []
+    ) {
+        transfers.enqueue(
+            plan: plan,
+            client: client,
+            account: account,
+            bucket: bucket,
+            settings: settings,
+            excludingSources: excludingSources
+        )
         scheduleListingRefresh()
+    }
+
+    private func existingKeys(among keys: [String]) async throws -> Set<String> {
+        guard let client = makeClient() else {
+            throw OSSServiceError(statusCode: 0, code: "NoClient", message: "还没有连接", requestId: "")
+        }
+        let unique = Array(Set(keys))
+        if unique.count > 40 {
+            let parents = Set(unique.map { PathTemplate.parentPrefix($0) })
+            var found = Set<String>()
+            for parent in parents {
+                let listing = try await client.listAllObjects(prefix: parent)
+                if listing.truncated {
+                    throw OSSServiceError(statusCode: 0, code: "IncompleteList", message: "无法完整确认是否重名", requestId: "")
+                }
+                found.formUnion(listing.objects.map(\.key))
+            }
+            return found.intersection(unique)
+        }
+        var found = Set<String>()
+        for key in unique {
+            if try await client.objectExists(key: key) {
+                found.insert(key)
+            }
+        }
+        return found
     }
 
     func ingestIncoming(_ urls: [URL]) {
@@ -302,6 +470,40 @@ final class AppModel {
     func requestDeleteSelection() {
         guard !browser.selectedKeys.isEmpty else { return }
         wantsDeleteConfirmation = true
+    }
+
+    var deleteDialogTitle: String {
+        let folders = browser.selectedFolders
+        let files = browser.selectedObjects
+        let count = folders.count + files.count
+        if count <= 1, let folder = folders.first, files.isEmpty {
+            return "删除文件夹“\(folder.name)”？"
+        }
+        if count <= 1, let file = files.first {
+            return "删除“\(file.name)”？"
+        }
+        return "删除 \(max(count, browser.selectedKeys.count)) 项？"
+    }
+
+    var deleteDialogMessage: String {
+        let folders = browser.selectedFolders
+        let files = browser.selectedObjects
+        var lines: [String] = folders.prefix(8).map { "\($0.name)/" }
+        let remain = 8 - lines.count
+        if remain > 0 {
+            lines.append(contentsOf: files.prefix(remain).map(\.name))
+        }
+        let extra = folders.count + files.count - lines.count
+        var text = lines.joined(separator: "\n")
+        if extra > 0 {
+            text += "\n以及另外 \(extra) 项"
+        }
+        if !folders.isEmpty {
+            text += (text.isEmpty ? "" : "\n") + "文件夹里的对象会一并从 OSS 删除，无法恢复。"
+        } else if !text.isEmpty {
+            text += "\n删除后无法恢复。"
+        }
+        return text
     }
 
     func scheduleListingRefresh() {
@@ -332,11 +534,7 @@ final class AppModel {
         do {
             for key in keys {
                 if key.hasSuffix("/") {
-                    let listing = try await client.listAll(prefix: key)
-                    for object in listing.objects {
-                        try await client.deleteObject(key: object.key)
-                    }
-                    try? await client.deleteObject(key: key)
+                    try await deletePrefix(key, client: client)
                 } else {
                     try await client.deleteObject(key: key)
                 }
@@ -352,15 +550,27 @@ final class AppModel {
     func deleteFolder(_ folder: OSSFolder) async {
         guard let client = makeClient() else { return }
         do {
-            let listing = try await client.listAll(prefix: folder.prefix)
-            for object in listing.objects {
-                try await client.deleteObject(key: object.key)
-            }
-            try? await client.deleteObject(key: folder.prefix)
+            try await deletePrefix(folder.prefix, client: client)
             await refreshListing()
         } catch {
             present(error.localizedDescription, error: true)
         }
+    }
+
+    private func deletePrefix(_ prefix: String, client: OSSClient) async throws {
+        let listing = try await client.listAllObjects(prefix: prefix, includePlaceholders: true)
+        if listing.truncated {
+            throw OSSServiceError(
+                statusCode: 0,
+                code: "IncompleteList",
+                message: "目录未列完，已取消删除，以免漏删",
+                requestId: ""
+            )
+        }
+        for object in listing.objects.sorted(by: { $0.key.count > $1.key.count }) {
+            try await client.deleteObject(key: object.key)
+        }
+        try? await client.deleteObject(key: prefix)
     }
 
     func rename(_ object: OSSObject, to raw: String) async {
@@ -380,17 +590,105 @@ final class AppModel {
     }
 
     func downloadSelection() {
-        guard let client = makeClient() else { return }
         let objects = browser.selectedObjects
-        guard !objects.isEmpty else { return }
+        let folders = browser.selectedFolders
+        guard !objects.isEmpty || !folders.isEmpty else { return }
+        guard let dest = chooseDownloadDirectory() else { return }
+        Task { await startDownloads(objects: objects, folders: folders, to: dest) }
+    }
+
+    func downloadFolder(_ folder: OSSFolder) {
+        guard let dest = chooseDownloadDirectory(message: "下载“\(folder.name)”到") else { return }
+        Task { await startDownloads(objects: [], folders: [folder], to: dest) }
+    }
+
+    func downloadCurrentPrefix() {
+        guard selectedBucket != nil else { return }
+        let prefix = browser.prefix
+        let name = prefix.isEmpty ? (selectedBucket?.name ?? "bucket") : PathTemplate.lastComponent(prefix)
+        guard let dest = chooseDownloadDirectory(message: "下载“\(name)”到") else { return }
+        Task { await startDownloads(objects: [], folders: [], to: dest, extraPrefix: (prefix, name)) }
+    }
+
+    private func chooseDownloadDirectory(message: String = "选择下载位置") -> URL? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.prompt = "存储"
-        panel.message = "选择下载位置"
-        guard panel.runModal() == .OK, let folder = panel.url else { return }
-        transfers.enqueueDownloads(objects: objects, client: client, folder: folder)
+        panel.message = message
+        guard panel.runModal() == .OK else { return nil }
+        return panel.url
+    }
+
+    private func startDownloads(
+        objects: [OSSObject],
+        folders: [OSSFolder],
+        to dest: URL,
+        extraPrefix: (prefix: String, folderName: String)? = nil
+    ) async {
+        guard let client = makeClient() else { return }
+        var items: [(object: OSSObject, destination: URL)] = []
+        var skippedLocal = 0
+        for object in objects {
+            guard let name = PathTemplate.sanitizedRelative(object.name) else { continue }
+            let url = dest.appending(path: name)
+            guard PathTemplate.isInside(url, root: dest) else { continue }
+            if FileManager.default.fileExists(atPath: url.path) {
+                skippedLocal += 1
+                continue
+            }
+            items.append((object: object, destination: url))
+        }
+        var truncated = false
+        var prefixes: [(String, String)] = folders.map { ($0.prefix, $0.name) }
+        if let extraPrefix {
+            prefixes.append(extraPrefix)
+        }
+        if !prefixes.isEmpty {
+            present("正在列出要下载的文件…")
+        }
+        for (prefix, folderName) in prefixes {
+            do {
+                let listing = try await client.listAllObjects(prefix: prefix)
+                if listing.truncated { truncated = true }
+                if listing.objects.isEmpty {
+                    present("“\(folderName)”里没有可下载的文件", error: true)
+                    continue
+                }
+                guard let safeName = PathTemplate.sanitizedRelative(folderName) else { continue }
+                let root = dest.appending(path: safeName, directoryHint: .isDirectory)
+                guard PathTemplate.isInside(root, root: dest) else { continue }
+                for object in listing.objects {
+                    let relative = PathTemplate.relative(object.key, under: prefix)
+                    guard let safe = PathTemplate.sanitizedRelative(relative) else { continue }
+                    let url = root.appending(path: safe)
+                    guard PathTemplate.isInside(url, root: dest) else { continue }
+                    if FileManager.default.fileExists(atPath: url.path) {
+                        skippedLocal += 1
+                        continue
+                    }
+                    items.append((object: object, destination: url))
+                }
+            } catch {
+                present(error.localizedDescription, error: true)
+                return
+            }
+        }
+        guard !items.isEmpty else {
+            if skippedLocal > 0 {
+                present("本地已有同名文件，已跳过 \(skippedLocal) 项")
+            }
+            return
+        }
+        transfers.enqueueDownloadJobs(items: items, client: client, scopedRoot: dest)
+        if truncated {
+            present("已加入 \(items.count) 个下载，部分目录未列完")
+        } else if skippedLocal > 0 {
+            present("已加入 \(items.count) 个下载，跳过 \(skippedLocal) 个本地已存在的文件")
+        } else if items.count > 1 {
+            present("已加入 \(items.count) 个下载")
+        }
     }
 
     func copyURLs(style: LinkStyle = .plain) {
@@ -512,6 +810,30 @@ enum LinkStyle {
     case plain, markdown, html
 }
 
+struct OverwritePrompt: Identifiable {
+    let id = UUID()
+    var plan: TransferEngine.UploadPlan
+    var client: OSSClient
+    var account: OSSAccount
+    var bucket: OSSBucket?
+    var conflicts: [String]
+    var skipSources: Set<URL>
+
+    var title: String {
+        conflicts.count == 1 ? "“\(conflicts[0])”已存在" : "\(conflicts.count) 个文件已存在"
+    }
+
+    var message: String {
+        let shown = conflicts.prefix(12)
+        var text = shown.joined(separator: "\n")
+        if conflicts.count > shown.count {
+            text += "\n以及另外 \(conflicts.count - shown.count) 个"
+        }
+        text += "\n覆盖后无法恢复原来的对象。"
+        return text
+    }
+}
+
 struct AccountDraft: Identifiable {
     var id: UUID
     var name: String
@@ -537,7 +859,7 @@ struct AccountDraft: Identifiable {
             endpointOverride: "",
             cdnDomain: "",
             defaultACL: .publicRead,
-            prefixTemplate: "assets/{yyyy}/{MM}/{dd}/",
+            prefixTemplate: "",
             useTransferAccelerate: false,
             createdAt: .now
         )

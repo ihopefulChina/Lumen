@@ -58,6 +58,41 @@ struct OSSClient: Sendable {
         return ObjectListing(folders: folders, objects: objects, isTruncated: token != nil, nextToken: token)
     }
 
+    /// All objects under `prefix`, including nested keys. No delimiter.
+    func listAllObjects(prefix: String, includePlaceholders: Bool = false) async throws -> (objects: [OSSObject], truncated: Bool) {
+        guard let bucket else { throw Self.missingBucket }
+        var objects: [OSSObject] = []
+        var token: String?
+        var pages = 0
+        repeat {
+            pages += 1
+            var query: [(String, String)] = [
+                ("list-type", "2"),
+                ("max-keys", "1000")
+            ]
+            if !prefix.isEmpty { query.append(("prefix", prefix)) }
+            if let token, !token.isEmpty { query.append(("continuation-token", token)) }
+            let response = try await perform(method: "GET", bucket: bucket, key: nil, query: query)
+            let listing = try OSSXML.listing(from: response.data)
+            objects.append(contentsOf: listing.objects.filter { object in
+                if object.key == prefix { return false }
+                if object.isFolderPlaceholder { return includePlaceholders }
+                return true
+            })
+            token = listing.isTruncated ? listing.nextToken : nil
+        } while token != nil && pages < Self.maxListPages
+        return (objects, token != nil)
+    }
+
+    func objectExists(key: String) async throws -> Bool {
+        do {
+            _ = try await head(key: key)
+            return true
+        } catch let error as OSSServiceError where error.statusCode == 404 {
+            return false
+        }
+    }
+
     func head(key: String) async throws -> ObjectHead {
         guard let bucket else { throw Self.missingBucket }
         let response = try await perform(method: "HEAD", bucket: bucket, key: key)

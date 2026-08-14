@@ -30,6 +30,70 @@ struct PathTemplateTests {
         #expect(result == "assets/2026/08/14/hero.png")
     }
 
+    @Test func nestedRelativeKeepsFolderTree() {
+        #expect(
+            PathTemplate.nestedRelative(
+                rootName: "avatars",
+                rootPath: "/tmp/drop/avatars",
+                filePath: "/tmp/drop/avatars/2024/b.png"
+            ) == "avatars/2024/b.png"
+        )
+        #expect(
+            PathTemplate.nestedRelative(
+                rootName: "avatars",
+                rootPath: "/tmp/drop/avatars/",
+                filePath: "/tmp/drop/avatars/hero.png"
+            ) == "avatars/hero.png"
+        )
+    }
+
+    @Test func sanitizedRelativeRejectsTraversal() {
+        #expect(PathTemplate.sanitizedRelative("avatars/2024/b.png") == "avatars/2024/b.png")
+        #expect(PathTemplate.sanitizedRelative("../secret.png") == nil)
+        #expect(PathTemplate.sanitizedRelative("a/../../b.png") == nil)
+        #expect(PathTemplate.isInside(URL(filePath: "/tmp/out/a.png"), root: URL(filePath: "/tmp/out")))
+        #expect(!PathTemplate.isInside(URL(filePath: "/tmp/other.png"), root: URL(filePath: "/tmp/out")))
+    }
+
+    @Test func replacingLastComponentKeepsParents() {
+        #expect(PathTemplate.replacingLastComponent("avatars/pic.heic", with: "pic.jpg") == "avatars/pic.jpg")
+        #expect(PathTemplate.replacingLastComponent("pic.heic", with: "pic.jpg") == "pic.jpg")
+    }
+
+    @Test func destinationKeyKeepsNestedFolderDrop() {
+        #expect(
+            PathTemplate.destinationKey(
+                prefix: "assets/",
+                filename: "avatars/2024/b.png",
+                applyTemplate: false,
+                template: "ignored/"
+            ) == "assets/avatars/2024/b.png"
+        )
+    }
+
+    @Test func destinationKeyKeepsFilenameWithoutTemplate() {
+        #expect(PathTemplate.destinationKey(prefix: "avatars/", filename: "hero.png", applyTemplate: false, template: "assets/{yyyy}/") == "avatars/hero.png")
+        #expect(PathTemplate.destinationKey(prefix: "", filename: "hero.png", applyTemplate: false, template: "assets/{yyyy}/") == "hero.png")
+    }
+
+    @Test func destinationKeyUsesTemplateOnlyAtRoot() {
+        var components = DateComponents()
+        components.year = 2026
+        components.month = 8
+        components.day = 14
+        let date = Calendar(identifier: .gregorian).date(from: components)!
+        let expanded = PathTemplate.expand("assets/{yyyy}/{MM}/{dd}/", now: date, filename: "hero.png")
+        #expect(expanded == "assets/2026/08/14")
+        #expect(PathTemplate.destinationKey(prefix: "avatars/", filename: "hero.png", applyTemplate: true, template: "assets/{yyyy}/{MM}/{dd}/") == "avatars/hero.png")
+    }
+
+    @Test func relativeStripsPrefix() {
+        #expect(PathTemplate.relative("assets/2026/a.png", under: "assets/") == "2026/a.png")
+        #expect(PathTemplate.relative("assets/a.png", under: "assets/") == "a.png")
+        #expect(PathTemplate.relative("a.png", under: "") == "a.png")
+        #expect(PathTemplate.relative("other/a.png", under: "assets/") == "a.png")
+    }
+
     @Test func crumbsIncludeBucket() {
         let crumbs = PathTemplate.crumbs(bucket: "studio", prefix: "assets/2026/")
         #expect(crumbs.map(\.title) == ["studio", "assets", "2026"])
@@ -56,7 +120,15 @@ struct SignerTests {
     @Test func imageKindRecognizesCommonFormats() {
         #expect(ImageKind.isImage(key: "a.PNG"))
         #expect(ImageKind.isImage(key: "b.heic"))
+        #expect(ImageKind.isImage(key: "loop.GIF"))
+        #expect(ImageKind.isImage(key: "cover.webp"))
+        #expect(ImageKind.isImage(key: "mark.svg"))
         #expect(ImageKind.contentType(for: "c.webp") == "image/webp")
+        #expect(ImageKind.contentType(for: "loop.gif") == "image/gif")
+        #expect(ImageKind.contentType(for: "mark.svg") == "image/svg+xml")
+        #expect(ImageKind.imgProcessable(key: "loop.gif"))
+        #expect(ImageKind.imgProcessable(key: "cover.webp"))
+        #expect(!ImageKind.imgProcessable(key: "mark.svg"))
         #expect(!ImageKind.isImage(key: "notes.txt"))
         #expect(ImageKind.isText(key: "config.JSON"))
         #expect(ImageKind.isText(key: "readme.txt"))
@@ -84,14 +156,37 @@ struct SignerTests {
 
 struct ImageProcessTests {
     @Test func gridUsesCenterCropWithoutFormat() {
-        #expect(OSSImageProcess.grid.query.contains("crop,w_128,h_128,g_center"))
+        #expect(OSSImageProcess.grid.query.contains("resize,m_fill,w_128,h_128"))
+        #expect(OSSImageProcess.grid.query.contains("limit_1"))
         #expect(!OSSImageProcess.grid.query.contains("format,jpg"))
+    }
+
+    @Test func webpPreviewFallsBackToJPEGProcess() {
+        let queries = OSSImageProcess.grid.queries(for: "cover.webp")
+        #expect(queries.contains(where: { $0.contains("format,jpg") }))
+        #expect(ImageKind.needsJPEGPreview(key: "cover.webp"))
+        #expect(!ImageKind.needsJPEGPreview(key: "hero.png"))
     }
 
     @Test func inspectorOnlyResizes() {
         #expect(OSSImageProcess.inspector.query.contains("resize,m_lfit"))
         #expect(!OSSImageProcess.inspector.query.contains("crop"))
         #expect(!OSSImageProcess.inspector.query.contains("format,jpg"))
+    }
+}
+
+struct AppVersionTests {
+    @Test func stripsTagPrefix() {
+        #expect(AppVersion.normalized("v0.0.2") == "0.0.2")
+        #expect(AppVersion.normalized("0.0.2-beta") == "0.0.2")
+    }
+
+    @Test func comparesSemanticVersions() {
+        #expect(AppVersion.isNewer("0.0.2", than: "0.0.1"))
+        #expect(AppVersion.isNewer("0.1.0", than: "0.0.9"))
+        #expect(!AppVersion.isNewer("0.0.1", than: "0.0.1"))
+        #expect(!AppVersion.isNewer("0.0.1", than: "0.0.2"))
+        #expect(AppVersion.isNewer("v1.0.0", than: "0.9.9"))
     }
 }
 

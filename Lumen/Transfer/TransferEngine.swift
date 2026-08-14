@@ -18,6 +18,23 @@ final class TransferEngine {
     var hasJobs: Bool { !jobs.isEmpty }
     var completedThisSession: [TransferJob] { jobs.filter { $0.status == .completed } }
 
+    struct PlannedUpload {
+        var sourceURL: URL
+        var fileURL: URL
+        var filename: String
+        var contentType: String
+        var size: Int64
+        var objectKey: String
+        var releaseSource: Bool
+        var failure: String?
+    }
+
+    struct UploadPlan {
+        var items: [PlannedUpload]
+        var skipped: Int
+        var scopedRoots: [URL]
+    }
+
     @discardableResult
     func enqueueUploads(
         urls: [URL],
@@ -25,105 +42,201 @@ final class TransferEngine {
         account: OSSAccount,
         bucket: OSSBucket?,
         prefix: String,
-        settings: AppSettings
+        settings: AppSettings,
+        applyTemplate: Bool = true
     ) -> Int {
-        concurrency = settings.concurrentUploads
+        let plan = Self.planUploads(
+            urls: urls,
+            prefix: prefix,
+            template: account.prefixTemplate,
+            applyTemplate: applyTemplate,
+            settings: settings
+        )
+        enqueue(plan: plan, client: client, account: account, bucket: bucket, settings: settings)
+        return plan.skipped
+    }
+
+    static func planUploads(
+        urls: [URL],
+        prefix: String,
+        template: String,
+        applyTemplate: Bool,
+        settings: AppSettings
+    ) -> UploadPlan {
+        var roots: [URL] = []
         for root in urls {
             if root.startAccessingSecurityScopedResource() {
-                scopedRoots.append(root)
+                roots.append(root)
             }
         }
-        let expansion = Self.expand(urls, imagesOnly: settings.imagesOnly)
-        let expanded = expansion.files
-        for url in expanded {
+        let expansion = expand(urls, imagesOnly: settings.imagesOnly)
+        var items: [PlannedUpload] = []
+        for entry in expansion.files {
+            let url = entry.url
             let accessed = url.startAccessingSecurityScopedResource()
-            let prepared: PreparedUpload
             do {
-                prepared = try Self.prepare(url: url, convertHEIC: settings.convertHEIC)
+                let prepared = try prepare(url: url, convertHEIC: settings.convertHEIC)
+                var relative = entry.relativePath
+                if prepared.filename != url.lastPathComponent {
+                    relative = PathTemplate.replacingLastComponent(relative, with: prepared.filename)
+                }
+                let key = PathTemplate.destinationKey(
+                    prefix: prefix,
+                    filename: relative,
+                    applyTemplate: applyTemplate,
+                    template: template
+                )
+                items.append(
+                    PlannedUpload(
+                        sourceURL: url,
+                        fileURL: prepared.fileURL,
+                        filename: prepared.filename,
+                        contentType: prepared.contentType,
+                        size: prepared.size,
+                        objectKey: key,
+                        releaseSource: accessed,
+                        failure: nil
+                    )
+                )
             } catch {
-                jobs.insert(
+                if accessed { url.stopAccessingSecurityScopedResource() }
+                items.append(
+                    PlannedUpload(
+                        sourceURL: url,
+                        fileURL: url,
+                        filename: url.lastPathComponent,
+                        contentType: "",
+                        size: 0,
+                        objectKey: "",
+                        releaseSource: false,
+                        failure: error.localizedDescription
+                    )
+                )
+            }
+        }
+        return UploadPlan(items: items, skipped: expansion.skipped, scopedRoots: roots)
+    }
+
+    func enqueue(
+        plan: UploadPlan,
+        client: OSSClient,
+        account: OSSAccount,
+        bucket: OSSBucket?,
+        settings: AppSettings,
+        excludingSources: Set<URL> = []
+    ) {
+        concurrency = settings.concurrentUploads
+        var addedActive = false
+        scopedRoots.append(contentsOf: plan.scopedRoots)
+        for item in plan.items {
+            if let failure = item.failure {
+                jobs.append(
                     TransferJob(
                         id: UUID(),
                         kind: .upload,
                         status: .failed,
-                        title: url.lastPathComponent,
+                        title: item.filename,
                         objectKey: "",
-                        localURL: url,
+                        localURL: item.sourceURL,
                         transferred: 0,
                         total: 0,
-                        errorMessage: error.localizedDescription,
+                        errorMessage: failure,
                         publicURL: nil,
                         finishedAt: .now
-                    ),
-                    at: 0
+                    )
                 )
-                if accessed { url.stopAccessingSecurityScopedResource() }
                 continue
             }
-
-            let template = account.prefixTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
-            let extra: String
-            if prefix.isEmpty, !template.isEmpty {
-                extra = PathTemplate.expand(template, filename: prepared.filename)
-            } else {
-                extra = ""
+            if excludingSources.contains(item.sourceURL) {
+                if item.releaseSource {
+                    item.sourceURL.stopAccessingSecurityScopedResource()
+                }
+                continue
             }
-            let tail = extra.isEmpty ? prepared.filename : PathTemplate.join(extra, key: prepared.filename)
-            let key = PathTemplate.join(prefix, key: tail)
             let job = TransferJob(
                 id: UUID(),
                 kind: .upload,
                 status: .queued,
-                title: prepared.filename,
-                objectKey: key,
-                localURL: prepared.fileURL,
+                title: item.filename,
+                objectKey: item.objectKey,
+                localURL: item.fileURL,
                 transferred: 0,
-                total: prepared.size,
+                total: item.size,
                 errorMessage: nil,
-                publicURL: account.publicURL(bucketName: client.bucket ?? bucket?.name ?? "", bucket: bucket, key: key),
+                publicURL: account.publicURL(bucketName: client.bucket ?? bucket?.name ?? "", bucket: bucket, key: item.objectKey),
                 finishedAt: nil
             )
-            jobs.insert(job, at: 0)
+            jobs.append(job)
+            addedActive = true
             let jobID = job.id
-            let scopedClient = client
-            let acl = account.defaultACL
             tasks[jobID] = Task { [weak self] in
                 await self?.runUpload(
                     id: jobID,
-                    client: scopedClient,
-                    key: key,
-                    fileURL: prepared.fileURL,
-                    contentType: prepared.contentType,
-                    acl: acl,
-                    release: accessed ? url : nil,
+                    client: client,
+                    key: item.objectKey,
+                    fileURL: item.fileURL,
+                    contentType: item.contentType,
+                    acl: account.defaultACL,
+                    release: item.releaseSource ? item.sourceURL : nil,
                     playSound: settings.playCompleteSound
                 )
             }
         }
+        if !addedActive {
+            for root in plan.scopedRoots {
+                root.stopAccessingSecurityScopedResource()
+            }
+            scopedRoots.removeAll { plan.scopedRoots.contains($0) }
+        }
         updateDockBadge()
-        return expansion.skipped
+    }
+
+    func abandon(plan: UploadPlan) {
+        for item in plan.items where item.releaseSource {
+            item.sourceURL.stopAccessingSecurityScopedResource()
+        }
+        for root in plan.scopedRoots {
+            root.stopAccessingSecurityScopedResource()
+        }
     }
 
     func enqueueDownloads(objects: [OSSObject], client: OSSClient, folder: URL) {
-        for object in objects {
-            let dest = folder.appending(path: object.name)
+        enqueueDownloadJobs(
+            items: objects.map { ($0, folder.appending(path: $0.name)) },
+            client: client,
+            scopedRoot: folder
+        )
+    }
+
+    func enqueueDownloadJobs(
+        items: [(object: OSSObject, destination: URL)],
+        client: OSSClient,
+        scopedRoot: URL
+    ) {
+        guard !items.isEmpty else { return }
+        if scopedRoot.startAccessingSecurityScopedResource() {
+            scopedRoots.append(scopedRoot)
+        }
+        for item in items {
+            let dest = item.destination
             let job = TransferJob(
                 id: UUID(),
                 kind: .download,
                 status: .queued,
-                title: object.name,
-                objectKey: object.key,
+                title: item.object.name,
+                objectKey: item.object.key,
                 localURL: dest,
                 transferred: 0,
-                total: object.size,
+                total: item.object.size,
                 errorMessage: nil,
                 publicURL: nil,
                 finishedAt: nil
             )
-            jobs.insert(job, at: 0)
+            jobs.append(job)
             let jobID = job.id
+            let key = item.object.key
             tasks[jobID] = Task { [weak self] in
-                await self?.runDownload(id: jobID, client: client, key: object.key, destination: dest)
+                await self?.runDownload(id: jobID, client: client, key: key, destination: dest)
             }
         }
         updateDockBadge()
@@ -284,25 +397,41 @@ final class TransferEngine {
         var size: Int64
     }
 
+    private struct ExpandedFile {
+        var url: URL
+        var relativePath: String
+    }
+
     private struct Expansion {
-        var files: [URL]
+        var files: [ExpandedFile]
         var skipped: Int
     }
 
     private static func expand(_ urls: [URL], imagesOnly: Bool) -> Expansion {
-        var result: [URL] = []
+        var result: [ExpandedFile] = []
         var skipped = 0
         let fm = FileManager.default
         for url in urls {
             var isDir: ObjCBool = false
             if fm.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
-                if let enumerator = fm.enumerator(at: url, includingPropertiesForKeys: [.isRegularFileKey], options: [.skipsHiddenFiles]) {
+                if let enumerator = fm.enumerator(
+                    at: url,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles, .skipsPackageDescendants]
+                ) {
                     for case let file as URL in enumerator {
+                        let values = try? file.resourceValues(forKeys: [.isRegularFileKey])
+                        if values?.isRegularFile == false { continue }
                         if imagesOnly && !ImageKind.isSupported(key: file.lastPathComponent) {
                             skipped += 1
                             continue
                         }
-                        result.append(file)
+                        let relative = PathTemplate.nestedRelative(
+                            rootName: url.lastPathComponent,
+                            rootPath: url.path,
+                            filePath: file.path
+                        )
+                        result.append(ExpandedFile(url: file, relativePath: relative))
                     }
                 }
             } else {
@@ -310,7 +439,7 @@ final class TransferEngine {
                     skipped += 1
                     continue
                 }
-                result.append(url)
+                result.append(ExpandedFile(url: url, relativePath: url.lastPathComponent))
             }
         }
         return Expansion(files: result, skipped: skipped)

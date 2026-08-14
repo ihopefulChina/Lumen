@@ -4,13 +4,10 @@ import SwiftUI
 @main
 struct LumenApp: App {
     @NSApplicationDelegateAdaptor(LumenAppDelegate.self) private var appDelegate
-    @State private var model = AppModel.shared
 
     var body: some Scene {
         WindowGroup("Lumen", id: "main") {
-            RootView()
-                .environment(model)
-                .onAppear { model.bootstrap() }
+            WorkspaceRoot()
         }
         .defaultSize(width: 1240, height: 800)
         .windowToolbarStyle(.unified)
@@ -20,23 +17,42 @@ struct LumenApp: App {
 
         Settings {
             SettingsView()
-                .environment(model)
-                .frame(width: 520, height: 480)
+                .environment(AppModel.settingsSession)
+                .frame(width: 520, height: 560)
         }
 
-        MenuBarExtra(isInserted: $model.showMenuBarExtra) {
+        MenuBarExtra(isInserted: menuBarBinding) {
             TransferMenu()
-                .environment(model)
+                .environment(AppServices.shared.focused ?? AppModel.settingsSession)
         } label: {
             Label("Lumen", systemImage: "photo.on.rectangle.angled")
         }
     }
 }
 
+private struct WorkspaceRoot: View {
+    @State private var model = AppModel()
+
+    var body: some View {
+        RootView()
+            .environment(model)
+            .background(WindowFocusProbe { model.becomeFocused() })
+            .onAppear {
+                model.bootstrap()
+                model.becomeFocused()
+            }
+    }
+}
+
 final class LumenAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationWillFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         Task { @MainActor in
-            AppModel.shared.ingestIncoming(urls)
+            let target = AppServices.shared.focused ?? AppServices.shared.sessions.first
+            target?.ingestIncoming(urls)
         }
     }
 
@@ -49,7 +65,7 @@ final class LumenAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
-            guard AppModel.shared.transfers.activeCount > 0 else {
+            guard AppServices.shared.transfers.activeCount > 0 else {
                 return .terminateNow
             }
             let alert = NSAlert()
@@ -82,6 +98,33 @@ struct LumenCommands: Commands {
                 .keyboardShortcut("c", modifiers: [.command, .shift])
             Button("复制 Markdown") { actions?.copyMarkdown() }
             Button("复制 HTML") { actions?.copyHTML() }
+            Divider()
+            Button("全选") { actions?.selectAll() }
+                .keyboardShortcut("a", modifiers: [.command])
+            Button("反选") { actions?.invertSelection() }
+                .keyboardShortcut("a", modifiers: [.command, .shift])
+        }
+        CommandGroup(after: .appInfo) {
+            Button("检查更新…") {
+                Task {
+                    let updates = AppServices.shared.updates
+                    await updates.check(manual: true, surface: .workspace)
+                    if updates.available == nil {
+                        WindowActions.notify(updates.lastMessage ?? "检查完成")
+                    }
+                }
+            }
+        }
+        CommandGroup(replacing: .help) {
+            Button("Lumen 帮助") {
+                NSWorkspace.shared.open(AppLinks.github)
+            }
+            Button("在 GitHub 打开仓库") {
+                NSWorkspace.shared.open(AppLinks.github)
+            }
+            Button("问题与反馈") {
+                NSWorkspace.shared.open(AppLinks.issues)
+            }
         }
         CommandMenu("浏览") {
             Button("后退") { actions?.goBack() }
@@ -115,6 +158,8 @@ struct LumenActions {
     var list: () -> Void
     var goBack: () -> Void
     var goForward: () -> Void
+    var selectAll: () -> Void
+    var invertSelection: () -> Void
 }
 
 private struct LumenActionsKey: FocusedValueKey {
@@ -125,5 +170,68 @@ extension FocusedValues {
     var lumenActions: LumenActions? {
         get { self[LumenActionsKey.self] }
         set { self[LumenActionsKey.self] = newValue }
+    }
+}
+
+private var menuBarBinding: Binding<Bool> {
+    Binding(
+        get: { AppServices.shared.showMenuBarExtra },
+        set: { AppServices.shared.showMenuBarExtra = $0 }
+    )
+}
+
+enum WindowActions {
+    static let workspaceID = NSUserInterfaceItemIdentifier("lumen.workspace")
+
+    static func prepare(_ window: NSWindow) {
+        window.identifier = workspaceID
+        window.tabbingMode = .disallowed
+        NSWindow.allowsAutomaticWindowTabbing = false
+    }
+
+    static func notify(_ message: String, title: String = "Lumen") {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "好")
+        alert.runModal()
+    }
+}
+
+private struct WindowFocusProbe: NSViewRepresentable {
+    var onFocus: () -> Void
+
+    func makeNSView(context: Context) -> Probe {
+        let view = Probe()
+        view.onFocus = onFocus
+        return view
+    }
+
+    func updateNSView(_ view: Probe, context: Context) {
+        view.onFocus = onFocus
+    }
+
+    final class Probe: NSView {
+        var onFocus: (() -> Void)?
+
+        override func viewDidMoveToWindow() {
+            NotificationCenter.default.removeObserver(self)
+            guard let window else { return }
+            WindowActions.prepare(window)
+            NotificationCenter.default.addObserver(
+                self,
+                selector: #selector(becameKey),
+                name: NSWindow.didBecomeKeyNotification,
+                object: window
+            )
+            if window.isKeyWindow {
+                onFocus?()
+            }
+        }
+
+        @objc private func becameKey() {
+            onFocus?()
+        }
     }
 }

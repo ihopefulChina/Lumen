@@ -117,6 +117,10 @@ struct InspectorView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
+            Button("下载当前文件夹…") {
+                model.downloadCurrentPrefix()
+            }
+            .controlSize(.regular)
             Spacer()
         }
         .frame(maxWidth: .infinity, alignment: .leading)

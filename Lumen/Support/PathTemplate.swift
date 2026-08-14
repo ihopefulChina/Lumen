@@ -52,6 +52,42 @@ enum PathTemplate {
         return parts.isEmpty ? "" : parts.joined(separator: "/") + "/"
     }
 
+    static func destinationKey(prefix: String, filename: String, applyTemplate: Bool, template: String) -> String {
+        let extra: String
+        if applyTemplate, prefix.isEmpty, !template.isEmpty {
+            extra = expand(template, filename: filename)
+        } else {
+            extra = ""
+        }
+        let tail = extra.isEmpty ? filename : join(extra, key: filename)
+        return join(prefix, key: tail)
+    }
+
+    static func replacingLastComponent(_ path: String, with name: String) -> String {
+        join(parentPrefix(path), key: name)
+    }
+
+    static func nestedRelative(rootName: String, rootPath: String, filePath: String) -> String {
+        let root = (rootPath as NSString).standardizingPath
+        let file = (filePath as NSString).standardizingPath
+        var rel = file
+        if file.hasPrefix(root) {
+            rel = String(file.dropFirst(root.count))
+        }
+        while rel.hasPrefix("/") {
+            rel = String(rel.dropFirst())
+        }
+        return join(rootName, key: rel)
+    }
+
+    static func relative(_ key: String, under prefix: String) -> String {
+        if prefix.isEmpty { return key }
+        if key.hasPrefix(prefix) {
+            return String(key.dropFirst(prefix.count))
+        }
+        return lastComponent(key)
+    }
+
     static func crumbs(bucket: String, prefix: String) -> [(title: String, prefix: String)] {
         var items: [(String, String)] = [(bucket, "")]
         if prefix.isEmpty { return items }
@@ -62,6 +98,20 @@ enum PathTemplate {
             items.append((part, running))
         }
         return items
+    }
+
+    static func sanitizedRelative(_ relative: String) -> String? {
+        let parts = relative.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard !parts.isEmpty, parts.allSatisfy({ $0 != ".." && $0 != "." && !$0.contains(":") }) else {
+            return nil
+        }
+        return parts.joined(separator: "/")
+    }
+
+    static func isInside(_ url: URL, root: URL) -> Bool {
+        let folder = root.standardizedFileURL.path
+        let path = url.standardizedFileURL.path
+        return path == folder || path.hasPrefix(folder + "/")
     }
 
     static func sanitizeKey(_ key: String) -> String {

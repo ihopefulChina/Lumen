@@ -1,4 +1,5 @@
 import Foundation
+import UniformTypeIdentifiers
 
 enum Formatters {
     static func bytes(_ value: Int64) -> String {
@@ -18,9 +19,21 @@ enum Formatters {
 }
 
 enum ImageKind {
+    /// Formats OSS will store, and that we treat as 素材图片.
+    /// IMG 能出缩略图的见 `imgProcessable`.
     static let imageExtensions: Set<String> = [
-        "jpg", "jpeg", "png", "gif", "webp", "heic", "heif",
-        "tif", "tiff", "bmp", "svg", "avif", "jxl", "ico", "jp2"
+        "jpg", "jpeg", "jpe", "jfif", "pjpeg", "pjp",
+        "png", "apng",
+        "gif",
+        "webp",
+        "bmp", "dib",
+        "tif", "tiff",
+        "heic", "heif", "heics",
+        "avif",
+        "svg", "svgz",
+        "ico", "cur",
+        "jp2", "j2k", "jpf", "jpx",
+        "jxl"
     ]
 
     static let textExtensions: Set<String> = [
@@ -45,15 +58,15 @@ enum ImageKind {
 
     static func contentType(for key: String) -> String {
         switch `extension`(of: key) {
-        case "jpg", "jpeg": "image/jpeg"
-        case "png": "image/png"
+        case "jpg", "jpeg", "jpe", "jfif", "pjpeg", "pjp": "image/jpeg"
+        case "png", "apng": "image/png"
         case "gif": "image/gif"
         case "webp": "image/webp"
         case "heic": "image/heic"
         case "heif": "image/heif"
         case "tif", "tiff": "image/tiff"
         case "bmp": "image/bmp"
-        case "svg": "image/svg+xml"
+        case "svg", "svgz": "image/svg+xml"
         case "avif": "image/avif"
         case "jxl": "image/jxl"
         case "ico": "image/x-icon"
@@ -74,5 +87,44 @@ enum ImageKind {
         if ext == "JSON" { return "JSON" }
         if isText(key: key) { return "\(ext) 文本" }
         return "\(ext) 文件"
+    }
+
+    /// WebP / HEIC / GIF 处理后 ImageIO 经常解不开，缩略图再要一版 JPEG。
+    static func needsJPEGPreview(key: String) -> Bool {
+        switch `extension`(of: key) {
+        case "webp", "heic", "heif", "heics", "gif", "avif":
+            true
+        default:
+            false
+        }
+    }
+
+    /// Aliyun IMG can decode these for `x-oss-process`. SVG / ICO 等只能当对象存。
+    static func imgProcessable(key: String) -> Bool {
+        switch `extension`(of: key) {
+        case "jpg", "jpeg", "jpe", "jfif", "pjpeg", "pjp",
+             "png", "apng",
+             "gif",
+             "webp",
+             "bmp", "dib",
+             "tif", "tiff",
+             "heic", "heif":
+            true
+        default:
+            false
+        }
+    }
+
+    static var importTypes: [UTType] {
+        var types: [UTType] = [
+            .image, .jpeg, .png, .gif, .webP, .tiff, .bmp,
+            .heic, .heif, .rawImage, .svg,
+            .json, .text, .plainText, .folder
+        ]
+        if let avif = UTType("public.avif") { types.append(avif) }
+        if let webp = UTType("org.webmproject.webp") { types.append(webp) }
+        if let svg = UTType("public.svg-image") { types.append(svg) }
+        if let gif = UTType("com.compuserve.gif") { types.append(gif) }
+        return types
     }
 }

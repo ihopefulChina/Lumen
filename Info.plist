@@ -14,6 +14,16 @@
 			<key>LSItemContentTypes</key>
 			<array>
 				<string>public.image</string>
+				<string>public.jpeg</string>
+				<string>public.png</string>
+				<string>com.compuserve.gif</string>
+				<string>org.webmproject.webp</string>
+				<string>public.svg-image</string>
+				<string>public.heic</string>
+				<string>public.heif</string>
+				<string>com.microsoft.bmp</string>
+				<string>public.tiff</string>
+				<string>public.avif</string>
 				<string>public.json</string>
 				<string>public.plain-text</string>
 				<string>public.text</string>
@@ -21,9 +31,9 @@
 		</dict>
 	</array>
 	<key>CFBundleShortVersionString</key>
-	<string>0.0.1</string>
+	<string>0.0.2</string>
 	<key>CFBundleVersion</key>
-	<string>1</string>
+	<string>2</string>
 	<key>NSSupportsSuddenTermination</key>
 	<true/>
 </dict>

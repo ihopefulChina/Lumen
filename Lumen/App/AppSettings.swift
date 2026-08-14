@@ -19,6 +19,9 @@ final class AppSettings {
     var showMenuBarWhileTransferring: Bool {
         didSet { defaults.set(showMenuBarWhileTransferring, forKey: Keys.menuBar) }
     }
+    var checkUpdatesAutomatically: Bool {
+        didSet { defaults.set(checkUpdatesAutomatically, forKey: Keys.autoUpdate) }
+    }
 
     private let defaults: UserDefaults
 
@@ -30,6 +33,7 @@ final class AppSettings {
         self.imagesOnly = defaults.object(forKey: Keys.imagesOnly) as? Bool ?? true
         self.playCompleteSound = defaults.bool(forKey: Keys.sound)
         self.showMenuBarWhileTransferring = defaults.object(forKey: Keys.menuBar) as? Bool ?? true
+        self.checkUpdatesAutomatically = defaults.object(forKey: Keys.autoUpdate) as? Bool ?? true
     }
 
     private enum Keys {
@@ -38,5 +42,6 @@ final class AppSettings {
         static let imagesOnly = "settings.imagesOnly"
         static let sound = "settings.playCompleteSound"
         static let menuBar = "settings.showMenuBar"
+        static let autoUpdate = "settings.checkUpdatesAutomatically"
     }
 }

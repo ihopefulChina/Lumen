@@ -46,5 +46,7 @@ struct FinderFolderIcon: View {
             .interpolation(.high)
             .aspectRatio(contentMode: .fit)
             .frame(width: size, height: size)
+            .contentShape(Rectangle())
+            .allowsHitTesting(true)
     }
 }

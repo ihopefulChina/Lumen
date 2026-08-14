@@ -6,23 +6,33 @@ struct TransferTray: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var expanded = true
 
+    private var jobs: [TransferJob] { model.transfers.jobs }
+
     var body: some View {
         VStack(spacing: 0) {
             Divider().opacity(0.4)
             VStack(alignment: .leading, spacing: 10) {
                 header
                 if expanded {
-                    LazyVStack(spacing: 8) {
-                        ForEach(model.transfers.jobs.prefix(6)) { job in
-                            TransferRow(job: job)
+                    ScrollView {
+                        LazyVStack(spacing: 8) {
+                            ForEach(jobs) { job in
+                                TransferRow(job: job)
+                            }
                         }
                     }
+                    .scrollBounceBehavior(.basedOnSize)
+                    .frame(maxHeight: listHeight)
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
         }
         .background(.bar)
+    }
+
+    private var listHeight: CGFloat {
+        min(CGFloat(max(jobs.count, 1)) * 52, 260)
     }
 
     private var header: some View {
@@ -44,7 +54,7 @@ struct TransferTray: View {
             }
             .buttonStyle(.plain)
             Spacer()
-            if model.transfers.jobs.contains(where: { !$0.isActive }) {
+            if jobs.contains(where: { !$0.isActive }) {
                 Button("清除已完成") {
                     model.transfers.clearFinished()
                 }
@@ -61,8 +71,9 @@ struct TransferTray: View {
 
     private var title: String {
         let active = model.transfers.activeCount
+        let total = jobs.count
         if active > 0 { return "正在传输 \(active) 项" }
-        return "传输"
+        return total > 0 ? "传输 · \(total) 项" : "传输"
     }
 }
 
@@ -160,10 +171,14 @@ struct TransferMenu: View {
         if model.transfers.jobs.isEmpty {
             Text("没有传输任务")
         } else {
-            ForEach(model.transfers.jobs.prefix(8)) { job in
+            let jobs = model.transfers.jobs
+            ForEach(jobs.prefix(12)) { job in
                 Button("\(job.title) · \(status(job))") {
                     openWindow(id: "main")
                 }
+            }
+            if jobs.count > 12 {
+                Text("还有 \(jobs.count - 12) 项")
             }
         }
         Divider()
