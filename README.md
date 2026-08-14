@@ -100,6 +100,3 @@ xcodebuild -scheme Lumen -destination 'platform=macOS,arch=arm64' -configuration
 
 发给不认识的人之前，用自己的 Apple Developer 账号 Archive，Developer ID 公证。Release 里的 dmg 没走这套。
 
-## License
-
-还没附许可证文件。阿里云 OSS、oss-browser 的名字归各自权利人。图标来自 OSS Browser 的公开 iOS 素材，不表示跟阿里云官方有关系。
