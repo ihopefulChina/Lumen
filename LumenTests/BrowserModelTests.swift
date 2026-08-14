@@ -127,6 +127,29 @@ struct BrowserModelTests {
         #expect(!model.browser.isLoading)
     }
 
+    @Test func incomingFilesAreQueuedUntilTheFirstWindowSessionExists() {
+        let services = AppServices(accounts: [])
+        let incoming = URL(fileURLWithPath: "/tmp/cold-launch.png")
+
+        services.routeIncoming([incoming])
+        let model = AppModel(kind: .window, services: services)
+
+        #expect(model.pendingOpenURLs == [incoming])
+    }
+
+    @Test func closingQuickLookDeletesItsOwnedTemporaryFile() throws {
+        let services = AppServices(accounts: [])
+        let model = AppModel(kind: .settings, services: services)
+        let temporary = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-quicklook-test-\(UUID().uuidString)")
+        try Data("preview".utf8).write(to: temporary)
+
+        model.presentPreview(at: temporary)
+        model.previewItem = nil
+
+        #expect(!FileManager.default.fileExists(atPath: temporary.path))
+    }
+
     private static func model() -> BrowserModel {
         let model = BrowserModel()
         model.folders = [OSSFolder(prefix: "folder/")]

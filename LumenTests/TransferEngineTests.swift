@@ -61,6 +61,7 @@ struct TransferEngineTests {
 
         engine.enqueue(plan: plan, client: client, account: account, bucket: nil, settings: settings)
         try await Self.waitUntil { engine.jobs.first?.status == .running }
+        try await Self.waitForRequest(transport)
         let queuedID = try #require(engine.jobs.last?.id)
         engine.cancel(queuedID)
 
@@ -218,6 +219,14 @@ struct TransferEngineTests {
         }
         Issue.record("Timed out waiting for transfer state")
     }
+
+    private static func waitForRequest(_ transport: BlockingUploadTransport) async throws {
+        for _ in 0..<200 {
+            if await transport.hasPendingRequest { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Timed out waiting for upload request")
+    }
 }
 
 private final class LockedCounter: @unchecked Sendable {
@@ -235,6 +244,8 @@ private final class LockedCounter: @unchecked Sendable {
 
 private actor BlockingUploadTransport: OSSHTTPTransport {
     private var continuation: CheckedContinuation<OSSHTTPResult, Never>?
+
+    var hasPendingRequest: Bool { continuation != nil }
 
     func send(
         _ request: URLRequest,

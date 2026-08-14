@@ -213,10 +213,22 @@ struct OSSClient: Sendable {
     func download(
         key: String,
         to destination: URL,
+        within root: URL? = nil,
         process: String? = nil,
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil
     ) async throws {
         guard let bucket else { throw Self.missingBucket }
+        if let root {
+            try FileSafety.validate(destination: destination, root: root)
+        }
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw OSSServiceError(
+                statusCode: 0,
+                code: "LocalFileExists",
+                message: "本地已有同名文件，未覆盖",
+                requestId: ""
+            )
+        }
         var query: [(String, String)] = []
         if let process, !process.isEmpty {
             query.append(("x-oss-process", process))
@@ -227,6 +239,7 @@ struct OSSClient: Sendable {
             key: key,
             query: query,
             downloadTo: destination,
+            downloadRoot: root,
             onProgress: onProgress
         )
     }
@@ -376,6 +389,7 @@ struct OSSClient: Sendable {
         body: Data? = nil,
         fileURL: URL? = nil,
         downloadTo: URL? = nil,
+        downloadRoot: URL? = nil,
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil,
         checksCancellation: Bool = true
     ) async throws -> HTTPResponse {
@@ -426,10 +440,21 @@ struct OSSClient: Sendable {
             guard let temp = http.temporaryDownloadURL else {
                 throw OSSServiceError(statusCode: 0, code: "MissingDownload", message: "下载没有返回文件", requestId: "")
             }
-            if FileManager.default.fileExists(atPath: downloadTo.path) {
-                try FileManager.default.removeItem(at: downloadTo)
+            if let downloadRoot {
+                try FileSafety.validate(destination: downloadTo, root: downloadRoot)
+            }
+            guard !FileManager.default.fileExists(atPath: downloadTo.path) else {
+                throw OSSServiceError(
+                    statusCode: 0,
+                    code: "LocalFileExists",
+                    message: "本地已有同名文件，未覆盖",
+                    requestId: ""
+                )
             }
             try FileManager.default.createDirectory(at: downloadTo.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let downloadRoot {
+                try FileSafety.validate(destination: downloadTo, root: downloadRoot)
+            }
             try FileManager.default.moveItem(at: temp, to: downloadTo)
         }
         return http

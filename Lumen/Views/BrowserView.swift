@@ -63,12 +63,14 @@ struct BrowserView: View {
             )) {
                 TextField("名称", text: $renameText)
                 Button("取消", role: .cancel) { renameTarget = nil }
-                Button("存储") {
+                Button("重命名") {
                     if let renameTarget {
                         Task { await model.rename(renameTarget, to: renameText) }
                     }
                     renameTarget = nil
                 }
+            } message: {
+                Text("不会覆盖已有同名对象。")
             }
     }
 

@@ -45,7 +45,15 @@ final class AppModel {
     var editingAccount: OSSAccount?
     var isLoadingBuckets = false
     var banner: BannerMessage?
-    var previewItem: URL?
+    var previewItem: URL? {
+        didSet {
+            guard let oldValue,
+                  oldValue != previewItem,
+                  ownedPreviewURLs.remove(oldValue) != nil
+            else { return }
+            try? FileManager.default.removeItem(at: oldValue)
+        }
+    }
     var inspectorHead: ObjectHead?
     var inspectorText: String?
     var isLoadingHead = false
@@ -53,6 +61,7 @@ final class AppModel {
     var wantsNewFolder = false
     var pendingOpenURLs: [URL] = []
     private var pendingOwnedTemporaryURLs: Set<URL> = []
+    private var ownedPreviewURLs: Set<URL> = []
     var overwritePrompt: OverwritePrompt?
     private var uploadGeneration = 0
     private var didLoadWindow = false
@@ -597,8 +606,14 @@ final class AppModel {
     }
 
     func createFolder(named raw: String) async {
-        let name = raw.trimmingCharacters(in: CharacterSet(charactersIn: "/ "))
-        guard !name.isEmpty, let client = makeClient() else { return }
+        let name: String
+        do {
+            name = try ObjectNameValidator.validate(raw)
+        } catch {
+            present(error.localizedDescription, error: true)
+            return
+        }
+        guard let client = makeClient() else { return }
         let key = PathTemplate.join(browser.prefix, key: name) + "/"
         do {
             try await client.putData(key: key, data: Data(), contentType: "application/x-directory", acl: .default)
@@ -620,7 +635,7 @@ final class AppModel {
                     try await client.deleteObject(key: key)
                 }
             }
-            browser.selectedKeys = []
+            browser.clearSelection()
             await refreshListing()
             Haptics.alignment()
         } catch {
@@ -656,15 +671,19 @@ final class AppModel {
 
     func rename(_ object: OSSObject, to raw: String) async {
         guard let client = makeClient() else { return }
-        let name = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !name.isEmpty else { return }
+        let name: String
+        do {
+            name = try ObjectNameValidator.validate(raw)
+        } catch {
+            present(error.localizedDescription, error: true)
+            return
+        }
         let dest = PathTemplate.join(PathTemplate.parentPrefix(object.key), key: name)
         guard dest != object.key else { return }
         do {
-            try await client.copyObject(from: object.key, to: dest)
-            try await client.deleteObject(key: object.key)
+            try await client.renameObject(from: object.key, to: dest, overwrite: false)
             await refreshListing()
-            browser.selectedKeys = [dest]
+            browser.select(key: dest, modifiers: [])
         } catch {
             present(error.localizedDescription, error: true)
         }
@@ -711,10 +730,15 @@ final class AppModel {
         guard let client = makeClient() else { return }
         var items: [(object: OSSObject, destination: URL)] = []
         var skippedLocal = 0
+        var skippedUnsafe = 0
         for object in objects {
-            guard let name = PathTemplate.sanitizedRelative(object.name) else { continue }
-            let url = dest.appending(path: name)
-            guard PathTemplate.isInside(url, root: dest) else { continue }
+            let url: URL
+            do {
+                url = try FileSafety.destination(root: dest, relativePath: object.name)
+            } catch {
+                skippedUnsafe += 1
+                continue
+            }
             if FileManager.default.fileExists(atPath: url.path) {
                 skippedLocal += 1
                 continue
@@ -737,14 +761,18 @@ final class AppModel {
                     present("“\(folderName)”里没有可下载的文件", error: true)
                     continue
                 }
-                guard let safeName = PathTemplate.sanitizedRelative(folderName) else { continue }
-                let root = dest.appending(path: safeName, directoryHint: .isDirectory)
-                guard PathTemplate.isInside(root, root: dest) else { continue }
                 for object in listing.objects {
                     let relative = PathTemplate.relative(object.key, under: prefix)
-                    guard let safe = PathTemplate.sanitizedRelative(relative) else { continue }
-                    let url = root.appending(path: safe)
-                    guard PathTemplate.isInside(url, root: dest) else { continue }
+                    let url: URL
+                    do {
+                        url = try FileSafety.destination(
+                            root: dest,
+                            relativePath: PathTemplate.join(folderName, key: relative)
+                        )
+                    } catch {
+                        skippedUnsafe += 1
+                        continue
+                    }
                     if FileManager.default.fileExists(atPath: url.path) {
                         skippedLocal += 1
                         continue
@@ -759,14 +787,16 @@ final class AppModel {
         guard !items.isEmpty else {
             if skippedLocal > 0 {
                 present("本地已有同名文件，已跳过 \(skippedLocal) 项")
+            } else if skippedUnsafe > 0 {
+                present("对象路径不安全，已跳过 \(skippedUnsafe) 项", error: true)
             }
             return
         }
         transfers.enqueueDownloadJobs(items: items, client: client, scopedRoot: dest)
         if truncated {
             present("已加入 \(items.count) 个下载，部分目录未列完")
-        } else if skippedLocal > 0 {
-            present("已加入 \(items.count) 个下载，跳过 \(skippedLocal) 个本地已存在的文件")
+        } else if skippedLocal + skippedUnsafe > 0 {
+            present("已加入 \(items.count) 个下载，跳过 \(skippedLocal + skippedUnsafe) 项")
         } else if items.count > 1 {
             present("已加入 \(items.count) 个下载")
         }
@@ -852,15 +882,26 @@ final class AppModel {
 
     func quickLookSelection() async {
         guard let object = browser.primarySelection, let client = makeClient() else { return }
-        let dest = FileManager.default.temporaryDirectory.appending(path: "\(object.etag)-\(object.name)")
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "LumenQuickLook", directoryHint: .isDirectory)
+        let name = (try? ObjectNameValidator.validate(object.name)) ?? "预览文件"
+        let dest: URL
         do {
-            if !FileManager.default.fileExists(atPath: dest.path) {
-                try await client.download(key: object.key, to: dest)
-            }
-            previewItem = dest
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            dest = try FileSafety.destination(
+                root: directory,
+                relativePath: "\(UUID().uuidString)-\(name)"
+            )
+            try await client.download(key: object.key, to: dest, within: directory)
+            presentPreview(at: dest)
         } catch {
             present(error.localizedDescription, error: true)
         }
+    }
+
+    func presentPreview(at url: URL) {
+        ownedPreviewURLs.insert(url)
+        previewItem = url
     }
 
     func copyFolderPath(_ prefix: String, includeBucket: Bool) {

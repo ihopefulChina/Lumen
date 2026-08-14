@@ -29,6 +29,28 @@ struct OSSClientTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path))
     }
 
+    @Test func downloadNeverOverwritesAnExistingLocalFile() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-no-overwrite-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "existing.txt")
+        let temporary = directory.appending(path: "response.tmp")
+        try Data("original".utf8).write(to: destination)
+        try Data("replacement".utf8).write(to: temporary)
+        let transport = StubOSSTransport(steps: [.download(temporary)])
+
+        await #expect(throws: (any Error).self) {
+            try await Self.client(transport: transport).download(
+                key: "existing.txt",
+                to: destination,
+                within: directory
+            )
+        }
+
+        #expect(try Data(contentsOf: destination) == Data("original".utf8))
+    }
+
     @Test func multipartFailureAbortsUploadExactlyOnce() async throws {
         let transport = StubOSSTransport(steps: [
             .response(
@@ -152,6 +174,7 @@ struct OSSClientTests {
 private actor StubOSSTransport: OSSHTTPTransport {
     enum Step: Sendable {
         case response(status: Int, headers: [String: String], data: Data)
+        case download(URL)
         case cancel
     }
 
@@ -175,6 +198,8 @@ private actor StubOSSTransport: OSSHTTPTransport {
         switch steps.removeFirst() {
         case .response(let status, let headers, let data):
             return OSSHTTPResult(status: status, headers: headers, data: data, temporaryDownloadURL: nil)
+        case .download(let url):
+            return OSSHTTPResult(status: 200, headers: [:], data: Data(), temporaryDownloadURL: url)
         case .cancel:
             throw CancellationError()
         }

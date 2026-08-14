@@ -204,7 +204,13 @@ final class TransferEngine {
                 retainedResources: [rootLease].compactMap { $0 }
             )
             tasks[jobID] = Task { [weak self] in
-                await self?.runDownload(id: jobID, client: client, key: key, destination: dest)
+                await self?.runDownload(
+                    id: jobID,
+                    client: client,
+                    key: key,
+                    destination: dest,
+                    root: scopedRoot
+                )
             }
         }
         updateDockBadge()
@@ -408,7 +414,13 @@ final class TransferEngine {
         }
     }
 
-    private func runDownload(id: UUID, client: OSSClient, key: String, destination: URL) async {
+    private func runDownload(
+        id: UUID,
+        client: OSSClient,
+        key: String,
+        destination: URL,
+        root: URL
+    ) async {
         guard await waitForSlot() else {
             mutate(id) { $0.status = .cancelled; $0.finishedAt = .now }
             finishResource(id)
@@ -420,7 +432,7 @@ final class TransferEngine {
         }
         mutate(id) { $0.status = .running }
         do {
-            try await client.download(key: key, to: destination) { [weak self] sent, total in
+            try await client.download(key: key, to: destination, within: root) { [weak self] sent, total in
                 Task { @MainActor in
                     self?.mutate(id) { job in
                         job.transferred = sent

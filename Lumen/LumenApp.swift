@@ -51,8 +51,7 @@ final class LumenAppDelegate: NSObject, NSApplicationDelegate {
 
     func application(_ application: NSApplication, open urls: [URL]) {
         Task { @MainActor in
-            let target = AppServices.shared.focused ?? AppServices.shared.sessions.first
-            target?.ingestIncoming(urls)
+            AppServices.shared.routeIncoming(urls)
         }
     }
 
@@ -175,11 +174,14 @@ extension FocusedValues {
 
 private var menuBarBinding: Binding<Bool> {
     Binding(
-        get: { AppServices.shared.showMenuBarExtra },
-        set: { AppServices.shared.showMenuBarExtra = $0 }
+        get: { MainActor.assumeIsolated { AppServices.shared.showMenuBarExtra } },
+        set: { value in
+            MainActor.assumeIsolated { AppServices.shared.showMenuBarExtra = value }
+        }
     )
 }
 
+@MainActor
 enum WindowActions {
     static let workspaceID = NSUserInterfaceItemIdentifier("lumen.workspace")
 

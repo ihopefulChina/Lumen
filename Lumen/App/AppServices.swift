@@ -22,6 +22,7 @@ final class AppServices {
 
     private var didBootstrap = false
     private var sessionBoxes: [WeakSession] = []
+    private var pendingIncomingURLs: [URL] = []
 
     init(
         accounts: [OSSAccount]? = nil,
@@ -45,6 +46,11 @@ final class AppServices {
             sessionBoxes.append(WeakSession(session))
         }
         focused = session
+        if !pendingIncomingURLs.isEmpty {
+            let queued = pendingIncomingURLs
+            pendingIncomingURLs = []
+            session.ingestIncoming(queued)
+        }
     }
 
     func unregister(_ session: AppModel) {
@@ -70,6 +76,15 @@ final class AppServices {
 
     func presentOnFocused(_ text: String, error: Bool = false) {
         focused?.present(text, error: error)
+    }
+
+    func routeIncoming(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        if let target = focused ?? sessions.first {
+            target.ingestIncoming(urls)
+        } else {
+            pendingIncomingURLs.append(contentsOf: urls)
+        }
     }
 }
 

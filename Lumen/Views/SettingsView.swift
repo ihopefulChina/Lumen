@@ -22,6 +22,9 @@ struct SettingsView: View {
                 Section("完成时") {
                     Toggle("播放提示音", isOn: $model.settings.playCompleteSound)
                     Toggle("传输时显示菜单栏图标", isOn: $model.settings.showMenuBarWhileTransferring)
+                        .onChange(of: model.settings.showMenuBarWhileTransferring) { _, enabled in
+                            model.showMenuBarExtra = enabled && model.transfers.activeCount > 0
+                        }
                 }
                 Section("更新") {
                     LabeledContent("当前版本", value: AppVersion.current)
