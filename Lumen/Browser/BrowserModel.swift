@@ -53,15 +53,21 @@ enum BrowserSortDirection: String, CaseIterable, Identifiable, Hashable, Sendabl
 final class BrowserModel {
     private let defaults: UserDefaults
 
-    var prefix = ""
+    var prefix = "" {
+        didSet {
+            guard prefix != oldValue else { return }
+            searchText = ""
+            clearSelection()
+        }
+    }
     var folders: [OSSFolder] = []
     var objects: [OSSObject] = []
-    var selectedKeys: Set<String> = [] {
+    private(set) var selectedKeys: Set<String> = [] {
         didSet { selectionEpoch += 1 }
     }
     var selectionEpoch = 0
-    var selectionAnchorKey: String?
-    var focusedKey: String?
+    private(set) var selectionAnchorKey: String?
+    private(set) var focusedKey: String?
     var viewMode: BrowserViewMode = .grid
     var sortField: BrowserSortField {
         didSet { defaults.set(sortField.rawValue, forKey: Keys.sortField) }
@@ -69,7 +75,12 @@ final class BrowserModel {
     var sortDirection: BrowserSortDirection {
         didSet { defaults.set(sortDirection.rawValue, forKey: Keys.sortDirection) }
     }
-    var searchText = ""
+    var searchText = "" {
+        didSet {
+            guard searchText != oldValue else { return }
+            reconcileVisibleState()
+        }
+    }
     var isLoading = false
     var errorMessage: String?
     var dropTargets: Set<String> = []
@@ -91,7 +102,12 @@ final class BrowserModel {
     var backStack: [String] = []
     var forwardStack: [String] = []
 
-    var imagesOnly = true
+    var imagesOnly = true {
+        didSet {
+            guard imagesOnly != oldValue else { return }
+            reconcileVisibleState()
+        }
+    }
     var canGoBack: Bool { !backStack.isEmpty }
     var canGoForward: Bool { !forwardStack.isEmpty }
 
@@ -115,11 +131,11 @@ final class BrowserModel {
     }
 
     var selectedObjects: [OSSObject] {
-        objects.filter { selectedKeys.contains($0.key) }
+        visibleObjects.filter { selectedKeys.contains($0.key) }
     }
 
     var selectedFolders: [OSSFolder] {
-        folders.filter { selectedKeys.contains($0.prefix) }
+        visibleFolders.filter { selectedKeys.contains($0.prefix) }
     }
 
     var visibleKeys: Set<String> {
@@ -128,6 +144,10 @@ final class BrowserModel {
 
     var orderedVisibleKeys: [String] {
         visibleFolders.map(\.prefix) + visibleObjects.map(\.key)
+    }
+
+    var actionableSelectionKeys: Set<String> {
+        selectedKeys.intersection(visibleKeys)
     }
 
     func selectAllVisible() {
@@ -256,16 +276,23 @@ final class BrowserModel {
         self.imagesOnly = imagesOnly
         folders = listing.folders
         objects = listing.objects
-        let visibleIDs = Set(visibleObjects.map(\.key)).union(visibleFolders.map(\.prefix))
-        selectedKeys = selectedKeys.intersection(visibleIDs)
-        if let focusedKey, !visibleIDs.contains(focusedKey) {
-            self.focusedKey = nil
-        }
-        if let selectionAnchorKey, !visibleIDs.contains(selectionAnchorKey) {
-            self.selectionAnchorKey = nil
-        }
+        reconcileVisibleState()
         lastRefresh = .now
         errorMessage = nil
+    }
+
+    private func reconcileVisibleState() {
+        let visible = visibleKeys
+        let retainedSelection = selectedKeys.intersection(visible)
+        if retainedSelection != selectedKeys {
+            selectedKeys = retainedSelection
+        }
+        if let focusedKey, !visible.contains(focusedKey) {
+            self.focusedKey = nil
+        }
+        if let selectionAnchorKey, !visible.contains(selectionAnchorKey) {
+            self.selectionAnchorKey = nil
+        }
     }
 
     private func filtered<T>(_ items: [T], name: KeyPath<T, String>) -> [T] {

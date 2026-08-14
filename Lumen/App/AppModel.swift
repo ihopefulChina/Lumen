@@ -633,7 +633,7 @@ final class AppModel {
     }
 
     func requestDeleteSelection() {
-        guard !browser.selectedKeys.isEmpty else { return }
+        guard !browser.actionableSelectionKeys.isEmpty else { return }
         wantsDeleteConfirmation = true
     }
 
@@ -700,7 +700,7 @@ final class AppModel {
 
     func deleteSelection() async {
         guard let client = makeClient() else { return }
-        let keys = Array(browser.selectedKeys)
+        let keys = Array(browser.actionableSelectionKeys)
         guard !keys.isEmpty else { return }
         do {
             for key in keys {
@@ -811,8 +811,9 @@ final class AppModel {
     }
 
     func cloudDragPayload(clickedKey: String) -> CloudDragPayload {
-        let keys = browser.selectedKeys.contains(clickedKey)
-            ? browser.selectedKeys
+        let actionableKeys = browser.actionableSelectionKeys
+        let keys = actionableKeys.contains(clickedKey)
+            ? actionableKeys
             : [clickedKey]
         return CloudDragPayload(
             accountID: selectedAccountID ?? UUID(),

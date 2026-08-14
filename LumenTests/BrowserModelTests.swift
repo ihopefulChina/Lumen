@@ -32,7 +32,7 @@ struct BrowserModelTests {
 
     @Test func primaryObjectUsesVisibleOrderEvenWhenFolderIsSelected() {
         let model = Self.model()
-        model.selectedKeys = ["folder/", "b.txt", "c.txt"]
+        model.replaceSelection(["folder/", "b.txt", "c.txt"])
 
         #expect(model.primarySelection?.key == "b.txt")
     }
@@ -45,6 +45,86 @@ struct BrowserModelTests {
         #expect(model.selectedKeys == ["b.txt"])
         model.moveSelection(.previous, extending: true)
         #expect(model.selectedKeys == ["a.txt", "b.txt"])
+    }
+
+    @Test func searchRemovesHiddenSelectionFocusAndAnchor() {
+        let model = Self.model()
+        model.select(key: "a.txt", modifiers: [])
+
+        model.searchText = "b"
+
+        #expect(model.selectedKeys.isEmpty)
+        #expect(model.focusedKey == nil)
+        #expect(model.selectionAnchorKey == nil)
+        #expect(model.selectedObjects.isEmpty)
+    }
+
+    @Test func searchKeepsASelectionThatRemainsVisible() {
+        let model = Self.model()
+        model.select(key: "b.txt", modifiers: [])
+
+        model.searchText = "b"
+
+        #expect(model.selectedKeys == ["b.txt"])
+        #expect(model.focusedKey == "b.txt")
+        #expect(model.selectionAnchorKey == "b.txt")
+    }
+
+    @Test func navigatingToAnotherFolderClearsTheFolderSearch() {
+        let model = Self.model()
+        model.searchText = "b"
+
+        model.navigate(to: "folder/")
+
+        #expect(model.searchText.isEmpty)
+        #expect(model.selectedKeys.isEmpty)
+    }
+
+    @Test func mediaFilterRemovesAnUnsupportedSelection() {
+        let model = Self.model()
+        model.objects.append(
+            OSSObject(
+                key: "archive.zip",
+                size: 1,
+                etag: "zip",
+                lastModified: nil,
+                storageClass: "Standard"
+            )
+        )
+        model.select(key: "archive.zip", modifiers: [])
+
+        model.imagesOnly = true
+
+        #expect(model.selectedKeys.isEmpty)
+        #expect(model.focusedKey == nil)
+        #expect(model.selectionAnchorKey == nil)
+    }
+
+    @Test func refreshedListingRemovesASelectionThatNoLongerExists() {
+        let model = Self.model()
+        model.select(key: "a.txt", modifiers: [])
+
+        model.apply(
+            ObjectListing(
+                folders: [],
+                objects: [
+                    OSSObject(
+                        key: "b.txt",
+                        size: 1,
+                        etag: "b",
+                        lastModified: nil,
+                        storageClass: "Standard"
+                    )
+                ],
+                isTruncated: false,
+                nextToken: nil
+            ),
+            imagesOnly: false
+        )
+
+        #expect(model.selectedKeys.isEmpty)
+        #expect(model.focusedKey == nil)
+        #expect(model.selectionAnchorKey == nil)
     }
 
     @Test func sizeSortingKeepsFoldersFirstAndUsesTheRequestedDirection() {
