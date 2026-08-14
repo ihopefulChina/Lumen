@@ -21,9 +21,38 @@ enum BrowserSelectionDirection: Sendable {
     case next
 }
 
+enum BrowserSortField: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case name
+    case modified
+    case size
+    case kind
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .name: "名称"
+        case .modified: "修改时间"
+        case .size: "大小"
+        case .kind: "种类"
+        }
+    }
+}
+
+enum BrowserSortDirection: String, CaseIterable, Identifiable, Hashable, Sendable {
+    case ascending
+    case descending
+
+    var id: String { rawValue }
+    var title: String { self == .ascending ? "升序" : "降序" }
+    var symbol: String { self == .ascending ? "arrow.up" : "arrow.down" }
+}
+
 @MainActor
 @Observable
 final class BrowserModel {
+    private let defaults: UserDefaults
+
     var prefix = ""
     var folders: [OSSFolder] = []
     var objects: [OSSObject] = []
@@ -34,6 +63,12 @@ final class BrowserModel {
     var selectionAnchorKey: String?
     var focusedKey: String?
     var viewMode: BrowserViewMode = .grid
+    var sortField: BrowserSortField {
+        didSet { defaults.set(sortField.rawValue, forKey: Keys.sortField) }
+    }
+    var sortDirection: BrowserSortDirection {
+        didSet { defaults.set(sortDirection.rawValue, forKey: Keys.sortDirection) }
+    }
     var searchText = ""
     var isLoading = false
     var errorMessage: String?
@@ -60,13 +95,23 @@ final class BrowserModel {
     var canGoBack: Bool { !backStack.isEmpty }
     var canGoForward: Bool { !forwardStack.isEmpty }
 
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+        self.sortField = defaults.string(forKey: Keys.sortField)
+            .flatMap(BrowserSortField.init(rawValue:)) ?? .name
+        self.sortDirection = defaults.string(forKey: Keys.sortDirection)
+            .flatMap(BrowserSortDirection.init(rawValue:)) ?? .ascending
+    }
+
     var visibleFolders: [OSSFolder] {
-        filtered(folders, name: \.name)
+        filtered(folders, name: \.name).sorted { lhs, rhs in
+            ordered(lhs.name.localizedStandardCompare(rhs.name))
+        }
     }
 
     var visibleObjects: [OSSObject] {
         let source = imagesOnly ? objects.filter(\.isSupported) : objects
-        return filtered(source, name: \.name)
+        return filtered(source, name: \.name).sorted(by: objectsAreOrdered)
     }
 
     var selectedObjects: [OSSObject] {
@@ -209,8 +254,8 @@ final class BrowserModel {
 
     func apply(_ listing: ObjectListing, imagesOnly: Bool) {
         self.imagesOnly = imagesOnly
-        folders = listing.folders.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        objects = listing.objects.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        folders = listing.folders
+        objects = listing.objects
         let visibleIDs = Set(visibleObjects.map(\.key)).union(visibleFolders.map(\.prefix))
         selectedKeys = selectedKeys.intersection(visibleIDs)
         if let focusedKey, !visibleIDs.contains(focusedKey) {
@@ -227,5 +272,42 @@ final class BrowserModel {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !query.isEmpty else { return items }
         return items.filter { $0[keyPath: name].localizedCaseInsensitiveContains(query) }
+    }
+
+    private func objectsAreOrdered(_ lhs: OSSObject, _ rhs: OSSObject) -> Bool {
+        let primary: ComparisonResult
+        switch sortField {
+        case .name:
+            primary = lhs.name.localizedStandardCompare(rhs.name)
+        case .modified:
+            primary = compare(lhs.lastModified ?? .distantPast, rhs.lastModified ?? .distantPast)
+        case .size:
+            primary = compare(lhs.size, rhs.size)
+        case .kind:
+            primary = ImageKind.displayKind(for: lhs.key)
+                .localizedStandardCompare(ImageKind.displayKind(for: rhs.key))
+        }
+        let result = primary == .orderedSame
+            ? lhs.name.localizedStandardCompare(rhs.name)
+            : primary
+        return ordered(result)
+    }
+
+    private func compare<T: Comparable>(_ lhs: T, _ rhs: T) -> ComparisonResult {
+        if lhs < rhs { return .orderedAscending }
+        if lhs > rhs { return .orderedDescending }
+        return .orderedSame
+    }
+
+    private func ordered(_ result: ComparisonResult) -> Bool {
+        switch sortDirection {
+        case .ascending: result == .orderedAscending
+        case .descending: result == .orderedDescending
+        }
+    }
+
+    private enum Keys {
+        static let sortField = "browser.sortField"
+        static let sortDirection = "browser.sortDirection"
     }
 }

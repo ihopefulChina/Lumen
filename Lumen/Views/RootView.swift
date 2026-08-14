@@ -248,6 +248,34 @@ private struct WorkspaceView: View {
                     Label("新建文件夹", systemImage: "folder.badge.plus")
                 }
 
+                Button {
+                    model.toggleCurrentFolderFavorite()
+                } label: {
+                    Label(
+                        model.isCurrentFolderFavorite ? "从常用中移除" : "添加到常用",
+                        systemImage: model.isCurrentFolderFavorite ? "star.fill" : "star"
+                    )
+                }
+                .disabled(model.selectedBucket == nil)
+                .help(model.isCurrentFolderFavorite ? "从常用位置移除" : "添加当前文件夹到常用位置")
+
+                Menu {
+                    Picker("排序依据", selection: $model.browser.sortField) {
+                        ForEach(BrowserSortField.allCases) { field in
+                            Text(field.title).tag(field)
+                        }
+                    }
+                    Divider()
+                    Picker("顺序", selection: $model.browser.sortDirection) {
+                        ForEach(BrowserSortDirection.allCases) { direction in
+                            Label(direction.title, systemImage: direction.symbol).tag(direction)
+                        }
+                    }
+                } label: {
+                    Label("排序", systemImage: "arrow.up.arrow.down")
+                }
+                .help("排序项目")
+
                 Picker("视图", selection: $model.browser.viewMode) {
                     ForEach(BrowserViewMode.allCases) { mode in
                         Label(mode.title, systemImage: mode.symbol).tag(mode)

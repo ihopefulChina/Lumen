@@ -14,6 +14,35 @@ struct SidebarView: View {
                 }
             }
         )) {
+            if !model.favorites.items.isEmpty {
+                Section("常用") {
+                    ForEach(model.favorites.items) { favorite in
+                        Button {
+                            model.openFavorite(favorite)
+                        } label: {
+                            Label {
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(favorite.name)
+                                        .lineLimit(1)
+                                    Text(favorite.bucketName)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                            } icon: {
+                                Image(systemName: favorite.prefix.isEmpty ? "externaldrive" : "folder")
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .contextMenu {
+                            Button("从常用中移除") {
+                                model.favorites.remove(favorite)
+                            }
+                        }
+                    }
+                }
+            }
+
             Section("账号") {
                 ForEach(model.accounts) { account in
                     Button {

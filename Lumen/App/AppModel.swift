@@ -30,6 +30,7 @@ final class AppModel {
     var transfers: TransferEngine
     var settings: AppSettings
     var updates: UpdateService
+    var favorites: FavoriteStore
     var showMenuBarExtra: Bool {
         get { services.showMenuBarExtra }
         set { services.showMenuBarExtra = newValue }
@@ -105,6 +106,7 @@ final class AppModel {
         self.transfers = services.transfers
         self.settings = services.settings
         self.updates = services.updates
+        self.favorites = services.favorites
         if kind == .window, let source = services.focused {
             selectedAccountID = source.selectedAccountID
             buckets = source.buckets
@@ -169,10 +171,14 @@ final class AppModel {
     }
 
     func selectBucket(_ bucket: OSSBucket) {
+        selectBucket(bucket, prefix: "")
+    }
+
+    private func selectBucket(_ bucket: OSSBucket, prefix: String) {
         invalidateListingAndInspectorRequests()
         selectedBucketName = bucket.name
         lastBucketName = bucket.name
-        browser.navigate(to: "", record: false)
+        browser.navigate(to: prefix, record: false)
         browser.backStack = []
         browser.forwardStack = []
         Task { await refreshListing() }
@@ -182,6 +188,73 @@ final class AppModel {
         invalidateListingAndInspectorRequests()
         browser.navigate(to: folder.prefix)
         Task { await refreshListing() }
+    }
+
+    var isCurrentFolderFavorite: Bool {
+        isFavorite(prefix: browser.prefix)
+    }
+
+    func isFavorite(prefix: String) -> Bool {
+        guard let accountID = selectedAccountID, let bucketName = selectedBucketName else {
+            return false
+        }
+        return favorites.contains(
+            accountID: accountID,
+            bucketName: bucketName,
+            prefix: prefix
+        )
+    }
+
+    func toggleCurrentFolderFavorite() {
+        let name = browser.prefix.isEmpty
+            ? (selectedBucketName ?? "存储空间")
+            : PathTemplate.lastComponent(browser.prefix)
+        toggleFavorite(prefix: browser.prefix, name: name)
+    }
+
+    func toggleFavorite(prefix: String, name: String) {
+        guard let accountID = selectedAccountID, let bucketName = selectedBucketName else { return }
+        if isFavorite(prefix: prefix) {
+            favorites.remove(accountID: accountID, bucketName: bucketName, prefix: prefix)
+        } else {
+            favorites.add(
+                FavoriteLocation(
+                    accountID: accountID,
+                    bucketName: bucketName,
+                    prefix: prefix,
+                    name: name
+                )
+            )
+        }
+    }
+
+    func openFavorite(_ favorite: FavoriteLocation) {
+        guard let account = accounts.first(where: { $0.id == favorite.accountID }) else {
+            favorites.remove(favorite)
+            present("这个常用位置的账号已不存在", error: true)
+            return
+        }
+
+        if selectedAccountID != account.id {
+            invalidateAllBrowserRequests()
+            selectedAccountID = account.id
+            lastAccountID = account.id.uuidString
+            selectedBucketName = nil
+            buckets = []
+            browser.reset()
+        }
+
+        Task {
+            if !buckets.contains(where: { $0.name == favorite.bucketName }) {
+                await refreshBuckets(selecting: favorite.bucketName)
+            }
+            guard let bucket = buckets.first(where: { $0.name == favorite.bucketName }) else {
+                favorites.remove(favorite)
+                present("这个常用位置的存储空间已不存在", error: true)
+                return
+            }
+            selectBucket(bucket, prefix: favorite.prefix)
+        }
     }
 
     func goToPrefix(_ prefix: String) {

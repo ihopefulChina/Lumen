@@ -47,6 +47,57 @@ struct BrowserModelTests {
         #expect(model.selectedKeys == ["a.txt", "b.txt"])
     }
 
+    @Test func sizeSortingKeepsFoldersFirstAndUsesTheRequestedDirection() {
+        let model = BrowserModel(defaults: Self.defaults())
+        model.imagesOnly = false
+        model.folders = [
+            OSSFolder(prefix: "alpha/"),
+            OSSFolder(prefix: "zulu/")
+        ]
+        model.objects = [
+            OSSObject(key: "small.txt", size: 1, etag: "s", lastModified: nil, storageClass: "Standard"),
+            OSSObject(key: "large.txt", size: 100, etag: "l", lastModified: nil, storageClass: "Standard")
+        ]
+        model.sortField = .size
+        model.sortDirection = .descending
+
+        #expect(model.visibleFolders.map(\.prefix) == ["zulu/", "alpha/"])
+        #expect(model.visibleObjects.map(\.key) == ["large.txt", "small.txt"])
+        #expect(model.orderedVisibleKeys == ["zulu/", "alpha/", "large.txt", "small.txt"])
+    }
+
+    @Test func browserSortPreferencePersistsAcrossWindows() {
+        let defaults = Self.defaults()
+        let first = BrowserModel(defaults: defaults)
+        first.sortField = .modified
+        first.sortDirection = .descending
+
+        let reopened = BrowserModel(defaults: defaults)
+
+        #expect(reopened.sortField == .modified)
+        #expect(reopened.sortDirection == .descending)
+    }
+
+    @Test func favoriteLocationsPersistAndDoNotDuplicate() {
+        let defaults = Self.defaults()
+        let accountID = UUID()
+        let favorite = FavoriteLocation(
+            accountID: accountID,
+            bucketName: "assets",
+            prefix: "design/icons/",
+            name: "icons"
+        )
+        let store = FavoriteStore(defaults: defaults)
+
+        store.add(favorite)
+        store.add(favorite)
+
+        #expect(store.items == [favorite])
+        #expect(FavoriteStore(defaults: defaults).items == [favorite])
+        store.remove(favorite)
+        #expect(store.items.isEmpty)
+    }
+
     @Test func nativeTableSelectionKeepsAKeyboardFocusAndAnchor() {
         let model = Self.model()
 
@@ -162,7 +213,7 @@ struct BrowserModelTests {
     }
 
     private static func model() -> BrowserModel {
-        let model = BrowserModel()
+        let model = BrowserModel(defaults: defaults())
         model.folders = [OSSFolder(prefix: "folder/")]
         model.objects = [
             OSSObject(key: "a.txt", size: 1, etag: "a", lastModified: nil, storageClass: "Standard"),
@@ -171,6 +222,11 @@ struct BrowserModelTests {
         ]
         model.imagesOnly = false
         return model
+    }
+
+    private static func defaults() -> UserDefaults {
+        let suite = "LumenTests.BrowserModel.\(UUID().uuidString)"
+        return UserDefaults(suiteName: suite)!
     }
 
     private static func waitForRequests(

@@ -17,6 +17,7 @@ final class AppServices {
     var settings = AppSettings()
     var transfers = TransferEngine()
     var updates = UpdateService()
+    var favorites = FavoriteStore()
     var showMenuBarExtra = false
     weak var focused: AppModel?
 
@@ -28,12 +29,14 @@ final class AppServices {
         accounts: [OSSAccount]? = nil,
         settings: AppSettings = AppSettings(),
         transfers: TransferEngine = TransferEngine(),
-        updates: UpdateService = UpdateService()
+        updates: UpdateService = UpdateService(),
+        favorites: FavoriteStore = FavoriteStore()
     ) {
         self.accounts = accounts ?? AccountStore.load()
         self.settings = settings
         self.transfers = transfers
         self.updates = updates
+        self.favorites = favorites
     }
 
     var sessions: [AppModel] {

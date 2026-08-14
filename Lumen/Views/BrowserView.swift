@@ -331,6 +331,10 @@ struct BrowserView: View {
 
     @ViewBuilder
     private func folderMenu(_ folder: OSSFolder) -> some View {
+        Button(model.isFavorite(prefix: folder.prefix) ? "从常用中移除" : "添加到常用") {
+            model.toggleFavorite(prefix: folder.prefix, name: folder.name)
+        }
+        Divider()
         Button(downloadTitle(clickedKey: folder.prefix)) {
             selectForMenu(folder.prefix)
             model.downloadSelection()
