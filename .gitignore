@@ -17,6 +17,7 @@ secrets.json
 .vscode/
 .cursor/
 .grok/
+.worktrees/
 dist/
 icon-compare.jpg
 .icon-compare.jpg
