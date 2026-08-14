@@ -8,18 +8,18 @@ Apple Silicon 上用的阿里云 OSS 客户端。界面按访达来：左边账�
 
 当前 **0.0.1**。只要 arm64，系统 macOS 15+。签名走 OSS V4（`OSS4-HMAC-SHA256`）。
 
-仓库：<https://github.com/ihopefulChina/lumen>
+仓库：<https://github.com/ihopefulChina/Lumen>
 
 ## 安装
 
-[Releases](https://github.com/ihopefulChina/lumen/releases) 里下 `Lumen-0.0.1.dmg`，把 App 拖进「应用程序」。
+[Releases](https://github.com/ihopefulChina/Lumen/releases) 里下 `Lumen-0.0.1.dmg`，把 App 拖进「应用程序」。
 
 这个包是临时签名，没做公证。第一次打开会提示无法验证开发者，**右键 App → 打开** 一次就行。别从不明 fork 下别人编好的包。
 
 从源码跑：
 
 ```bash
-git clone git@github.com:ihopefulChina/lumen.git
+git clone git@github.com:ihopefulChina/Lumen.git
 cd lumen
 open Lumen.xcodeproj
 ```
