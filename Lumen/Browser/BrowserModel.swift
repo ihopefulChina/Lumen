@@ -9,6 +9,18 @@ enum BrowserViewMode: String, CaseIterable, Identifiable {
     var symbol: String { self == .grid ? "square.grid.2x2" : "list.bullet" }
 }
 
+struct BrowserSelectionModifiers: OptionSet, Sendable {
+    let rawValue: Int
+
+    static let toggle = BrowserSelectionModifiers(rawValue: 1 << 0)
+    static let extendRange = BrowserSelectionModifiers(rawValue: 1 << 1)
+}
+
+enum BrowserSelectionDirection: Sendable {
+    case previous
+    case next
+}
+
 @MainActor
 @Observable
 final class BrowserModel {
@@ -19,6 +31,8 @@ final class BrowserModel {
         didSet { selectionEpoch += 1 }
     }
     var selectionEpoch = 0
+    var selectionAnchorKey: String?
+    var focusedKey: String?
     var viewMode: BrowserViewMode = .grid
     var searchText = ""
     var isLoading = false
@@ -67,6 +81,10 @@ final class BrowserModel {
         Set(visibleFolders.map(\.prefix)).union(visibleObjects.map(\.key))
     }
 
+    var orderedVisibleKeys: [String] {
+        visibleFolders.map(\.prefix) + visibleObjects.map(\.key)
+    }
+
     func selectAllVisible() {
         selectedKeys = visibleKeys
     }
@@ -76,17 +94,76 @@ final class BrowserModel {
     }
 
     var primarySelection: OSSObject? {
-        if let first = selectedKeys.first {
-            return objects.first(where: { $0.key == first })
+        visibleObjects.first(where: { selectedKeys.contains($0.key) })
+    }
+
+    func select(key: String, modifiers: BrowserSelectionModifiers) {
+        let ordered = orderedVisibleKeys
+        guard let targetIndex = ordered.firstIndex(of: key) else { return }
+
+        if modifiers.contains(.extendRange) {
+            let anchor = selectionAnchorKey ?? focusedKey ?? key
+            let anchorIndex = ordered.firstIndex(of: anchor) ?? targetIndex
+            let range = min(anchorIndex, targetIndex)...max(anchorIndex, targetIndex)
+            let rangeKeys = Set(range.map { ordered[$0] })
+            if modifiers.contains(.toggle) {
+                selectedKeys.formUnion(rangeKeys)
+            } else {
+                selectedKeys = rangeKeys
+            }
+            selectionAnchorKey = anchor
+            focusedKey = key
+            return
         }
-        return nil
+
+        if modifiers.contains(.toggle) {
+            if selectedKeys.contains(key) {
+                selectedKeys.remove(key)
+            } else {
+                selectedKeys.insert(key)
+            }
+            focusedKey = key
+            selectionAnchorKey = selectedKeys.contains(key)
+                ? key
+                : ordered.first(where: { selectedKeys.contains($0) })
+            return
+        }
+
+        selectedKeys = [key]
+        selectionAnchorKey = key
+        focusedKey = key
+    }
+
+    func moveSelection(_ direction: BrowserSelectionDirection, extending: Bool) {
+        let ordered = orderedVisibleKeys
+        guard !ordered.isEmpty else { return }
+        let current = focusedKey.flatMap { ordered.firstIndex(of: $0) }
+            ?? ordered.firstIndex(where: { selectedKeys.contains($0) })
+            ?? (direction == .next ? -1 : ordered.count)
+        let targetIndex: Int
+        switch direction {
+        case .previous:
+            targetIndex = max(0, current - 1)
+        case .next:
+            targetIndex = min(ordered.count - 1, current + 1)
+        }
+        select(
+            key: ordered[targetIndex],
+            modifiers: extending ? [.extendRange] : []
+        )
+    }
+
+    func clearSelection() {
+        selectedKeys = []
+        selectionAnchorKey = nil
+        focusedKey = nil
     }
 
     func reset() {
         prefix = ""
         folders = []
         objects = []
-        selectedKeys = []
+        clearSelection()
         errorMessage = nil
         isLoading = false
         backStack = []
@@ -95,7 +172,7 @@ final class BrowserModel {
 
     func navigate(to newPrefix: String, record: Bool = true) {
         guard newPrefix != prefix else {
-            selectedKeys = []
+            clearSelection()
             return
         }
         if record {
@@ -103,14 +180,14 @@ final class BrowserModel {
             forwardStack.removeAll()
         }
         prefix = newPrefix
-        selectedKeys = []
+        clearSelection()
     }
 
     func goBack() -> Bool {
         guard let previous = backStack.popLast() else { return false }
         forwardStack.append(prefix)
         prefix = previous
-        selectedKeys = []
+        clearSelection()
         return true
     }
 
@@ -118,7 +195,7 @@ final class BrowserModel {
         guard let next = forwardStack.popLast() else { return false }
         backStack.append(prefix)
         prefix = next
-        selectedKeys = []
+        clearSelection()
         return true
     }
 
@@ -128,6 +205,12 @@ final class BrowserModel {
         objects = listing.objects.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         let visibleIDs = Set(visibleObjects.map(\.key)).union(visibleFolders.map(\.prefix))
         selectedKeys = selectedKeys.intersection(visibleIDs)
+        if let focusedKey, !visibleIDs.contains(focusedKey) {
+            self.focusedKey = nil
+        }
+        if let selectionAnchorKey, !visibleIDs.contains(selectionAnchorKey) {
+            self.selectionAnchorKey = nil
+        }
         lastRefresh = .now
         errorMessage = nil
     }

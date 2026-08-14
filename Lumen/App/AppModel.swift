@@ -21,6 +21,7 @@ final class AppModel {
 
     private let services: AppServices
     private let kind: Kind
+    private let clientProvider: @MainActor (OSSAccount, OSSBucket?) throws -> OSSClient
 
     var accounts: [OSSAccount] {
         get { services.accounts }
@@ -55,6 +56,12 @@ final class AppModel {
     private var uploadGeneration = 0
     private var didLoadWindow = false
     private var listingRefreshTask: Task<Void, Never>?
+    private var listingLoadTask: Task<ObjectListing, Error>?
+    private var bucketLoadTask: Task<[OSSBucket], Error>?
+    private var inspectorLoadTask: Task<(ObjectHead, String?), Error>?
+    private let listingRequestGate = BrowserRequestGate()
+    private let bucketRequestGate = BrowserRequestGate()
+    private let inspectorRequestGate = BrowserRequestGate()
 
     private var lastAccountID: String {
         get { UserDefaults.standard.string(forKey: "nav.lastAccount") ?? "" }
@@ -77,9 +84,14 @@ final class AppModel {
         selectedAccount != nil && selectedBucket != nil
     }
 
-    init(kind: Kind = .window, services: AppServices = .shared) {
+    init(
+        kind: Kind = .window,
+        services: AppServices = .shared,
+        clientProvider: @escaping @MainActor (OSSAccount, OSSBucket?) throws -> OSSClient = AppModel.defaultClient
+    ) {
         self.kind = kind
         self.services = services
+        self.clientProvider = clientProvider
         self.transfers = services.transfers
         self.settings = services.settings
         self.updates = services.updates
@@ -124,6 +136,7 @@ final class AppModel {
 
     func pruneIfNeeded() {
         if let id = selectedAccountID, !accounts.contains(where: { $0.id == id }) {
+            invalidateAllBrowserRequests()
             selectedAccountID = accounts.first?.id
             buckets = []
             selectedBucketName = nil
@@ -136,6 +149,7 @@ final class AppModel {
     }
 
     func selectAccount(_ account: OSSAccount) {
+        invalidateAllBrowserRequests()
         selectedAccountID = account.id
         lastAccountID = account.id.uuidString
         selectedBucketName = nil
@@ -145,6 +159,7 @@ final class AppModel {
     }
 
     func selectBucket(_ bucket: OSSBucket) {
+        invalidateListingAndInspectorRequests()
         selectedBucketName = bucket.name
         lastBucketName = bucket.name
         browser.navigate(to: "", record: false)
@@ -154,31 +169,53 @@ final class AppModel {
     }
 
     func openFolder(_ folder: OSSFolder) {
+        invalidateListingAndInspectorRequests()
         browser.navigate(to: folder.prefix)
         Task { await refreshListing() }
     }
 
     func goToPrefix(_ prefix: String) {
+        invalidateListingAndInspectorRequests()
         browser.navigate(to: prefix)
         Task { await refreshListing() }
     }
 
     func goBack() {
         guard browser.goBack() else { return }
+        invalidateListingAndInspectorRequests()
         Task { await refreshListing() }
     }
 
     func goForward() {
         guard browser.goForward() else { return }
+        invalidateListingAndInspectorRequests()
         Task { await refreshListing() }
     }
 
     func refreshListing() async {
-        guard let client = makeClient() else { return }
+        guard let client = makeClient(),
+              let accountID = selectedAccountID,
+              let bucketName = selectedBucketName
+        else { return }
+        listingLoadTask?.cancel()
+        let prefix = browser.prefix
+        let context = listingRequestGate.begin(
+            accountID: accountID,
+            bucketName: bucketName,
+            prefix: prefix,
+            objectKey: nil
+        )
         browser.isLoading = true
         browser.errorMessage = nil
+        let task = Task { try await client.listAll(prefix: prefix) }
+        listingLoadTask = task
         do {
-            let listing = try await client.listAll(prefix: browser.prefix)
+            let listing = try await task.value
+            guard listingRequestGate.canCommit(context),
+                  selectedAccountID == context.accountID,
+                  selectedBucketName == context.bucketName,
+                  browser.prefix == context.prefix
+            else { return }
             browser.apply(listing, imagesOnly: settings.imagesOnly)
             if listing.isTruncated {
                 present("这个文件夹里的对象很多，只加载了前几页")
@@ -186,24 +223,32 @@ final class AppModel {
         } catch is CancellationError {
             // Ignore.
         } catch {
-            browser.errorMessage = error.localizedDescription
+            if listingRequestGate.canCommit(context) {
+                browser.errorMessage = error.localizedDescription
+            }
         }
-        browser.isLoading = false
+        if listingRequestGate.canCommit(context) {
+            browser.isLoading = false
+            listingLoadTask = nil
+        }
     }
 
     func refreshBuckets(selecting preferred: String? = nil) async {
         guard let account = selectedAccount else { return }
+        bucketLoadTask?.cancel()
+        let context = bucketRequestGate.begin(
+            accountID: account.id,
+            bucketName: nil,
+            prefix: "",
+            objectKey: nil
+        )
         isLoadingBuckets = true
-        defer { isLoadingBuckets = false }
         do {
-            let creds = try AccountStore.credentials(for: account)
-            let client = OSSClient(
-                credentials: creds,
-                region: account.regionID,
-                endpointHost: account.apiHost(for: nil),
-                bucket: nil
-            )
-            let list = try await client.listBuckets()
+            let client = try clientProvider(account, nil)
+            let task = Task { try await client.listBuckets() }
+            bucketLoadTask = task
+            let list = try await task.value
+            guard bucketRequestGate.canCommit(context), selectedAccountID == context.accountID else { return }
             buckets = list.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
             let current = selectedBucketName
             if let current, buckets.contains(where: { $0.name == current }) {
@@ -216,25 +261,23 @@ final class AppModel {
             } else if let first = buckets.first {
                 selectBucket(first)
             }
+        } catch is CancellationError {
+            // A newer account request replaced this one.
         } catch {
-            present(error.localizedDescription, error: true)
+            if bucketRequestGate.canCommit(context) {
+                present(error.localizedDescription, error: true)
+            }
+        }
+        if bucketRequestGate.canCommit(context) {
+            isLoadingBuckets = false
+            bucketLoadTask = nil
         }
     }
 
     func makeClient() -> OSSClient? {
         guard let account = selectedAccount else { return nil }
         do {
-            let creds = try AccountStore.credentials(for: account)
-            var client = OSSClient(
-                credentials: creds,
-                region: account.signingRegion(for: selectedBucket),
-                endpointHost: account.apiHost(for: selectedBucket),
-                bucket: selectedBucket?.name
-            )
-            if let bucket = selectedBucket {
-                client = client.scoped(to: bucket, account: account)
-            }
-            return client
+            return try clientProvider(account, selectedBucket)
         } catch {
             present(error.localizedDescription, error: true)
             return nil
@@ -729,22 +772,51 @@ final class AppModel {
 
     func loadInspector() async {
         guard let object = browser.primarySelection, let client = makeClient() else {
+            inspectorLoadTask?.cancel()
+            inspectorRequestGate.invalidate()
             inspectorHead = nil
             inspectorText = nil
+            isLoadingHead = false
             return
         }
+        inspectorLoadTask?.cancel()
+        let context = inspectorRequestGate.begin(
+            accountID: selectedAccountID,
+            bucketName: selectedBucketName,
+            prefix: browser.prefix,
+            objectKey: object.key
+        )
         isLoadingHead = true
-        defer { isLoadingHead = false }
         inspectorText = nil
-        do {
-            inspectorHead = try await client.head(key: object.key)
-        } catch {
-            inspectorHead = nil
+        let task = Task { () throws -> (ObjectHead, String?) in
+            let head = try await client.head(key: object.key)
+            var text: String?
+            if object.isText,
+               object.size <= 512_000,
+               let data = try? await client.objectData(key: object.key) {
+                text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16)
+            }
+            return (head, text)
         }
-        guard object.isText, object.size <= 512_000 else { return }
-        if let data = try? await client.objectData(key: object.key),
-           let text = String(data: data, encoding: .utf8) ?? String(data: data, encoding: .utf16) {
+        inspectorLoadTask = task
+        do {
+            let (head, text) = try await task.value
+            guard inspectorRequestGate.canCommit(context),
+                  browser.primarySelection?.key == context.objectKey
+            else { return }
+            inspectorHead = head
             inspectorText = text
+        } catch is CancellationError {
+            // A newer selection replaced this one.
+        } catch {
+            if inspectorRequestGate.canCommit(context) {
+                inspectorHead = nil
+                inspectorText = nil
+            }
+        }
+        if inspectorRequestGate.canCommit(context) {
+            isLoadingHead = false
+            inspectorLoadTask = nil
         }
     }
 
@@ -813,6 +885,41 @@ final class AppModel {
         let url = FileManager.default.temporaryDirectory.appending(path: "clipboard-\(UUID().uuidString).jpg")
         try? data.write(to: url)
         return url
+    }
+
+    private static func defaultClient(account: OSSAccount, bucket: OSSBucket?) throws -> OSSClient {
+        let credentials = try AccountStore.credentials(for: account)
+        var client = OSSClient(
+            credentials: credentials,
+            region: account.signingRegion(for: bucket),
+            endpointHost: account.apiHost(for: bucket),
+            bucket: bucket?.name
+        )
+        if let bucket {
+            client = client.scoped(to: bucket, account: account)
+        }
+        return client
+    }
+
+    private func invalidateListingAndInspectorRequests() {
+        listingLoadTask?.cancel()
+        listingLoadTask = nil
+        listingRequestGate.invalidate()
+        browser.isLoading = false
+        inspectorLoadTask?.cancel()
+        inspectorLoadTask = nil
+        inspectorRequestGate.invalidate()
+        inspectorHead = nil
+        inspectorText = nil
+        isLoadingHead = false
+    }
+
+    private func invalidateAllBrowserRequests() {
+        bucketLoadTask?.cancel()
+        bucketLoadTask = nil
+        bucketRequestGate.invalidate()
+        isLoadingBuckets = false
+        invalidateListingAndInspectorRequests()
     }
 }
 

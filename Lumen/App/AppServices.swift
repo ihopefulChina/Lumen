@@ -23,8 +23,16 @@ final class AppServices {
     private var didBootstrap = false
     private var sessionBoxes: [WeakSession] = []
 
-    private init() {
-        accounts = AccountStore.load()
+    init(
+        accounts: [OSSAccount]? = nil,
+        settings: AppSettings = AppSettings(),
+        transfers: TransferEngine = TransferEngine(),
+        updates: UpdateService = UpdateService()
+    ) {
+        self.accounts = accounts ?? AccountStore.load()
+        self.settings = settings
+        self.transfers = transfers
+        self.updates = updates
     }
 
     var sessions: [AppModel] {
