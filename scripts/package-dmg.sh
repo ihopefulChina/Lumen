@@ -3,10 +3,10 @@ set -euo pipefail
 
 script_dir="${0:A:h}"
 repo_dir="${script_dir:h}"
-version="0.0.4"
-build_number="4"
+version="0.0.5"
+build_number="5"
 sparkle_account="studio.lumen.oss"
-derived_dir="$repo_dir/.build/release-v004"
+derived_dir="$repo_dir/.build/release-v005"
 app_path="$derived_dir/Build/Products/Release/Lumen.app"
 dist_dir="$repo_dir/dist"
 output_path="$dist_dir/Lumen-$version.dmg"
@@ -18,7 +18,7 @@ if [[ -e "$output_path" ]]; then
     exit 2
 fi
 
-stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/lumen-v004-dmg.XXXXXX")"
+stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/lumen-v005-dmg.XXXXXX")"
 temp_dmg="$stage_dir/Lumen-$version.dmg"
 mount_dir="$stage_dir/mount"
 appcast_dir="$stage_dir/appcast"
@@ -27,7 +27,7 @@ cleanup() {
     if [[ "$mounted" == "1" ]]; then
         hdiutil detach "$mount_dir" -quiet || true
     fi
-    if [[ "$stage_dir" == "${TMPDIR:-/tmp}"/lumen-v004-dmg.* ]]; then
+    if [[ "$stage_dir" == "${TMPDIR:-/tmp}"/lumen-v005-dmg.* ]]; then
         rm -rf "$stage_dir"
     fi
 }

@@ -38,6 +38,10 @@ struct SettingsView: View {
                     Button("检查更新…") {
                         model.updates.checkForUpdates()
                     }
+                    .disabled(!model.updates.canCheckForUpdates)
+                    Text("发现新版本后可直接安装；安装完成后，Lumen 会自动重新打开。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 Section("关于") {
                     Text("传图片和文本去阿里云 OSS。密钥只存在这台 Mac 上。")

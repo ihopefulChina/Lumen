@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.4.dmg"><strong>下载 Lumen 0.0.4</strong></a>
+  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.5.dmg"><strong>下载 Lumen 0.0.5</strong></a>
   &nbsp;·&nbsp;
   <a href="https://github.com/ihopefulChina/Lumen/releases">版本记录</a>
   &nbsp;·&nbsp;
@@ -27,18 +27,20 @@
 
 ## OSS，也可以像访达一样自然
 
-Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口。单击选择、双击打开，使用 `⌘` 或 `⇧` 多选；网格、列表、路径栏、侧边栏收藏、快速查看和拖放整理都遵循熟悉的 Mac 操作。
+Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口。单击选择、双击打开，使用 `⌘` 或 `⇧` 多选；按 Return 原地重命名，按 `⌘↓` 打开。网格、列表、路径栏、侧边栏收藏、快速查看和拖放整理都遵循熟悉的 Mac 操作。
 
 ### 找到内容
 
 - 在网格和列表之间切换，按名称、日期、大小或类型排序。
 - 收藏经常访问的 OSS 文件夹，从侧边栏一步抵达。
+- 搜索只作用于当前文件夹；过滤结果时会同步清理隐藏选择，避免误操作看不见的对象。
 - 使用方向键移动选择，按空格快速查看，打开检查器查看对象信息。
 - 切换账号、Bucket 或路径时，过期的网络响应不会覆盖当前页面。
 
 ### 整理内容
 
 - 在同一 Bucket 内复制、移动或拖放文件与文件夹。
+- 像访达一样在网格或列表中原地重命名；文件默认只选中主名，扩展名保持不动。
 - 重命名文件夹时保留完整子目录结构。
 - 所有目标会先做冲突检查；Lumen 不会静默覆盖已有对象。
 - 云端移动会在复制全部成功后才删除源对象，失败时尽量回滚新建目标。
@@ -60,7 +62,7 @@ Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口�
 
 ## 开始使用
 
-1. [下载 Lumen 0.0.4](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.4.dmg)。
+1. [下载 Lumen 0.0.5](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.5.dmg)。
 2. 打开 DMG，把 Lumen 拖到「应用程序」。
 3. 添加阿里云 OSS 账号，选择地域，然后双击进入 Bucket。
 4. 把文件拖进窗口，或按 `⌘O` 开始上传。
@@ -81,9 +83,9 @@ assets/{yyyy}/{MM}/{dd}/
 
 ## 自动更新
 
-在菜单栏选择「Lumen → 检查更新…」，或在「设置 → 通用」开启自动检查。发现新版本后，Lumen 会下载并验证更新，安装完成后重新启动软件。
+在菜单栏选择「Lumen → 检查更新…」，或在「设置 → 通用」开启自动检查。发现新版本后，点击安装即可完成下载与签名验证；安装结束后 Lumen 会自动退出并重新打开。
 
-0.0.3 及更早版本尚未内置这一能力，需要手动安装 0.0.4 一次；此后的版本可以直接在 Lumen 内更新。
+已安装 0.0.4 的用户可以直接在软件内升级到 0.0.5。0.0.3 及更早版本尚未内置更新器，需要先手动安装一次当前版本。
 
 ## 快捷键
 
@@ -98,12 +100,13 @@ assets/{yyyy}/{MM}/{dd}/
 | 刷新 | `⌘R` |
 | 网格 / 列表 | `⌘1` / `⌘2` |
 | 快速查看 | `Space` |
-| 打开选中项 | `Return` |
-| 取消选择 / 删除 | `Esc` / `Delete` |
+| 重命名 | `Return` |
+| 打开选中项 | `⌘↓` 或双击 |
+| 取消重命名或选择 / 删除 | `Esc` / `Delete` |
 
 ## 安装与系统要求
 
-Lumen 0.0.4 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
+Lumen 0.0.5 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
 
 当前公开 DMG 使用 ad-hoc 签名，尚未使用 Apple Developer ID 签名或完成 Apple 公证。如果 macOS 阻止首次打开，请前往「系统设置 → 隐私与安全性」确认打开。首次安装后的软件更新仍会经过 Lumen 内置的 Ed25519 签名验证。
 
