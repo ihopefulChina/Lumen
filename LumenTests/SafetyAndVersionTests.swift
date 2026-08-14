@@ -70,6 +70,63 @@ struct SafetyAndVersionTests {
         #expect(!AppVersion.isNewer("1.two.3", than: "0.0.3"))
     }
 
+    @Test func diagnosticsExcludeStorageAndCredentialIdentifiers() {
+        let account = OSSAccount(
+            id: UUID(),
+            name: "Production Account",
+            accessKeyId: "LTAI-sensitive-id",
+            regionID: "cn-secret-region",
+            endpointOverride: "https://internal.example.test",
+            cdnDomain: "secret-cdn.example.test",
+            defaultACL: .private,
+            prefixTemplate: "private/{yyyy}/",
+            useTransferAccelerate: false,
+            createdAt: .now
+        )
+        let transfer = TransferJob(
+            id: UUID(),
+            kind: .upload,
+            status: .failed,
+            title: "private-object.jpg",
+            objectKey: "production-bucket/private/object.jpg",
+            localURL: URL(filePath: "/Users/private/Documents/private-object.jpg"),
+            transferred: 0,
+            total: 42,
+            errorMessage: "RequestId secret-request-id",
+            publicURL: URL(string: "https://production-bucket.example.test/private/object.jpg?Signature=secret"),
+            finishedAt: .now
+        )
+        let input = DiagnosticsReport.Input(
+            version: "0.0.7",
+            build: "7",
+            operatingSystem: "macOS 15.6",
+            architecture: "arm64",
+            updateFeedHost: "github.com",
+            accounts: [account],
+            transfers: [transfer],
+            settings: .init(
+                concurrentUploads: 3,
+                convertHEIC: true,
+                imagesOnly: true,
+                playCompleteSound: false,
+                showMenuBarWhileTransferring: true,
+                checkUpdatesAutomatically: true
+            )
+        )
+
+        let report = DiagnosticsReport.make(input: input)
+
+        #expect(report.contains("Lumen 0.0.7 (7)"))
+        #expect(report.contains("Configured accounts: 1"))
+        #expect(report.contains("Failed transfers: 1"))
+        for sensitive in [
+            "LTAI", "secret", "Production Account", "production-bucket",
+            "private/object.jpg", "/Users/", "RequestId", "Signature"
+        ] {
+            #expect(!report.localizedCaseInsensitiveContains(sensitive))
+        }
+    }
+
     @Test func objectURLPreservesExactKey() throws {
         let account = OSSAccount(
             id: UUID(),

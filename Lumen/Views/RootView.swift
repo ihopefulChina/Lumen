@@ -368,7 +368,7 @@ private struct BannerView: View {
                 }
                 .buttonStyle(.borderless)
                 .font(.callout.weight(.semibold))
-                .accessibilityHint("恢复上一次重命名或移动")
+                .accessibilityHint("恢复上一次可撤销的云端操作")
             }
 
             Button(action: dismiss) {
@@ -379,6 +379,7 @@ private struct BannerView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("关闭提示")
+            .help("关闭提示")
         }
         .padding(.leading, 14)
         .padding(.trailing, 9)

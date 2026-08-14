@@ -3,9 +3,14 @@ import Foundation
 import Observation
 
 enum AppLinks {
+    static let website = URL(string: "https://ihopefulchina.github.io/Lumen/")!
+    static let privacy = URL(string: "https://ihopefulchina.github.io/Lumen/privacy.html")!
+    static let support = URL(string: "https://ihopefulchina.github.io/Lumen/support.html")!
     static let github = URL(string: "https://github.com/ihopefulChina/Lumen")!
     static let releases = URL(string: "https://github.com/ihopefulChina/Lumen/releases")!
     static let issues = URL(string: "https://github.com/ihopefulChina/Lumen/issues")!
+    static let security = URL(string: "https://github.com/ihopefulChina/Lumen/security/policy")!
+    static let privateSecurityReport = URL(string: "https://github.com/ihopefulChina/Lumen/security/advisories/new")!
 }
 
 @MainActor
