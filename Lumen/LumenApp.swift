@@ -38,6 +38,7 @@ private struct WorkspaceRoot: View {
             .environment(model)
             .background(WindowFocusProbe { model.becomeFocused() })
             .onAppear {
+                guard !AppRuntime.isRunningTests else { return }
                 do {
                     try SecretStore.migrateLegacySecrets()
                 } catch {
@@ -52,10 +53,6 @@ private struct WorkspaceRoot: View {
 final class LumenAppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillFinishLaunching(_ notification: Notification) {
         NSWindow.allowsAutomaticWindowTabbing = false
-        // Run before the first window appears so existing 0.0.3 credentials are
-        // available even when SwiftUI restores a window without a fresh onAppear.
-        // WorkspaceRoot retries and surfaces any migration failure to the user.
-        try? SecretStore.migrateLegacySecrets()
     }
 
     func application(_ application: NSApplication, open urls: [URL]) {
@@ -83,6 +80,12 @@ final class LumenAppDelegate: NSObject, NSApplicationDelegate {
             alert.addButton(withTitle: "继续传输")
             return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
         }
+    }
+}
+
+private enum AppRuntime {
+    static var isRunningTests: Bool {
+        ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
     }
 }
 

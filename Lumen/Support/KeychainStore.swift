@@ -7,6 +7,12 @@ protocol SecureSecretBackend {
     func delete(_ account: String) throws
 }
 
+protocol KeychainItemAccessing: Sendable {
+    func read(account: String, modern: Bool) throws -> String?
+    func set(_ value: String, for account: String, modern: Bool) throws
+    func delete(account: String, modern: Bool) throws
+}
+
 struct KeychainSecretBackend: SecureSecretBackend {
     enum Storage {
         case automatic
@@ -15,45 +21,84 @@ struct KeychainSecretBackend: SecureSecretBackend {
     }
 
     private let storage: Storage
+    private let access: any KeychainItemAccessing
 
-    init(storage: Storage = .automatic) {
+    init(
+        storage: Storage = .automatic,
+        access: any KeychainItemAccessing = SystemKeychainItemAccess()
+    ) {
         self.storage = storage
+        self.access = access
     }
 
     func get(_ account: String) throws -> String? {
         switch storage {
         case .dataProtection:
-            return try read(account: account, modern: true)
+            return try access.read(account: account, modern: true)
         case .fileBased:
-            return try read(account: account, modern: false)
+            return try access.read(account: account, modern: false)
         case .automatic:
             do {
-                if let modern = try read(account: account, modern: true) {
+                if let modern = try access.read(account: account, modern: true) {
                     return modern
                 }
             } catch KeychainStoreError.status(errSecMissingEntitlement) {
                 // Public ad-hoc builds do not have a provisioned Keychain access group.
             }
-            return try read(account: account, modern: false)
+            return try access.read(account: account, modern: false)
         }
     }
 
     func set(_ value: String, for account: String) throws {
         switch storage {
         case .dataProtection:
-            try set(value, for: account, modern: true)
+            try access.set(value, for: account, modern: true)
         case .fileBased:
-            try set(value, for: account, modern: false)
+            try access.set(value, for: account, modern: false)
         case .automatic:
             do {
-                try set(value, for: account, modern: true)
+                try access.set(value, for: account, modern: true)
             } catch KeychainStoreError.status(errSecMissingEntitlement) {
-                try set(value, for: account, modern: false)
+                try access.set(value, for: account, modern: false)
             }
         }
     }
 
-    private func set(_ value: String, for account: String, modern: Bool) throws {
+    func delete(_ account: String) throws {
+        let modes: [Bool]
+        switch storage {
+        case .automatic: modes = [true, false]
+        case .dataProtection: modes = [true]
+        case .fileBased: modes = [false]
+        }
+        for modern in modes {
+            do {
+                try access.delete(account: account, modern: modern)
+            } catch KeychainStoreError.status(errSecMissingEntitlement) where modern {
+                continue
+            }
+        }
+    }
+}
+
+struct SystemKeychainItemAccess: KeychainItemAccessing {
+    func read(account: String, modern: Bool) throws -> String? {
+        var lookup = KeychainStore.query(account: account, modern: modern)
+        lookup[kSecReturnData as String] = true
+        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
+        var item: CFTypeRef?
+        let status = SecItemCopyMatching(lookup as CFDictionary, &item)
+        if status == errSecItemNotFound { return nil }
+        guard status == errSecSuccess else {
+            throw KeychainStoreError(status: status)
+        }
+        guard let data = item as? Data, let value = String(data: data, encoding: .utf8) else {
+            throw KeychainStoreError.invalidData
+        }
+        return value
+    }
+
+    func set(_ value: String, for account: String, modern: Bool) throws {
         let data = Data(value.utf8)
         let lookup = KeychainStore.query(account: account, modern: modern)
         let changes = [kSecValueData as String: data]
@@ -72,36 +117,11 @@ struct KeychainSecretBackend: SecureSecretBackend {
         }
     }
 
-    func delete(_ account: String) throws {
-        let modes: [Bool]
-        switch storage {
-        case .automatic: modes = [true, false]
-        case .dataProtection: modes = [true]
-        case .fileBased: modes = [false]
-        }
-        for modern in modes {
-            let status = SecItemDelete(KeychainStore.query(account: account, modern: modern) as CFDictionary)
-            if modern, status == errSecMissingEntitlement { continue }
-            guard status == errSecSuccess || status == errSecItemNotFound else {
-                throw KeychainStoreError(status: status)
-            }
-        }
-    }
-
-    private func read(account: String, modern: Bool) throws -> String? {
-        var lookup = KeychainStore.query(account: account, modern: modern)
-        lookup[kSecReturnData as String] = true
-        lookup[kSecMatchLimit as String] = kSecMatchLimitOne
-        var item: CFTypeRef?
-        let status = SecItemCopyMatching(lookup as CFDictionary, &item)
-        if status == errSecItemNotFound { return nil }
-        guard status == errSecSuccess else {
+    func delete(account: String, modern: Bool) throws {
+        let status = SecItemDelete(KeychainStore.query(account: account, modern: modern) as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
             throw KeychainStoreError(status: status)
         }
-        guard let data = item as? Data, let value = String(data: data, encoding: .utf8) else {
-            throw KeychainStoreError.invalidData
-        }
-        return value
     }
 }
 

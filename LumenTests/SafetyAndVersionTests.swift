@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Testing
 @testable import Lumen
 
@@ -133,24 +134,19 @@ struct SafetyAndVersionTests {
         #expect(result.migratedAccounts.isEmpty)
     }
 
-    @Test func distributionBuildCanRoundTripAKeychainSecret() throws {
-        let backend = KeychainSecretBackend()
-        let account = "lumen-keychain-test-\(UUID().uuidString)"
+    @Test func automaticKeychainFallsBackWhenDataProtectionNeedsEntitlement() throws {
+        let access = RecordingKeychainAccess(modernFailure: errSecMissingEntitlement)
+        let backend = KeychainSecretBackend(access: access)
+        let account = "account"
 
         try backend.set("temporary-secret", for: account)
-        defer { try? backend.delete(account) }
-
         #expect(try backend.get(account) == "temporary-secret")
-    }
+        try backend.delete(account)
 
-    @Test func fileBasedKeychainFallbackCanRoundTripASecret() throws {
-        let backend = KeychainSecretBackend(storage: .fileBased)
-        let account = "lumen-keychain-fallback-test-\(UUID().uuidString)"
-
-        try backend.set("temporary-secret", for: account)
-        defer { try? backend.delete(account) }
-
-        #expect(try backend.get(account) == "temporary-secret")
+        #expect(access.setModes == [true, false])
+        #expect(access.readModes == [true, false])
+        #expect(access.deleteModes == [true, false])
+        #expect(access.values.isEmpty)
     }
 }
 
@@ -185,4 +181,44 @@ private final class MemorySecretBackend: SecureSecretBackend {
 
 private enum MemorySecretError: Error {
     case writeFailed
+}
+
+private final class RecordingKeychainAccess: KeychainItemAccessing, @unchecked Sendable {
+    var values: [String: String] = [:]
+    var setModes: [Bool] = []
+    var readModes: [Bool] = []
+    var deleteModes: [Bool] = []
+    private let modernFailure: OSStatus?
+
+    init(modernFailure: OSStatus? = nil) {
+        self.modernFailure = modernFailure
+    }
+
+    func read(account: String, modern: Bool) throws -> String? {
+        readModes.append(modern)
+        try failIfNeeded(modern)
+        return values[key(account, modern: modern)]
+    }
+
+    func set(_ value: String, for account: String, modern: Bool) throws {
+        setModes.append(modern)
+        try failIfNeeded(modern)
+        values[key(account, modern: modern)] = value
+    }
+
+    func delete(account: String, modern: Bool) throws {
+        deleteModes.append(modern)
+        try failIfNeeded(modern)
+        values.removeValue(forKey: key(account, modern: modern))
+    }
+
+    private func failIfNeeded(_ modern: Bool) throws {
+        if modern, let modernFailure {
+            throw KeychainStoreError(status: modernFailure)
+        }
+    }
+
+    private func key(_ account: String, modern: Bool) -> String {
+        "\(modern ? "modern" : "legacy"):\(account)"
+    }
 }

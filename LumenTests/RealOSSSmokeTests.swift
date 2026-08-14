@@ -16,6 +16,7 @@ struct RealOSSSmokeTests {
         "Requires the explicit REAL_OSS_SMOKE compilation condition and a locally saved Lumen account"
     ))
     func uploadListDownloadRenameAndCleanUp() async throws {
+        try SecretStore.migrateLegacySecrets()
         let accounts = AccountStore.load()
         guard let account = accounts.first else { throw SmokeFailure.noSavedAccount }
         let credentials = try AccountStore.credentials(for: account)
