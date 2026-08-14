@@ -100,7 +100,7 @@ struct LumenCommands: Commands {
             Divider()
             Button("全选") { actions?.selectAll() }
                 .keyboardShortcut("a", modifiers: [.command])
-            Button("反选") { actions?.invertSelection() }
+            Button("取消全选") { actions?.deselectAll() }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
         }
         CommandGroup(after: .appInfo) {
@@ -158,7 +158,7 @@ struct LumenActions {
     var goBack: () -> Void
     var goForward: () -> Void
     var selectAll: () -> Void
-    var invertSelection: () -> Void
+    var deselectAll: () -> Void
 }
 
 private struct LumenActionsKey: FocusedValueKey {

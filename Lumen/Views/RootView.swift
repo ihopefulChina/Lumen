@@ -49,13 +49,13 @@ struct RootView: View {
             goBack: { model.goBack() },
             goForward: { model.goForward() },
             selectAll: { model.browser.selectAllVisible() },
-            invertSelection: { model.browser.invertVisibleSelection() }
+            deselectAll: { model.browser.clearSelection() }
         )
     }
 
     private func installKeyMonitor() {
         KeyMonitor.install { event in
-            let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
             if let responder = NSApp.keyWindow?.firstResponder, responder is NSTextView {
                 return event
             }
@@ -69,7 +69,21 @@ struct RootView: View {
                 return nil
             }
             if event.keyCode == 0, flags == [.command, .shift] {
-                model.browser.invertVisibleSelection()
+                model.browser.clearSelection()
+                return nil
+            }
+            if event.keyCode == 53, flags.isEmpty, !model.browser.selectedKeys.isEmpty {
+                model.browser.clearSelection()
+                return nil
+            }
+            if [123, 124, 125, 126].contains(event.keyCode),
+               flags.isEmpty || flags == .shift {
+                let direction: BrowserSelectionDirection = [123, 126].contains(event.keyCode) ? .previous : .next
+                model.browser.moveSelection(direction, extending: flags.contains(.shift))
+                return nil
+            }
+            if event.keyCode == 36, flags.isEmpty {
+                openFocusedItem(model)
                 return nil
             }
             if event.keyCode == 49, flags.isEmpty, model.previewItem == nil {
@@ -77,6 +91,17 @@ struct RootView: View {
                 return nil
             }
             return event
+        }
+    }
+
+    private func openFocusedItem(_ model: AppModel) {
+        let key = model.browser.focusedKey
+            ?? model.browser.orderedVisibleKeys.first(where: { model.browser.selectedKeys.contains($0) })
+        guard let key else { return }
+        if let folder = model.browser.folders.first(where: { $0.prefix == key }) {
+            model.openFolder(folder)
+        } else {
+            Task { await model.quickLookSelection() }
         }
     }
 }

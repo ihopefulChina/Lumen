@@ -134,6 +134,14 @@ final class BrowserModel {
         focusedKey = key
     }
 
+    func replaceSelection(_ keys: Set<String>) {
+        let visible = keys.intersection(visibleKeys)
+        selectedKeys = visible
+        let first = orderedVisibleKeys.first(where: { visible.contains($0) })
+        focusedKey = first
+        selectionAnchorKey = first
+    }
+
     func moveSelection(_ direction: BrowserSelectionDirection, extending: Bool) {
         let ordered = orderedVisibleKeys
         guard !ordered.isEmpty else { return }

@@ -47,6 +47,17 @@ struct BrowserModelTests {
         #expect(model.selectedKeys == ["a.txt", "b.txt"])
     }
 
+    @Test func nativeTableSelectionKeepsAKeyboardFocusAndAnchor() {
+        let model = Self.model()
+
+        model.replaceSelection(["b.txt", "c.txt"])
+
+        #expect(model.focusedKey == "b.txt")
+        #expect(model.selectionAnchorKey == "b.txt")
+        model.moveSelection(.next, extending: true)
+        #expect(model.selectedKeys == ["b.txt", "c.txt"])
+    }
+
     @Test func staleRequestContextCannotCommit() {
         let gate = BrowserRequestGate()
         let accountID = UUID()

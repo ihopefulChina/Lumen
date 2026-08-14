@@ -121,10 +121,10 @@ struct BrowserView: View {
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.secondary)
-            Text(model.browser.searchText.isEmpty ? "将图片、JSON 或文本拖到这里" : "没有匹配的项目")
+            Text(model.browser.searchText.isEmpty ? "此文件夹为空" : "没有匹配的项目")
                 .font(.title3)
             if model.browser.searchText.isEmpty {
-                Text("也可以从照片或访达选取。")
+                Text("拖入文件，或从工具栏上传。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 8) {
@@ -154,7 +154,7 @@ struct BrowserView: View {
                             selected: selected.contains(folder.prefix),
                             dropTargeted: model.browser.activeDropPrefix == folder.prefix
                         ) {
-                            selectFolder(folder, additive: NSEvent.modifierFlags.contains(.command))
+                            selectFolder(folder, modifiers: currentSelectionModifiers)
                         } onOpen: {
                             model.openFolder(folder)
                         }
@@ -177,7 +177,7 @@ struct BrowserView: View {
                             object: object,
                             selected: selected.contains(object.key)
                         ) {
-                            select(object, additive: NSEvent.modifierFlags.contains(.command))
+                            select(object, modifiers: currentSelectionModifiers)
                         } onOpen: {
                             Task { await model.quickLookSelection() }
                         }
@@ -202,6 +202,9 @@ struct BrowserView: View {
                     .contentShape(Rectangle())
                     .contextMenu { backgroundMenu() }
             }
+        }
+        .onTapGesture {
+            model.browser.clearSelection()
         }
         .contentMargins(.all, 0, for: .scrollContent)
         .scrollContentBackground(.hidden)
@@ -294,7 +297,7 @@ struct BrowserView: View {
     private var tableSelection: Binding<Set<BrowserRow.ID>> {
         Binding(
             get: { model.browser.selectedKeys },
-            set: { model.browser.selectedKeys = $0 }
+            set: { model.browser.replaceSelection($0) }
         )
     }
 
@@ -321,7 +324,9 @@ struct BrowserView: View {
         Button("刷新") { Task { await model.refreshListing() } }
         Divider()
         Button("全选") { model.browser.selectAllVisible() }
-        Button("反选") { model.browser.invertVisibleSelection() }
+        if !model.browser.selectedKeys.isEmpty {
+            Button("取消选择") { model.browser.clearSelection() }
+        }
     }
 
     @ViewBuilder
@@ -365,7 +370,7 @@ struct BrowserView: View {
 
     private func selectForMenu(_ key: String) {
         if !model.browser.selectedKeys.contains(key) {
-            model.browser.selectedKeys = [key]
+            model.browser.select(key: key, modifiers: [])
         }
     }
 
@@ -398,28 +403,20 @@ struct BrowserView: View {
         return "删除…"
     }
 
-    private func selectFolder(_ folder: OSSFolder, additive: Bool) {
-        if additive {
-            if model.browser.selectedKeys.contains(folder.prefix) {
-                model.browser.selectedKeys.remove(folder.prefix)
-            } else {
-                model.browser.selectedKeys.insert(folder.prefix)
-            }
-        } else {
-            model.browser.selectedKeys = [folder.prefix]
-        }
+    private var currentSelectionModifiers: BrowserSelectionModifiers {
+        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
+        var modifiers: BrowserSelectionModifiers = []
+        if flags.contains(.command) { modifiers.insert(.toggle) }
+        if flags.contains(.shift) { modifiers.insert(.extendRange) }
+        return modifiers
     }
 
-    private func select(_ object: OSSObject, additive: Bool) {
-        if additive {
-            if model.browser.selectedKeys.contains(object.key) {
-                model.browser.selectedKeys.remove(object.key)
-            } else {
-                model.browser.selectedKeys.insert(object.key)
-            }
-        } else {
-            model.browser.selectedKeys = [object.key]
-        }
+    private func selectFolder(_ folder: OSSFolder, modifiers: BrowserSelectionModifiers) {
+        model.browser.select(key: folder.prefix, modifiers: modifiers)
+    }
+
+    private func select(_ object: OSSObject, modifiers: BrowserSelectionModifiers) {
+        model.browser.select(key: object.key, modifiers: modifiers)
     }
 
     private func importPhotos(_ items: [PhotosPickerItem]) async {
@@ -496,6 +493,18 @@ private struct PathBar: View {
                     }
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            if model.browser.isLoading {
+                ProgressView()
+                    .controlSize(.mini)
+                    .help("正在刷新")
+            } else {
+                Text(statusText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
         }
         .font(.callout)
         .padding(.horizontal, 8)
@@ -507,6 +516,12 @@ private struct PathBar: View {
         .contextMenu {
             pathMenu(prefix: model.browser.prefix, isCurrent: true)
         }
+    }
+
+    private var statusText: String {
+        let selected = model.browser.selectedKeys.count
+        if selected > 0 { return "已选 \(selected) 项" }
+        return "\(model.browser.visibleFolders.count + model.browser.visibleObjects.count) 项"
     }
 
     @ViewBuilder
@@ -554,10 +569,11 @@ private struct FolderCell: View {
     var dropTargeted: Bool
     var action: () -> Void
     var onOpen: () -> Void
+    @State private var selectedDuringPress = false
 
     var body: some View {
         let highlighted = selected || dropTargeted
-        Button(action: action) {
+        Button(action: selectOnRelease) {
             VStack(spacing: 4) {
                 FinderFolderIcon(size: 64)
                     .padding(8)
@@ -587,10 +603,20 @@ private struct FolderCell: View {
             .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
         }
-        .buttonStyle(.plain)
+        .buttonStyle(FinderItemButtonStyle(onPress: selectOnPress))
         .contentShape(Rectangle())
         .simultaneousGesture(TapGesture(count: 2).onEnded(onOpen))
         .help(folder.name)
+    }
+
+    private func selectOnPress() {
+        selectedDuringPress = true
+        action()
+    }
+
+    private func selectOnRelease() {
+        if !selectedDuringPress { action() }
+        selectedDuringPress = false
     }
 }
 
@@ -599,9 +625,10 @@ private struct AssetCell: View {
     var selected: Bool
     var action: () -> Void
     var onOpen: () -> Void
+    @State private var selectedDuringPress = false
 
     var body: some View {
-        Button(action: action) {
+        Button(action: selectOnRelease) {
             VStack(spacing: 4) {
                 ThumbnailView(object: object)
                     .aspectRatio(1, contentMode: .fit)
@@ -622,9 +649,31 @@ private struct AssetCell: View {
                     .frame(maxWidth: .infinity)
             }
         }
-        .buttonStyle(PressStyle(pressedScale: 0.98))
+        .buttonStyle(FinderItemButtonStyle(onPress: selectOnPress))
         .help(object.name)
         .simultaneousGesture(TapGesture(count: 2).onEnded { onOpen() })
+    }
+
+    private func selectOnPress() {
+        selectedDuringPress = true
+        action()
+    }
+
+    private func selectOnRelease() {
+        if !selectedDuringPress { action() }
+        selectedDuringPress = false
+    }
+}
+
+private struct FinderItemButtonStyle: ButtonStyle {
+    var onPress: () -> Void
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .opacity(configuration.isPressed ? 0.86 : 1)
+            .onChange(of: configuration.isPressed) { _, pressed in
+                if pressed { onPress() }
+            }
     }
 }
 
