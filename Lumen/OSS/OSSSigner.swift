@@ -4,7 +4,7 @@ import Foundation
 enum OSSSigner {
     private static let lock = NSLock()
 
-    nonisolated(unsafe) private static let iso8601: DateFormatter = {
+    private static let iso8601: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)
@@ -12,7 +12,7 @@ enum OSSSigner {
         return formatter
     }()
 
-    nonisolated(unsafe) private static let rfc822: DateFormatter = {
+    private static let rfc822: DateFormatter = {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.timeZone = TimeZone(secondsFromGMT: 0)

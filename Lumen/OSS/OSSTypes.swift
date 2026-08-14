@@ -96,9 +96,9 @@ struct OSSAccount: Identifiable, Hashable, Codable, Sendable {
         if useTransferAccelerate {
             return "oss-accelerate.aliyuncs.com"
         }
-        let override = OSSEndpoint.normalize(endpointOverride)
+        let override = endpointOverride.trimmingCharacters(in: .whitespacesAndNewlines)
         if !override.isEmpty {
-            return override
+            return override.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         }
         if let endpoint = bucket?.extranetEndpoint, !endpoint.isEmpty {
             return OSSEndpoint.normalize(endpoint)
@@ -110,7 +110,8 @@ struct OSSAccount: Identifiable, Hashable, Codable, Sendable {
     }
 
     func objectHost(bucketName: String, bucket: OSSBucket?) -> String {
-        OSSEndpoint.objectHost(endpoint: apiHost(for: bucket), bucketName: bucketName)
+        let endpoint = OSSEndpoint.parse(apiHost(for: bucket))
+        return OSSEndpoint.objectHost(endpoint: endpoint.host, bucketName: bucketName)
     }
 
     func signingRegion(for bucket: OSSBucket?) -> String {
@@ -121,11 +122,15 @@ struct OSSAccount: Identifiable, Hashable, Codable, Sendable {
     }
 
     func publicURL(bucketName: String, bucket: OSSBucket?, key: String) -> URL? {
-        let cdn = OSSEndpoint.normalize(cdnDomain)
-        let host = cdn.isEmpty ? objectHost(bucketName: bucketName, bucket: bucket) : cdn
+        let cdn = cdnDomain.trimmingCharacters(in: .whitespacesAndNewlines)
+        let endpoint = OSSEndpoint.parse(cdn.isEmpty ? apiHost(for: bucket) : cdn)
+        let host = cdn.isEmpty
+            ? OSSEndpoint.objectHost(endpoint: endpoint.host, bucketName: bucketName)
+            : endpoint.host
         var components = URLComponents()
-        components.scheme = "https"
+        components.scheme = endpoint.scheme
         components.host = host
+        components.port = endpoint.port
         components.percentEncodedPath = "/" + OSSSigner.uriEncode(key, encodeSlash: false)
         return components.url
     }
@@ -137,6 +142,23 @@ struct OSSAccount: Identifiable, Hashable, Codable, Sendable {
 }
 
 enum OSSEndpoint {
+    struct Parsed: Equatable, Sendable {
+        var scheme: String
+        var host: String
+        var port: Int?
+    }
+
+    static func parse(_ raw: String) -> Parsed {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        let components = URLComponents(string: candidate)
+        return Parsed(
+            scheme: components?.scheme?.lowercased() == "http" ? "http" : "https",
+            host: normalize(components?.host ?? trimmed),
+            port: components?.port
+        )
+    }
+
     static func normalize(_ raw: String) -> String {
         var host = raw
             .replacingOccurrences(of: "https://", with: "")
@@ -223,8 +245,16 @@ struct OSSServiceError: LocalizedError, Sendable {
     var requestId: String
 
     var errorDescription: String? {
-        if message.isEmpty { return code.isEmpty ? "请求失败（\(statusCode)）" : code }
-        return message
+        var description = message.isEmpty
+            ? (code.isEmpty ? "请求失败（\(statusCode)）" : code)
+            : message
+        if !code.isEmpty, code != message {
+            description += "（\(code)）"
+        }
+        if !requestId.isEmpty {
+            description += "\n请求 ID：\(requestId)"
+        }
+        return description
     }
 
     var failureReason: String? {

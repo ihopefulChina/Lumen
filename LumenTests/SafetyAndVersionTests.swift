@@ -35,6 +35,27 @@ struct SafetyAndVersionTests {
         #expect(url.path(percentEncoded: true) == "/a//%E7%A9%BA%20%E6%A0%BC/%2B%3F%23.txt")
     }
 
+    @Test func objectURLPreservesCustomEndpointSchemeAndPort() throws {
+        let account = OSSAccount(
+            id: UUID(),
+            name: "Test",
+            accessKeyId: "test",
+            regionID: "cn-hangzhou",
+            endpointOverride: "http://127.0.0.1:9000",
+            cdnDomain: "",
+            defaultACL: .publicRead,
+            prefixTemplate: "",
+            useTransferAccelerate: false,
+            createdAt: .now
+        )
+
+        let url = try #require(account.publicURL(bucketName: "bucket", bucket: nil, key: "a.txt"))
+
+        #expect(url.scheme == "http")
+        #expect(url.host == "127.0.0.1")
+        #expect(url.port == 9000)
+    }
+
     @Test func unsafeRelativePathsAreRejected() {
         #expect(throws: FileSafety.Error.self) {
             try FileSafety.relativeComponents("../outside.txt")

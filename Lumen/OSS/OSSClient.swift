@@ -5,14 +5,30 @@ struct OSSClient: Sendable {
     var region: String
     var endpointHost: String
     var bucket: String?
+    var transport: any OSSHTTPTransport
 
     static let multipartThreshold: Int64 = 8 * 1024 * 1024
     static let partSize: Int64 = 8 * 1024 * 1024
     static let maxListPages = 30
 
+    init(
+        credentials: OSSCredentials,
+        region: String,
+        endpointHost: String,
+        bucket: String?,
+        transport: any OSSHTTPTransport = URLSessionOSSHTTPTransport()
+    ) {
+        self.credentials = credentials
+        self.region = region
+        self.endpointHost = endpointHost
+        self.bucket = bucket
+        self.transport = transport
+    }
+
     var requestHost: String {
-        guard let bucket, !bucket.isEmpty else { return endpointHost }
-        return OSSEndpoint.objectHost(endpoint: endpointHost, bucketName: bucket)
+        let endpoint = OSSEndpoint.parse(endpointHost)
+        guard let bucket, !bucket.isEmpty else { return endpoint.host }
+        return OSSEndpoint.objectHost(endpoint: endpoint.host, bucketName: bucket)
     }
 
     func scoped(to bucket: OSSBucket, account: OSSAccount) -> OSSClient {
@@ -48,14 +64,26 @@ struct OSSClient: Sendable {
         var objects: [OSSObject] = []
         var token: String?
         var pages = 0
+        var seenTokens = Set<String>()
+        var incomplete = false
         repeat {
             pages += 1
             let page = try await listFolder(prefix: prefix, token: token)
             folders.append(contentsOf: page.folders)
             objects.append(contentsOf: page.objects)
-            token = page.isTruncated ? page.nextToken : nil
+            if page.isTruncated {
+                guard let next = page.nextToken, !next.isEmpty, seenTokens.insert(next).inserted else {
+                    incomplete = true
+                    token = nil
+                    break
+                }
+                token = next
+            } else {
+                token = nil
+            }
         } while token != nil && pages < Self.maxListPages
-        return ObjectListing(folders: folders, objects: objects, isTruncated: token != nil, nextToken: token)
+        if token != nil { incomplete = true }
+        return ObjectListing(folders: folders, objects: objects, isTruncated: incomplete, nextToken: token)
     }
 
     /// All objects under `prefix`, including nested keys. No delimiter.
@@ -64,6 +92,8 @@ struct OSSClient: Sendable {
         var objects: [OSSObject] = []
         var token: String?
         var pages = 0
+        var seenTokens = Set<String>()
+        var incomplete = false
         repeat {
             pages += 1
             var query: [(String, String)] = [
@@ -79,9 +109,19 @@ struct OSSClient: Sendable {
                 if object.isFolderPlaceholder { return includePlaceholders }
                 return true
             })
-            token = listing.isTruncated ? listing.nextToken : nil
+            if listing.isTruncated {
+                guard let next = listing.nextToken, !next.isEmpty, seenTokens.insert(next).inserted else {
+                    incomplete = true
+                    token = nil
+                    break
+                }
+                token = next
+            } else {
+                token = nil
+            }
         } while token != nil && pages < Self.maxListPages
-        return (objects, token != nil)
+        if token != nil { incomplete = true }
+        return (objects, incomplete)
     }
 
     func objectExists(key: String) async throws -> Bool {
@@ -150,15 +190,24 @@ struct OSSClient: Sendable {
         _ = try await perform(method: "DELETE", bucket: bucket, key: key)
     }
 
-    func copyObject(from sourceKey: String, to destKey: String) async throws {
+    func copyObject(from sourceKey: String, to destKey: String, overwrite: Bool = true) async throws {
         guard let bucket else { throw Self.missingBucket }
         let source = "/" + bucket + "/" + OSSSigner.uriEncode(sourceKey, encodeSlash: false)
+        var headers = ["x-oss-copy-source": source]
+        if !overwrite {
+            headers["x-oss-forbid-overwrite"] = "true"
+        }
         _ = try await perform(
             method: "PUT",
             bucket: bucket,
             key: destKey,
-            headers: ["x-oss-copy-source": source]
+            headers: headers
         )
+    }
+
+    func renameObject(from sourceKey: String, to destKey: String, overwrite: Bool) async throws {
+        try await copyObject(from: sourceKey, to: destKey, overwrite: overwrite)
+        try await deleteObject(key: sourceKey)
     }
 
     func download(
@@ -208,8 +257,10 @@ struct OSSClient: Sendable {
             expires: expires
         )
         var items = URLComponents()
-        items.scheme = "https"
+        let endpoint = OSSEndpoint.parse(endpointHost)
+        items.scheme = endpoint.scheme
         items.host = requestHost
+        items.port = endpoint.port
         items.percentEncodedPath = "/" + OSSSigner.uriEncode(key, encodeSlash: false)
         items.percentEncodedQuery = query
             .map { name, value in
@@ -242,13 +293,12 @@ struct OSSClient: Sendable {
             headers: initiateHeaders
         )
         let uploadId = try OSSXML.uploadId(from: initiated.data)
-        var parts: [(Int, String)] = []
-        var offset: Int64 = 0
-        var partNumber = 1
-        let handle = try FileHandle(forReadingFrom: fileURL)
-        defer { try? handle.close() }
-
         do {
+            var parts: [(Int, String)] = []
+            var offset: Int64 = 0
+            var partNumber = 1
+            let handle = try FileHandle(forReadingFrom: fileURL)
+            defer { try? handle.close() }
             while offset < size {
                 try Task.checkCancellation()
                 let thisSize = min(Self.partSize, size - offset)
@@ -283,12 +333,16 @@ struct OSSClient: Sendable {
                 body: completeBody
             )
         } catch {
-            _ = try? await perform(
-                method: "DELETE",
-                bucket: bucket,
-                key: key,
-                query: [("uploadId", uploadId)]
-            )
+            let client = self
+            await Task.detached {
+                _ = try? await client.perform(
+                    method: "DELETE",
+                    bucket: bucket,
+                    key: key,
+                    query: [("uploadId", uploadId)],
+                    checksCancellation: false
+                )
+            }.value
             throw error
         }
     }
@@ -304,11 +358,7 @@ struct OSSClient: Sendable {
 
     // MARK: - Transport
 
-    private struct HTTPResponse: Sendable {
-        var status: Int
-        var headers: [String: String]
-        var data: Data
-    }
+    private typealias HTTPResponse = OSSHTTPResult
 
     private static let missingBucket = OSSServiceError(
         statusCode: 0,
@@ -326,9 +376,12 @@ struct OSSClient: Sendable {
         body: Data? = nil,
         fileURL: URL? = nil,
         downloadTo: URL? = nil,
-        onProgress: (@Sendable (Int64, Int64) -> Void)? = nil
+        onProgress: (@Sendable (Int64, Int64) -> Void)? = nil,
+        checksCancellation: Bool = true
     ) async throws -> HTTPResponse {
-        try Task.checkCancellation()
+        if checksCancellation {
+            try Task.checkCancellation()
+        }
         guard let url = makeURL(bucket: bucket, key: key, query: query) else {
             throw OSSServiceError(statusCode: 0, code: "InvalidURL", message: "无法构造请求地址", requestId: "")
         }
@@ -353,72 +406,60 @@ struct OSSClient: Sendable {
             request.setValue(value, forHTTPHeaderField: name)
         }
 
-        let delegate = onProgress.map(ProgressMonitor.init)
-        let session = URLSession.shared
-        let status: Int
-        let headers: [String: String]
-        let data: Data
+        let httpBody: OSSHTTPBody
+        if let fileURL {
+            httpBody = .file(fileURL)
+        } else if let body {
+            httpBody = .data(body)
+        } else {
+            httpBody = .none
+        }
+        let result = try await transport.send(
+            request,
+            body: httpBody,
+            download: downloadTo != nil,
+            onProgress: onProgress
+        )
+        let http = try validated(result)
 
         if let downloadTo {
-            let (temp, response) = try await session.download(for: request, delegate: delegate)
-            let http = try validated(response, data: Data())
+            guard let temp = http.temporaryDownloadURL else {
+                throw OSSServiceError(statusCode: 0, code: "MissingDownload", message: "下载没有返回文件", requestId: "")
+            }
             if FileManager.default.fileExists(atPath: downloadTo.path) {
                 try FileManager.default.removeItem(at: downloadTo)
             }
             try FileManager.default.createDirectory(at: downloadTo.deletingLastPathComponent(), withIntermediateDirectories: true)
             try FileManager.default.moveItem(at: temp, to: downloadTo)
-            status = http.status
-            headers = http.headers
-            data = Data()
-        } else if let fileURL {
-            let (bodyData, response) = try await session.upload(for: request, fromFile: fileURL, delegate: delegate)
-            let http = try validated(response, data: bodyData)
-            status = http.status
-            headers = http.headers
-            data = bodyData
-        } else if let body {
-            let (bodyData, response) = try await session.upload(for: request, from: body, delegate: delegate)
-            let http = try validated(response, data: bodyData)
-            status = http.status
-            headers = http.headers
-            data = bodyData
-        } else {
-            let (bodyData, response) = try await session.data(for: request, delegate: delegate)
-            let http = try validated(response, data: bodyData)
-            status = http.status
-            headers = http.headers
-            data = bodyData
         }
-
-        return HTTPResponse(status: status, headers: headers, data: data)
+        return http
     }
 
-    private func validated(_ response: URLResponse, data: Data) throws -> HTTPResponse {
-        guard let http = response as? HTTPURLResponse else {
-            throw OSSServiceError(statusCode: 0, code: "InvalidResponse", message: "响应无效", requestId: "")
+    private func validated(_ response: HTTPResponse) throws -> HTTPResponse {
+        if !(200...299).contains(response.status) {
+            var error = OSSXML.parseError(response.data, status: response.status)
+            if error.requestId.isEmpty {
+                error.requestId = response.headers.value("x-oss-request-id") ?? ""
+            }
+            throw error
         }
-        var headers: [String: String] = [:]
-        for (key, value) in http.allHeaderFields {
-            headers["\(key)"] = "\(value)"
-        }
-        if !(200...299).contains(http.statusCode) {
-            throw OSSXML.parseError(data, status: http.statusCode)
-        }
-        return HTTPResponse(status: http.statusCode, headers: headers, data: data)
+        return response
     }
 
     private func makeURL(bucket: String?, key: String?, query: [(String, String)]) -> URL? {
         var components = URLComponents()
-        components.scheme = "https"
+        let endpoint = OSSEndpoint.parse(endpointHost)
+        components.scheme = endpoint.scheme
+        components.port = endpoint.port
         if let bucket, !bucket.isEmpty {
-            components.host = OSSEndpoint.objectHost(endpoint: endpointHost, bucketName: bucket)
+            components.host = OSSEndpoint.objectHost(endpoint: endpoint.host, bucketName: bucket)
             if let key, !key.isEmpty {
                 components.percentEncodedPath = "/" + OSSSigner.uriEncode(key, encodeSlash: false)
             } else {
                 components.path = "/"
             }
         } else {
-            components.host = endpointHost
+            components.host = endpoint.host
             components.path = "/"
         }
         if !query.isEmpty {
@@ -444,22 +485,4 @@ private extension Dictionary where Key == String, Value == String {
         let target = name.lowercased()
         return first(where: { $0.key.lowercased() == target })?.value
     }
-}
-
-private final class ProgressMonitor: NSObject, URLSessionTaskDelegate, URLSessionDownloadDelegate, @unchecked Sendable {
-    let handler: @Sendable (Int64, Int64) -> Void
-
-    init(_ handler: @escaping @Sendable (Int64, Int64) -> Void) {
-        self.handler = handler
-    }
-
-    func urlSession(_ session: URLSession, task: URLSessionTask, didSendBodyData bytesSent: Int64, totalBytesSent: Int64, totalBytesExpectedToSend: Int64) {
-        handler(totalBytesSent, totalBytesExpectedToSend)
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64, totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
-        handler(totalBytesWritten, totalBytesExpectedToWrite)
-    }
-
-    func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {}
 }
