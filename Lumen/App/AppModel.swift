@@ -734,29 +734,28 @@ final class AppModel {
               let accountID = selectedAccountID,
               let bucketName = selectedBucketName
         else { return }
-        let keys = Array(browser.actionableSelectionKeys)
+        let selectedKeys = browser.actionableSelectionKeys
+        let keys = browser.orderedVisibleKeys.filter(selectedKeys.contains)
         guard !keys.isEmpty else { return }
         lastCloudUndoOperation = nil
         lastDeleteUndoOperation = nil
+        var receipts: [OSSDeleteReceipt] = []
         do {
-            var receipts: [OSSDeleteReceipt] = []
             for key in keys {
                 if key.hasSuffix("/") {
-                    receipts.append(contentsOf: try await deletePrefix(key, client: client))
+                    try await deletePrefix(key, client: client) { receipt in
+                        receipts.append(receipt)
+                    }
                 } else {
                     receipts.append(try await client.deleteObject(key: key))
                 }
             }
-            let markers = receipts.compactMap(\.undoMarker)
-            if !markers.isEmpty, markers.count == receipts.count {
-                lastDeleteUndoOperation = CloudDeleteUndoOperation(
-                    accountID: accountID,
-                    bucketName: bucketName,
-                    title: "撤销删除",
-                    markers: markers,
-                    sourceSelection: Set(keys)
-                )
-            }
+            recordDeleteUndo(
+                receipts: receipts,
+                sourceSelection: Set(keys),
+                accountID: accountID,
+                bucketName: bucketName
+            )
             browser.clearSelection()
             await refreshListing()
             Haptics.alignment()
@@ -765,21 +764,40 @@ final class AppModel {
                 action: lastDeleteUndoOperation == nil ? nil : .undoCloudOperation
             )
         } catch {
-            present(error.localizedDescription, error: true)
+            guard !receipts.isEmpty else {
+                present(error.localizedDescription, error: true)
+                return
+            }
+            recordDeleteUndo(
+                receipts: receipts,
+                sourceSelection: Set(receipts.map(\.key)),
+                accountID: accountID,
+                bucketName: bucketName
+            )
+            await refreshListing()
+            present(
+                "已删除 \(receipts.count) 个对象，之后失败：\(error.localizedDescription)",
+                error: true,
+                action: lastDeleteUndoOperation == nil ? nil : .undoCloudOperation
+            )
         }
     }
 
     func deleteFolder(_ folder: OSSFolder) async {
         guard let client = makeClient() else { return }
         do {
-            _ = try await deletePrefix(folder.prefix, client: client)
+            try await deletePrefix(folder.prefix, client: client) { _ in }
             await refreshListing()
         } catch {
             present(error.localizedDescription, error: true)
         }
     }
 
-    private func deletePrefix(_ prefix: String, client: OSSClient) async throws -> [OSSDeleteReceipt] {
+    private func deletePrefix(
+        _ prefix: String,
+        client: OSSClient,
+        onDeleted: (OSSDeleteReceipt) -> Void
+    ) async throws {
         let listing = try await client.listAllObjects(prefix: prefix, includePlaceholders: true)
         if listing.truncated {
             throw OSSServiceError(
@@ -789,11 +807,29 @@ final class AppModel {
                 requestId: ""
             )
         }
-        var receipts: [OSSDeleteReceipt] = []
         for object in listing.objects.sorted(by: { $0.key.count > $1.key.count }) {
-            receipts.append(try await client.deleteObject(key: object.key))
+            onDeleted(try await client.deleteObject(key: object.key))
         }
-        return receipts
+    }
+
+    private func recordDeleteUndo(
+        receipts: [OSSDeleteReceipt],
+        sourceSelection: Set<String>,
+        accountID: UUID,
+        bucketName: String
+    ) {
+        let markers = receipts.compactMap(\.undoMarker)
+        guard !markers.isEmpty, markers.count == receipts.count else {
+            lastDeleteUndoOperation = nil
+            return
+        }
+        lastDeleteUndoOperation = CloudDeleteUndoOperation(
+            accountID: accountID,
+            bucketName: bucketName,
+            title: "撤销删除",
+            markers: markers,
+            sourceSelection: sourceSelection
+        )
     }
 
     @discardableResult
