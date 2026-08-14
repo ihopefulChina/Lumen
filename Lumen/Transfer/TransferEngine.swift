@@ -11,8 +11,9 @@ final class TransferEngine {
     var onUploadFinished: (@MainActor () -> Void)?
 
     private var tasks: [UUID: Task<Void, Never>] = [:]
+    private var resources: [UUID: TransferResource] = [:]
+    private var retryDescriptors: [UUID: RetryDescriptor] = [:]
     private var running = 0
-    private var scopedRoots: [URL] = []
 
     var activeCount: Int { jobs.filter(\.isActive).count }
     var hasJobs: Bool { !jobs.isEmpty }
@@ -25,14 +26,20 @@ final class TransferEngine {
         var contentType: String
         var size: Int64
         var objectKey: String
-        var releaseSource: Bool
+        var resource: TransferResource
         var failure: String?
     }
 
     struct UploadPlan {
         var items: [PlannedUpload]
         var skipped: Int
-        var scopedRoots: [URL]
+        var options = UploadPreparationOptions(imagesOnly: false, convertHEIC: false)
+    }
+
+    struct UploadPreparationOptions: Sendable {
+        var imagesOnly: Bool
+        var convertHEIC: Bool
+        var ownedTemporaryURLs: Set<URL> = []
     }
 
     @discardableResult
@@ -44,38 +51,46 @@ final class TransferEngine {
         prefix: String,
         settings: AppSettings,
         applyTemplate: Bool = true
-    ) -> Int {
-        let plan = Self.planUploads(
+    ) async -> Int {
+        let options = UploadPreparationOptions(
+            imagesOnly: settings.imagesOnly,
+            convertHEIC: settings.convertHEIC
+        )
+        let plan = await Self.planUploads(
             urls: urls,
             prefix: prefix,
             template: account.prefixTemplate,
             applyTemplate: applyTemplate,
-            settings: settings
+            options: options
         )
         enqueue(plan: plan, client: client, account: account, bucket: bucket, settings: settings)
         return plan.skipped
     }
 
-    static func planUploads(
+    nonisolated static func planUploads(
         urls: [URL],
         prefix: String,
         template: String,
         applyTemplate: Bool,
-        settings: AppSettings
-    ) -> UploadPlan {
-        var roots: [URL] = []
-        for root in urls {
-            if root.startAccessingSecurityScopedResource() {
-                roots.append(root)
-            }
-        }
-        let expansion = expand(urls, imagesOnly: settings.imagesOnly)
+        options: UploadPreparationOptions
+    ) async -> UploadPlan {
+        let rootLeases = urls.compactMap(SecurityScopeLease.init(url:))
+        let expansion = expand(urls, imagesOnly: options.imagesOnly)
         var items: [PlannedUpload] = []
         for entry in expansion.files {
             let url = entry.url
-            let accessed = url.startAccessingSecurityScopedResource()
+            let sourceLease = SecurityScopeLease(url: url)
             do {
-                let prepared = try prepare(url: url, convertHEIC: settings.convertHEIC)
+                let prepared = try await prepare(url: url, convertHEIC: options.convertHEIC)
+                var cleanupURLs = prepared.fileURL == url ? [] : [prepared.fileURL]
+                if options.ownedTemporaryURLs.contains(url) {
+                    cleanupURLs.append(url)
+                }
+                let retained: [AnyObject] = rootLeases + [sourceLease].compactMap { $0 }
+                let resource = TransferResource(
+                    cleanupURLs: cleanupURLs,
+                    retainedResources: retained
+                )
                 var relative = entry.relativePath
                 if prepared.filename != url.lastPathComponent {
                     relative = PathTemplate.replacingLastComponent(relative, with: prepared.filename)
@@ -94,12 +109,13 @@ final class TransferEngine {
                         contentType: prepared.contentType,
                         size: prepared.size,
                         objectKey: key,
-                        releaseSource: accessed,
+                        resource: resource,
                         failure: nil
                     )
                 )
             } catch {
-                if accessed { url.stopAccessingSecurityScopedResource() }
+                let retained: [AnyObject] = rootLeases + [sourceLease].compactMap { $0 }
+                let cleanupURLs = options.ownedTemporaryURLs.contains(url) ? [url] : []
                 items.append(
                     PlannedUpload(
                         sourceURL: url,
@@ -108,13 +124,16 @@ final class TransferEngine {
                         contentType: "",
                         size: 0,
                         objectKey: "",
-                        releaseSource: false,
+                        resource: TransferResource(
+                            cleanupURLs: cleanupURLs,
+                            retainedResources: retained
+                        ),
                         failure: error.localizedDescription
                     )
                 )
             }
         }
-        return UploadPlan(items: items, skipped: expansion.skipped, scopedRoots: roots)
+        return UploadPlan(items: items, skipped: expansion.skipped, options: options)
     }
 
     func enqueue(
@@ -125,79 +144,19 @@ final class TransferEngine {
         settings: AppSettings,
         excludingSources: Set<URL> = []
     ) {
-        concurrency = settings.concurrentUploads
-        var addedActive = false
-        scopedRoots.append(contentsOf: plan.scopedRoots)
-        for item in plan.items {
-            if let failure = item.failure {
-                jobs.append(
-                    TransferJob(
-                        id: UUID(),
-                        kind: .upload,
-                        status: .failed,
-                        title: item.filename,
-                        objectKey: "",
-                        localURL: item.sourceURL,
-                        transferred: 0,
-                        total: 0,
-                        errorMessage: failure,
-                        publicURL: nil,
-                        finishedAt: .now
-                    )
-                )
-                continue
-            }
-            if excludingSources.contains(item.sourceURL) {
-                if item.releaseSource {
-                    item.sourceURL.stopAccessingSecurityScopedResource()
-                }
-                continue
-            }
-            let job = TransferJob(
-                id: UUID(),
-                kind: .upload,
-                status: .queued,
-                title: item.filename,
-                objectKey: item.objectKey,
-                localURL: item.fileURL,
-                transferred: 0,
-                total: item.size,
-                errorMessage: nil,
-                publicURL: account.publicURL(bucketName: client.bucket ?? bucket?.name ?? "", bucket: bucket, key: item.objectKey),
-                finishedAt: nil
-            )
-            jobs.append(job)
-            addedActive = true
-            let jobID = job.id
-            tasks[jobID] = Task { [weak self] in
-                await self?.runUpload(
-                    id: jobID,
-                    client: client,
-                    key: item.objectKey,
-                    fileURL: item.fileURL,
-                    contentType: item.contentType,
-                    acl: account.defaultACL,
-                    release: item.releaseSource ? item.sourceURL : nil,
-                    playSound: settings.playCompleteSound
-                )
-            }
-        }
-        if !addedActive {
-            for root in plan.scopedRoots {
-                root.stopAccessingSecurityScopedResource()
-            }
-            scopedRoots.removeAll { plan.scopedRoots.contains($0) }
-        }
-        updateDockBadge()
+        enqueue(
+            plan: plan,
+            client: client,
+            account: account,
+            bucket: bucket,
+            concurrentUploads: settings.concurrentUploads,
+            playCompleteSound: settings.playCompleteSound,
+            excludingSources: excludingSources
+        )
     }
 
     func abandon(plan: UploadPlan) {
-        for item in plan.items where item.releaseSource {
-            item.sourceURL.stopAccessingSecurityScopedResource()
-        }
-        for root in plan.scopedRoots {
-            root.stopAccessingSecurityScopedResource()
-        }
+        plan.items.forEach { $0.resource.finish() }
     }
 
     func enqueueDownloads(objects: [OSSObject], client: OSSClient, folder: URL) {
@@ -214,9 +173,7 @@ final class TransferEngine {
         scopedRoot: URL
     ) {
         guard !items.isEmpty else { return }
-        if scopedRoot.startAccessingSecurityScopedResource() {
-            scopedRoots.append(scopedRoot)
-        }
+        let rootLease = SecurityScopeLease(url: scopedRoot)
         for item in items {
             let dest = item.destination
             let job = TransferJob(
@@ -235,6 +192,17 @@ final class TransferEngine {
             jobs.append(job)
             let jobID = job.id
             let key = item.object.key
+            retryDescriptors[jobID] = .download(
+                DownloadRetryDescriptor(
+                    client: client,
+                    object: item.object,
+                    destination: dest,
+                    scopedRoot: scopedRoot
+                )
+            )
+            resources[jobID] = TransferResource(
+                retainedResources: [rootLease].compactMap { $0 }
+            )
             tasks[jobID] = Task { [weak self] in
                 await self?.runDownload(id: jobID, client: client, key: key, destination: dest)
             }
@@ -245,6 +213,7 @@ final class TransferEngine {
     func cancel(_ id: UUID) {
         tasks[id]?.cancel()
         tasks[id] = nil
+        finishResource(id)
         mutate(id) { job in
             if job.isActive {
                 job.status = .cancelled
@@ -259,14 +228,135 @@ final class TransferEngine {
     }
 
     func clearFinished() {
+        let removedIDs = Set(jobs.filter { !$0.isActive }.map(\.id))
         jobs.removeAll { !$0.isActive }
+        for id in removedIDs {
+            retryDescriptors[id] = nil
+        }
     }
 
-    func retry(_ id: UUID, client: OSSClient, account: OSSAccount, settings: AppSettings) {
-        guard let job = jobs.first(where: { $0.id == id }), let local = job.localURL else { return }
-        if job.kind == .upload {
-            enqueueUploads(urls: [local], client: client, account: account, bucket: nil, prefix: PathTemplate.parentPrefix(job.objectKey), settings: settings)
+    func canRetry(_ id: UUID) -> Bool {
+        guard let descriptor = retryDescriptors[id] else { return false }
+        switch descriptor {
+        case .upload(let upload):
+            return FileManager.default.fileExists(atPath: upload.sourceURL.path)
+        case .download:
+            return true
         }
+    }
+
+    func retry(_ id: UUID) {
+        guard let descriptor = retryDescriptors[id] else { return }
+        switch descriptor {
+        case .upload(let upload):
+            guard FileManager.default.fileExists(atPath: upload.sourceURL.path) else { return }
+            Task {
+                let plan = await Self.planUploads(
+                    urls: [upload.sourceURL],
+                    prefix: "",
+                    template: "",
+                    applyTemplate: false,
+                    options: upload.options
+                )
+                var exactPlan = plan
+                if !exactPlan.items.isEmpty {
+                    exactPlan.items[0].objectKey = upload.objectKey
+                }
+                enqueue(
+                    plan: exactPlan,
+                    client: upload.client,
+                    account: upload.account,
+                    bucket: upload.bucket,
+                    concurrentUploads: concurrency,
+                    playCompleteSound: upload.playSound
+                )
+            }
+        case .download(let download):
+            enqueueDownloadJobs(
+                items: [(download.object, download.destination)],
+                client: download.client,
+                scopedRoot: download.scopedRoot
+            )
+        }
+    }
+
+    private func enqueue(
+        plan: UploadPlan,
+        client: OSSClient,
+        account: OSSAccount,
+        bucket: OSSBucket?,
+        concurrentUploads: Int,
+        playCompleteSound: Bool,
+        excludingSources: Set<URL> = []
+    ) {
+        concurrency = concurrentUploads
+        for item in plan.items {
+            if let failure = item.failure {
+                jobs.append(
+                    TransferJob(
+                        id: UUID(),
+                        kind: .upload,
+                        status: .failed,
+                        title: item.filename,
+                        objectKey: item.objectKey,
+                        localURL: item.sourceURL,
+                        transferred: 0,
+                        total: 0,
+                        errorMessage: failure,
+                        publicURL: nil,
+                        finishedAt: .now
+                    )
+                )
+                item.resource.finish()
+                continue
+            }
+            if excludingSources.contains(item.sourceURL) {
+                item.resource.finish()
+                continue
+            }
+            let job = TransferJob(
+                id: UUID(),
+                kind: .upload,
+                status: .queued,
+                title: item.filename,
+                objectKey: item.objectKey,
+                localURL: item.fileURL,
+                transferred: 0,
+                total: item.size,
+                errorMessage: nil,
+                publicURL: account.publicURL(
+                    bucketName: client.bucket ?? bucket?.name ?? "",
+                    bucket: bucket,
+                    key: item.objectKey
+                ),
+                finishedAt: nil
+            )
+            jobs.append(job)
+            retryDescriptors[job.id] = .upload(
+                UploadRetryDescriptor(
+                    client: client,
+                    account: account,
+                    bucket: bucket,
+                    sourceURL: item.sourceURL,
+                    objectKey: item.objectKey,
+                    options: plan.options,
+                    playSound: playCompleteSound
+                )
+            )
+            resources[job.id] = item.resource
+            tasks[job.id] = Task { [weak self] in
+                await self?.runUpload(
+                    id: job.id,
+                    client: client,
+                    key: item.objectKey,
+                    fileURL: item.fileURL,
+                    contentType: item.contentType,
+                    acl: account.defaultACL,
+                    playSound: playCompleteSound
+                )
+            }
+        }
+        updateDockBadge()
     }
 
     private func runUpload(
@@ -276,14 +366,16 @@ final class TransferEngine {
         fileURL: URL,
         contentType: String,
         acl: ObjectACL,
-        release: URL?,
         playSound: Bool
     ) async {
-        await waitForSlot(id: id)
-        guard !Task.isCancelled else {
+        guard await waitForSlot() else {
             mutate(id) { $0.status = .cancelled; $0.finishedAt = .now }
-            finishSlot()
+            finishResource(id)
             return
+        }
+        defer {
+            finishResource(id)
+            finishSlot()
         }
         mutate(id) { $0.status = .running }
         do {
@@ -314,18 +406,17 @@ final class TransferEngine {
                 job.finishedAt = .now
             }
         }
-        if let release {
-            release.stopAccessingSecurityScopedResource()
-        }
-        finishSlot()
     }
 
     private func runDownload(id: UUID, client: OSSClient, key: String, destination: URL) async {
-        await waitForSlot(id: id)
-        guard !Task.isCancelled else {
+        guard await waitForSlot() else {
             mutate(id) { $0.status = .cancelled; $0.finishedAt = .now }
-            finishSlot()
+            finishResource(id)
             return
+        }
+        defer {
+            finishResource(id)
+            finishSlot()
         }
         mutate(id) { $0.status = .running }
         do {
@@ -352,14 +443,15 @@ final class TransferEngine {
                 job.finishedAt = .now
             }
         }
-        finishSlot()
     }
 
-    private func waitForSlot(id: UUID) async {
+    private func waitForSlot() async -> Bool {
         while running >= concurrency && !Task.isCancelled {
             try? await Task.sleep(for: .milliseconds(80))
         }
+        guard !Task.isCancelled else { return false }
         running += 1
+        return true
     }
 
     private func finishSlot() {
@@ -371,13 +463,11 @@ final class TransferEngine {
         tasks = tasks.filter { pair in
             jobs.first(where: { $0.id == pair.key })?.isActive ?? false
         }
-        if activeCount == 0 {
-            for root in scopedRoots {
-                root.stopAccessingSecurityScopedResource()
-            }
-            scopedRoots.removeAll()
-        }
         updateDockBadge()
+    }
+
+    private func finishResource(_ id: UUID) {
+        resources.removeValue(forKey: id)?.finish()
     }
 
     private func mutate(_ id: UUID, _ body: (inout TransferJob) -> Void) {
@@ -388,6 +478,28 @@ final class TransferEngine {
     private func updateDockBadge() {
         let count = activeCount
         NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+    }
+
+    private enum RetryDescriptor: Sendable {
+        case upload(UploadRetryDescriptor)
+        case download(DownloadRetryDescriptor)
+    }
+
+    private struct UploadRetryDescriptor: Sendable {
+        var client: OSSClient
+        var account: OSSAccount
+        var bucket: OSSBucket?
+        var sourceURL: URL
+        var objectKey: String
+        var options: UploadPreparationOptions
+        var playSound: Bool
+    }
+
+    private struct DownloadRetryDescriptor: Sendable {
+        var client: OSSClient
+        var object: OSSObject
+        var destination: URL
+        var scopedRoot: URL
     }
 
     private struct PreparedUpload {
@@ -407,7 +519,7 @@ final class TransferEngine {
         var skipped: Int
     }
 
-    private static func expand(_ urls: [URL], imagesOnly: Bool) -> Expansion {
+    nonisolated private static func expand(_ urls: [URL], imagesOnly: Bool) -> Expansion {
         var result: [ExpandedFile] = []
         var skipped = 0
         let fm = FileManager.default
@@ -445,7 +557,8 @@ final class TransferEngine {
         return Expansion(files: result, skipped: skipped)
     }
 
-    private static func prepare(url: URL, convertHEIC: Bool) throws -> PreparedUpload {
+    nonisolated private static func prepare(url: URL, convertHEIC: Bool) async throws -> PreparedUpload {
+        try await ensureUbiquitousItemIsDownloaded(url)
         let ext = url.pathExtension.lowercased()
         if convertHEIC, ext == "heic" || ext == "heif" {
             guard let image = NSImage(contentsOf: url),
@@ -460,15 +573,36 @@ final class TransferEngine {
             try jpeg.write(to: dest)
             return PreparedUpload(fileURL: dest, filename: name, contentType: "image/jpeg", size: Int64(jpeg.count))
         }
-        let values = try url.resourceValues(forKeys: [.fileSizeKey, .ubiquitousItemDownloadingStatusKey])
-        if values.ubiquitousItemDownloadingStatus == .notDownloaded {
-            try FileManager.default.startDownloadingUbiquitousItem(at: url)
-        }
+        let values = try url.resourceValues(forKeys: [.fileSizeKey])
         return PreparedUpload(
             fileURL: url,
             filename: url.lastPathComponent,
             contentType: ImageKind.contentType(for: url.lastPathComponent),
             size: Int64(values.fileSize ?? 0)
+        )
+    }
+
+    nonisolated private static func ensureUbiquitousItemIsDownloaded(_ url: URL) async throws {
+        let keys: Set<URLResourceKey> = [.isUbiquitousItemKey, .ubiquitousItemDownloadingStatusKey]
+        var values = try url.resourceValues(forKeys: keys)
+        guard values.isUbiquitousItem == true,
+              values.ubiquitousItemDownloadingStatus == .notDownloaded
+        else { return }
+
+        try FileManager.default.startDownloadingUbiquitousItem(at: url)
+        for _ in 0..<300 {
+            try Task.checkCancellation()
+            try await Task.sleep(for: .milliseconds(200))
+            values = try url.resourceValues(forKeys: keys)
+            if values.ubiquitousItemDownloadingStatus != .notDownloaded {
+                return
+            }
+        }
+        throw OSSServiceError(
+            statusCode: 0,
+            code: "ICloudDownloadTimeout",
+            message: "等待 iCloud 下载文件超时",
+            requestId: ""
         )
     }
 }

@@ -52,6 +52,7 @@ final class AppModel {
     var wantsDeleteConfirmation = false
     var wantsNewFolder = false
     var pendingOpenURLs: [URL] = []
+    private var pendingOwnedTemporaryURLs: Set<URL> = []
     var overwritePrompt: OverwritePrompt?
     private var uploadGeneration = 0
     private var didLoadWindow = false
@@ -344,8 +345,10 @@ final class AppModel {
         present("已连接，共 \(found.count) 个存储空间")
         if !pendingOpenURLs.isEmpty, hasWorkspace {
             let queued = pendingOpenURLs
+            let owned = pendingOwnedTemporaryURLs
             pendingOpenURLs = []
-            upload(urls: queued)
+            pendingOwnedTemporaryURLs = []
+            upload(urls: queued, ownedTemporaryURLs: owned)
         }
     }
 
@@ -363,16 +366,29 @@ final class AppModel {
         pruneIfNeeded()
     }
 
-    func upload(urls: [URL], to prefix: String? = nil, applyTemplate: Bool? = nil) {
-        guard makeClient() != nil, selectedAccount != nil else {
+    func upload(
+        urls: [URL],
+        to prefix: String? = nil,
+        applyTemplate: Bool? = nil,
+        ownedTemporaryURLs: Set<URL> = []
+    ) {
+        guard selectedAccount != nil, selectedBucket != nil, makeClient() != nil else {
             pendingOpenURLs.append(contentsOf: urls)
+            pendingOwnedTemporaryURLs.formUnion(ownedTemporaryURLs)
             showAccountSheet = accounts.isEmpty
             present("先添加账号并选择存储空间", error: true)
             return
         }
         let dest = prefix ?? browser.prefix
         let useTemplate = applyTemplate ?? dest.isEmpty
-        Task { await beginUpload(urls: urls, prefix: dest, applyTemplate: useTemplate) }
+        Task {
+            await beginUpload(
+                urls: urls,
+                prefix: dest,
+                applyTemplate: useTemplate,
+                ownedTemporaryURLs: ownedTemporaryURLs
+            )
+        }
     }
 
     func confirmOverwrite() {
@@ -399,19 +415,32 @@ final class AppModel {
         transfers.abandon(plan: prompt.plan)
     }
 
-    private func beginUpload(urls: [URL], prefix: String, applyTemplate: Bool) async {
-        guard let client = makeClient(), let account = selectedAccount else { return }
+    private func beginUpload(
+        urls: [URL],
+        prefix: String,
+        applyTemplate: Bool,
+        ownedTemporaryURLs: Set<URL>
+    ) async {
+        guard let client = makeClient(), let account = selectedAccount, let bucket = selectedBucket else {
+            ownedTemporaryURLs.forEach { try? FileManager.default.removeItem(at: $0) }
+            return
+        }
         uploadGeneration += 1
         let generation = uploadGeneration
         if overwritePrompt != nil {
             cancelOverwrite()
         }
-        let plan = TransferEngine.planUploads(
+        let options = TransferEngine.UploadPreparationOptions(
+            imagesOnly: settings.imagesOnly,
+            convertHEIC: settings.convertHEIC,
+            ownedTemporaryURLs: ownedTemporaryURLs
+        )
+        let plan = await TransferEngine.planUploads(
             urls: urls,
             prefix: prefix,
             template: account.prefixTemplate,
             applyTemplate: applyTemplate,
-            settings: settings
+            options: options
         )
         if plan.skipped > 0 {
             present("已跳过 \(plan.skipped) 个不支持的文件")
@@ -423,7 +452,7 @@ final class AppModel {
         }
         let existing: Set<String>
         do {
-            existing = try await existingKeys(among: viable.map(\.objectKey))
+            existing = try await existingKeys(among: viable.map(\.objectKey), client: client)
         } catch {
             transfers.abandon(plan: plan)
             present("无法确认目标是否已有同名文件，已取消上传", error: true)
@@ -447,14 +476,14 @@ final class AppModel {
             seen.insert(item.objectKey)
         }
         if conflicts.isEmpty {
-            commit(plan: plan, client: client, account: account, bucket: selectedBucket)
+            commit(plan: plan, client: client, account: account, bucket: bucket)
             return
         }
         overwritePrompt = OverwritePrompt(
             plan: plan,
             client: client,
             account: account,
-            bucket: selectedBucket,
+            bucket: bucket,
             conflicts: conflicts,
             skipSources: skipSources
         )
@@ -478,10 +507,7 @@ final class AppModel {
         scheduleListingRefresh()
     }
 
-    private func existingKeys(among keys: [String]) async throws -> Set<String> {
-        guard let client = makeClient() else {
-            throw OSSServiceError(statusCode: 0, code: "NoClient", message: "还没有连接", requestId: "")
-        }
+    private func existingKeys(among keys: [String], client: OSSClient) async throws -> Set<String> {
         let unique = Array(Set(keys))
         if unique.count > 40 {
             let parents = Set(unique.map { PathTemplate.parentPrefix($0) })
@@ -510,11 +536,15 @@ final class AppModel {
 
     func confirmPendingOpen() {
         let urls = pendingOpenURLs
+        let owned = pendingOwnedTemporaryURLs
         pendingOpenURLs = []
-        upload(urls: urls)
+        pendingOwnedTemporaryURLs = []
+        upload(urls: urls, ownedTemporaryURLs: owned)
     }
 
     func cancelPendingOpen() {
+        pendingOwnedTemporaryURLs.forEach { try? FileManager.default.removeItem(at: $0) }
+        pendingOwnedTemporaryURLs = []
         pendingOpenURLs = []
     }
 
@@ -872,7 +902,7 @@ final class AppModel {
                 }
             }
             if !files.isEmpty {
-                upload(urls: files)
+                upload(urls: files, ownedTemporaryURLs: Set(files))
             }
         }
     }

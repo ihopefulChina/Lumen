@@ -120,6 +120,11 @@ private struct TransferRow: View {
                 }
                 .buttonStyle(.plain)
                 .help("取消")
+            } else if job.status == .failed, model.transfers.canRetry(job.id) {
+                Button("重试") {
+                    model.transfers.retry(job.id)
+                }
+                .controlSize(.small)
             } else if job.status == .completed, job.kind == .upload {
                 Button("复制") {
                     if let url = job.publicURL {

@@ -433,7 +433,7 @@ struct BrowserView: View {
         }
         photos = []
         if !urls.isEmpty {
-            model.upload(urls: urls)
+            model.upload(urls: urls, ownedTemporaryURLs: Set(urls))
         }
     }
 }
