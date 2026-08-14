@@ -49,23 +49,18 @@ required_html=(
 )
 
 for pattern in "${required_html[@]}"; do
-  if ! rg -Fq "$pattern" "$index"; then
+  if ! grep -Fq -- "$pattern" "$index"; then
     echo "Missing required HTML marker: $pattern" >&2
     exit 1
   fi
 done
 
-if rg -n '(fonts\.(googleapis|gstatic)\.com|TODO|Lorem ipsum|href="/|src="/)' "$site_root" --glob '*.html' --glob '*.css'; then
+if grep -En '(fonts\.(googleapis|gstatic)\.com|TODO|Lorem ipsum|href="/|src="/)' "$site_root"/*.html "$site_root"/*.css; then
   echo "Website contains a forbidden dependency, placeholder, or root-relative URL." >&2
   exit 1
 fi
 
-if rg -nP '<script(?! type="application/ld\+json")' "$site_root" --glob '*.html'; then
-  echo "Website contains runtime JavaScript." >&2
-  exit 1
-fi
-
-if ! rg -Fq '@media (prefers-reduced-motion: reduce)' "$site_root/styles.css"; then
+if ! grep -Fq -- '@media (prefers-reduced-motion: reduce)' "$site_root/styles.css"; then
   echo "Missing reduced-motion support." >&2
   exit 1
 fi
@@ -92,6 +87,8 @@ class SiteParser(HTMLParser):
             self.ids.add(values["id"])
         if tag == "a" and "href" in values:
             self.links.append(values["href"])
+        if tag == "script" and values.get("type") != "application/ld+json":
+            self.errors.append("runtime JavaScript is not allowed")
         if tag == "img":
             self.images.append(values)
             for required in ("src", "alt", "width", "height"):
