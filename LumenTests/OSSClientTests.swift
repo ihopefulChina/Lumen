@@ -38,7 +38,7 @@ struct OSSClientTests {
         let temporary = directory.appending(path: "response.tmp")
         try Data("original".utf8).write(to: destination)
         try Data("replacement".utf8).write(to: temporary)
-        let transport = StubOSSTransport(steps: [.download(temporary)])
+        let transport = StubOSSTransport(steps: [.download(temporary, headers: [:])])
 
         await #expect(throws: (any Error).self) {
             try await Self.client(transport: transport).download(
@@ -152,6 +152,73 @@ struct OSSClientTests {
         #expect(await transport.recordedRequests().count == 1)
     }
 
+    @Test func crc64XZMatchesTheStandardCheckVector() {
+        #expect(CRC64XZ.checksum(Data("123456789".utf8)) == 0x995D_C9BB_DF19_39FA)
+    }
+
+    @Test func putDataReportsMatchingServerCRC64() async throws {
+        let data = Data("verified upload".utf8)
+        let checksum = CRC64XZ.checksum(data)
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 200,
+                headers: ["x-oss-hash-crc64ecma": String(checksum)],
+                data: Data()
+            )
+        ])
+
+        let verified = try await Self.client(transport: transport).putData(
+            key: "verified.txt",
+            data: data,
+            contentType: "text/plain",
+            acl: .private
+        )
+
+        #expect(verified)
+    }
+
+    @Test func putDataRejectsMismatchedServerCRC64() async {
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 200,
+                headers: ["x-oss-hash-crc64ecma": "1"],
+                data: Data()
+            )
+        ])
+
+        await #expect(throws: OSSIntegrityError.self) {
+            try await Self.client(transport: transport).putData(
+                key: "corrupted.txt",
+                data: Data("different".utf8),
+                contentType: "text/plain",
+                acl: .private
+            )
+        }
+    }
+
+    @Test func downloadRejectsMismatchedCRCBeforePublishingDestination() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-crc-download-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "download.txt")
+        let temporary = directory.appending(path: "response.tmp")
+        try Data("downloaded bytes".utf8).write(to: temporary)
+        let transport = StubOSSTransport(steps: [
+            .download(temporary, headers: ["x-oss-hash-crc64ecma": "1"])
+        ])
+
+        await #expect(throws: OSSIntegrityError.self) {
+            try await Self.client(transport: transport).download(
+                key: "download.txt",
+                to: destination,
+                within: directory
+            )
+        }
+
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+    }
+
     private static func client(transport: any OSSHTTPTransport) -> OSSClient {
         OSSClient(
             credentials: OSSCredentials(
@@ -174,7 +241,7 @@ struct OSSClientTests {
 private actor StubOSSTransport: OSSHTTPTransport {
     enum Step: Sendable {
         case response(status: Int, headers: [String: String], data: Data)
-        case download(URL)
+        case download(URL, headers: [String: String])
         case cancel
     }
 
@@ -198,8 +265,8 @@ private actor StubOSSTransport: OSSHTTPTransport {
         switch steps.removeFirst() {
         case .response(let status, let headers, let data):
             return OSSHTTPResult(status: status, headers: headers, data: data, temporaryDownloadURL: nil)
-        case .download(let url):
-            return OSSHTTPResult(status: 200, headers: [:], data: Data(), temporaryDownloadURL: url)
+        case .download(let url, let headers):
+            return OSSHTTPResult(status: 200, headers: headers, data: Data(), temporaryDownloadURL: url)
         case .cancel:
             throw CancellationError()
         }

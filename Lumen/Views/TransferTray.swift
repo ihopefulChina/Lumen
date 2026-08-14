@@ -110,7 +110,7 @@ private struct TransferRow: View {
             Text(job.status == .running ? "\(Int(job.progress * 100))%" : statusLabel)
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
-                .frame(width: 52, alignment: .trailing)
+                .frame(width: 56, alignment: .trailing)
             if job.isActive {
                 Button {
                     model.transfers.cancel(job.id)
@@ -161,7 +161,7 @@ private struct TransferRow: View {
         switch job.status {
         case .queued: "排队"
         case .running: "进行中"
-        case .completed: "完成"
+        case .completed: job.integrityVerified ? "已校验" : "完成"
         case .failed: "失败"
         case .cancelled: "已取消"
         }
@@ -197,7 +197,7 @@ struct TransferMenu: View {
         switch job.status {
         case .running: "\(Int(job.progress * 100))%"
         case .queued: "排队"
-        case .completed: "完成"
+        case .completed: job.integrityVerified ? "完成 · 已校验" : "完成"
         case .failed: "失败"
         case .cancelled: "已取消"
         }

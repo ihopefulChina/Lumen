@@ -385,7 +385,7 @@ final class TransferEngine {
         }
         mutate(id) { $0.status = .running }
         do {
-            try await client.putObject(key: key, fileURL: fileURL, contentType: contentType, acl: acl) { [weak self] sent, total in
+            let integrityVerified = try await client.putObject(key: key, fileURL: fileURL, contentType: contentType, acl: acl) { [weak self] sent, total in
                 Task { @MainActor in
                     self?.mutate(id) { job in
                         job.transferred = sent
@@ -397,6 +397,7 @@ final class TransferEngine {
                 job.status = .completed
                 job.transferred = job.total
                 job.finishedAt = .now
+                job.integrityVerified = integrityVerified
             }
             Haptics.commit()
             if playSound {
@@ -432,7 +433,7 @@ final class TransferEngine {
         }
         mutate(id) { $0.status = .running }
         do {
-            try await client.download(key: key, to: destination, within: root) { [weak self] sent, total in
+            let integrityVerified = try await client.download(key: key, to: destination, within: root) { [weak self] sent, total in
                 Task { @MainActor in
                     self?.mutate(id) { job in
                         job.transferred = sent
@@ -444,6 +445,7 @@ final class TransferEngine {
                 job.status = .completed
                 job.transferred = max(job.transferred, job.total)
                 job.finishedAt = .now
+                job.integrityVerified = integrityVerified
             }
             Haptics.commit()
         } catch is CancellationError {

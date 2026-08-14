@@ -154,6 +154,44 @@ struct TransferEngineTests {
         #expect(paths == ["/remote/download.txt", "/remote/download.txt"])
     }
 
+    @Test func finishingOneUploadNeverExceedsConfiguredConcurrency() async throws {
+        let urls = try (1...4).map { try Self.temporaryFile(named: "concurrency-\($0).txt") }
+        defer { urls.forEach { try? FileManager.default.removeItem(at: $0) } }
+        let transport = ControllableUploadTransport()
+        let client = Self.client(transport: transport)
+        let engine = TransferEngine()
+        let plan = TransferEngine.UploadPlan(
+            items: urls.enumerated().map { index, url in
+                Self.item(
+                    url: url,
+                    key: "item-\(index + 1).txt",
+                    resource: TransferResource()
+                )
+            },
+            skipped: 0
+        )
+
+        engine.enqueue(
+            plan: plan,
+            client: client,
+            account: Self.account(),
+            bucket: nil,
+            settings: Self.settings(concurrency: 2)
+        )
+        try await Self.waitUntil { await transport.requestCount == 2 }
+        let firstPath = try #require(await transport.requestPaths.first)
+        await transport.resume(path: firstPath)
+        try await Self.waitUntil { await transport.requestCount >= 3 }
+        try await Task.sleep(for: .milliseconds(250))
+
+        #expect(await transport.requestCount == 3)
+
+        await transport.resumeAll()
+        try await Self.waitUntil { await transport.requestCount == 4 }
+        await transport.resumeAll()
+        try await Self.waitUntil { engine.jobs.allSatisfy { $0.status == .completed } }
+    }
+
     private static func item(
         url: URL,
         key: String,
@@ -218,6 +256,16 @@ struct TransferEngineTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         Issue.record("Timed out waiting for transfer state")
+    }
+
+    private static func waitUntil(
+        _ condition: @escaping @Sendable () async -> Bool
+    ) async throws {
+        for _ in 0..<200 {
+            if await condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Timed out waiting for asynchronous transfer state")
     }
 
     private static func waitForRequest(_ transport: BlockingUploadTransport) async throws {
@@ -300,5 +348,39 @@ private actor RetryTransport: OSSHTTPTransport {
             data: Data(),
             temporaryDownloadURL: download ? downloadURL : nil
         )
+    }
+}
+
+private actor ControllableUploadTransport: OSSHTTPTransport {
+    private(set) var requestPaths: [String] = []
+    private var continuations: [String: CheckedContinuation<OSSHTTPResult, Never>] = [:]
+
+    var requestCount: Int { requestPaths.count }
+
+    func send(
+        _ request: URLRequest,
+        body: OSSHTTPBody,
+        download: Bool,
+        onProgress: (@Sendable (Int64, Int64) -> Void)?
+    ) async throws -> OSSHTTPResult {
+        let path = request.url?.path ?? UUID().uuidString
+        requestPaths.append(path)
+        return await withCheckedContinuation { continuation in
+            continuations[path] = continuation
+        }
+    }
+
+    func resume(path: String) {
+        continuations.removeValue(forKey: path)?.resume(returning: Self.success)
+    }
+
+    func resumeAll() {
+        let pending = Array(continuations.values)
+        continuations.removeAll()
+        pending.forEach { $0.resume(returning: Self.success) }
+    }
+
+    private static var success: OSSHTTPResult {
+        OSSHTTPResult(status: 200, headers: [:], data: Data(), temporaryDownloadURL: nil)
     }
 }

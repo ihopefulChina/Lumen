@@ -25,6 +25,7 @@ struct TransferJob: Identifiable, Equatable, Sendable {
     var errorMessage: String?
     var publicURL: URL?
     var finishedAt: Date?
+    var integrityVerified = false
 
     var progress: Double {
         guard total > 0 else { return status == .completed ? 1 : 0 }

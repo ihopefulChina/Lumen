@@ -147,18 +147,27 @@ struct OSSClient: Sendable {
         )
     }
 
+    @discardableResult
     func putObject(
         key: String,
         fileURL: URL,
         contentType: String,
         acl: ObjectACL,
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil
-    ) async throws {
+    ) async throws -> Bool {
         guard let bucket else { throw Self.missingBucket }
         let size = try fileSize(fileURL)
+        let localCRC64 = try CRC64XZ.checksum(fileURL: fileURL)
         if size >= Self.multipartThreshold {
-            try await multipartUpload(key: key, fileURL: fileURL, size: size, contentType: contentType, acl: acl, onProgress: onProgress)
-            return
+            return try await multipartUpload(
+                key: key,
+                fileURL: fileURL,
+                size: size,
+                contentType: contentType,
+                acl: acl,
+                localCRC64: localCRC64,
+                onProgress: onProgress
+            )
         }
         var headers = [
             "Content-Type": contentType
@@ -166,7 +175,7 @@ struct OSSClient: Sendable {
         if acl != .default {
             headers["x-oss-object-acl"] = acl.rawValue
         }
-        _ = try await perform(
+        let response = try await perform(
             method: "PUT",
             bucket: bucket,
             key: key,
@@ -174,15 +183,18 @@ struct OSSClient: Sendable {
             fileURL: fileURL,
             onProgress: onProgress
         )
+        return try Self.verifyCRC64(local: localCRC64, headers: response.headers)
     }
 
-    func putData(key: String, data: Data, contentType: String, acl: ObjectACL) async throws {
+    @discardableResult
+    func putData(key: String, data: Data, contentType: String, acl: ObjectACL) async throws -> Bool {
         guard let bucket else { throw Self.missingBucket }
         var headers = ["Content-Type": contentType]
         if acl != .default {
             headers["x-oss-object-acl"] = acl.rawValue
         }
-        _ = try await perform(method: "PUT", bucket: bucket, key: key, headers: headers, body: data)
+        let response = try await perform(method: "PUT", bucket: bucket, key: key, headers: headers, body: data)
+        return try Self.verifyCRC64(local: CRC64XZ.checksum(data), headers: response.headers)
     }
 
     func deleteObject(key: String) async throws {
@@ -210,13 +222,14 @@ struct OSSClient: Sendable {
         try await deleteObject(key: sourceKey)
     }
 
+    @discardableResult
     func download(
         key: String,
         to destination: URL,
         within root: URL? = nil,
         process: String? = nil,
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil
-    ) async throws {
+    ) async throws -> Bool {
         guard let bucket else { throw Self.missingBucket }
         if let root {
             try FileSafety.validate(destination: destination, root: root)
@@ -233,7 +246,7 @@ struct OSSClient: Sendable {
         if let process, !process.isEmpty {
             query.append(("x-oss-process", process))
         }
-        _ = try await perform(
+        let response = try await perform(
             method: "GET",
             bucket: bucket,
             key: key,
@@ -242,6 +255,7 @@ struct OSSClient: Sendable {
             downloadRoot: root,
             onProgress: onProgress
         )
+        return response.headers.value("x-oss-hash-crc64ecma") != nil
     }
 
     func objectData(key: String, process: String? = nil) async throws -> Data {
@@ -251,6 +265,7 @@ struct OSSClient: Sendable {
             query.append(("x-oss-process", process))
         }
         let response = try await perform(method: "GET", bucket: bucket, key: key, query: query)
+        _ = try Self.verifyCRC64(local: CRC64XZ.checksum(response.data), headers: response.headers)
         return response.data
     }
 
@@ -291,8 +306,9 @@ struct OSSClient: Sendable {
         size: Int64,
         contentType: String,
         acl: ObjectACL,
+        localCRC64: UInt64,
         onProgress: (@Sendable (Int64, Int64) -> Void)?
-    ) async throws {
+    ) async throws -> Bool {
         guard let bucket else { throw Self.missingBucket }
         var initiateHeaders = ["Content-Type": contentType]
         if acl != .default {
@@ -337,7 +353,7 @@ struct OSSClient: Sendable {
             }
 
             let completeBody = completeXML(parts: parts)
-            _ = try await perform(
+            let completed = try await perform(
                 method: "POST",
                 bucket: bucket,
                 key: key,
@@ -345,6 +361,7 @@ struct OSSClient: Sendable {
                 headers: ["Content-Type": "application/xml"],
                 body: completeBody
             )
+            return try Self.verifyCRC64(local: localCRC64, headers: completed.headers)
         } catch {
             let client = self
             await Task.detached {
@@ -440,24 +457,41 @@ struct OSSClient: Sendable {
             guard let temp = http.temporaryDownloadURL else {
                 throw OSSServiceError(statusCode: 0, code: "MissingDownload", message: "下载没有返回文件", requestId: "")
             }
-            if let downloadRoot {
-                try FileSafety.validate(destination: downloadTo, root: downloadRoot)
+            do {
+                if let downloadRoot {
+                    try FileSafety.validate(destination: downloadTo, root: downloadRoot)
+                }
+                guard !FileManager.default.fileExists(atPath: downloadTo.path) else {
+                    throw OSSServiceError(
+                        statusCode: 0,
+                        code: "LocalFileExists",
+                        message: "本地已有同名文件，未覆盖",
+                        requestId: ""
+                    )
+                }
+                let localCRC64 = try CRC64XZ.checksum(fileURL: temp)
+                _ = try Self.verifyCRC64(local: localCRC64, headers: http.headers)
+                try FileManager.default.createDirectory(at: downloadTo.deletingLastPathComponent(), withIntermediateDirectories: true)
+                if let downloadRoot {
+                    try FileSafety.validate(destination: downloadTo, root: downloadRoot)
+                }
+                try FileManager.default.moveItem(at: temp, to: downloadTo)
+            } catch {
+                try? FileManager.default.removeItem(at: temp)
+                throw error
             }
-            guard !FileManager.default.fileExists(atPath: downloadTo.path) else {
-                throw OSSServiceError(
-                    statusCode: 0,
-                    code: "LocalFileExists",
-                    message: "本地已有同名文件，未覆盖",
-                    requestId: ""
-                )
-            }
-            try FileManager.default.createDirectory(at: downloadTo.deletingLastPathComponent(), withIntermediateDirectories: true)
-            if let downloadRoot {
-                try FileSafety.validate(destination: downloadTo, root: downloadRoot)
-            }
-            try FileManager.default.moveItem(at: temp, to: downloadTo)
         }
         return http
+    }
+
+    private static func verifyCRC64(local: UInt64, headers: [String: String]) throws -> Bool {
+        guard let serverValue = headers.value("x-oss-hash-crc64ecma") else {
+            return false
+        }
+        guard let remote = UInt64(serverValue), remote == local else {
+            throw OSSIntegrityError(localCRC64: local, serverValue: serverValue)
+        }
+        return true
     }
 
     private func validated(_ response: HTTPResponse) throws -> HTTPResponse {
