@@ -279,12 +279,14 @@ final class AppModel {
             createdAt: draft.createdAt
         )
         try AccountStore.storeSecrets(id: account.id, secret: draft.secret, token: draft.token)
-        if let index = accounts.firstIndex(where: { $0.id == account.id }) {
-            accounts[index] = account
+        var updatedAccounts = accounts
+        if let index = updatedAccounts.firstIndex(where: { $0.id == account.id }) {
+            updatedAccounts[index] = account
         } else {
-            accounts.append(account)
+            updatedAccounts.append(account)
         }
-        AccountStore.save(accounts)
+        try AccountStore.save(updatedAccounts)
+        accounts = updatedAccounts
         buckets = found.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         selectedAccountID = account.id
         lastAccountID = account.id.uuidString
@@ -305,9 +307,15 @@ final class AppModel {
     }
 
     func deleteAccount(_ account: OSSAccount) {
-        accounts.removeAll { $0.id == account.id }
+        let updatedAccounts = accounts.filter { $0.id != account.id }
+        do {
+            try AccountStore.save(updatedAccounts)
+        } catch {
+            present("无法保存账号更改：\(error.localizedDescription)", error: true)
+            return
+        }
+        accounts = updatedAccounts
         AccountStore.deleteSecrets(id: account.id)
-        AccountStore.save(accounts)
         services.sessions.forEach { $0.pruneIfNeeded() }
         pruneIfNeeded()
     }
@@ -706,8 +714,10 @@ final class AppModel {
             guard let url = resolved else { return nil }
             switch style {
             case .plain: return url.absoluteString
-            case .markdown: return "![\(object.name)](\(url.absoluteString))"
-            case .html: return "<img src=\"\(url.absoluteString)\" alt=\"\(object.name)\" />"
+            case .markdown:
+                return LinkEscaping.markdownImage(name: object.name, url: url.absoluteString)
+            case .html:
+                return LinkEscaping.htmlImage(name: object.name, url: url.absoluteString)
             }
         }
         guard !urls.isEmpty else { return }

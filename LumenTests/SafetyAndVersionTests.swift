@@ -1,0 +1,88 @@
+import Foundation
+import Testing
+@testable import Lumen
+
+struct SafetyAndVersionTests {
+    @Test func malformedVersionsAreRejected() {
+        #expect(AppVersion.parts("1.two.3") == nil)
+        #expect(AppVersion.parts("1..3") == nil)
+        #expect(AppVersion.parts("1.2.3") == [1, 2, 3])
+        #expect(!AppVersion.isNewer("1.two.3", than: "0.0.3"))
+    }
+
+    @Test func objectURLPreservesExactKey() throws {
+        let account = OSSAccount(
+            id: UUID(),
+            name: "Test",
+            accessKeyId: "test",
+            regionID: "cn-hangzhou",
+            endpointOverride: "",
+            cdnDomain: "",
+            defaultACL: .private,
+            prefixTemplate: "",
+            useTransferAccelerate: false,
+            createdAt: .now
+        )
+        let url = try #require(
+            account.publicURL(
+                bucketName: "bucket",
+                bucket: nil,
+                key: "a//空 格/+?#.txt"
+            )
+        )
+
+        #expect(url.host == "bucket.oss-cn-hangzhou.aliyuncs.com")
+        #expect(url.path(percentEncoded: true) == "/a//%E7%A9%BA%20%E6%A0%BC/%2B%3F%23.txt")
+    }
+
+    @Test func unsafeRelativePathsAreRejected() {
+        #expect(throws: FileSafety.Error.self) {
+            try FileSafety.relativeComponents("../outside.txt")
+        }
+        #expect(throws: FileSafety.Error.self) {
+            try FileSafety.relativeComponents("/absolute.txt")
+        }
+        #expect(throws: FileSafety.Error.self) {
+            try FileSafety.relativeComponents("nested//empty.txt")
+        }
+    }
+
+    @Test func symlinkCannotEscapeDownloadRoot() throws {
+        let base = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-safety-tests-\(UUID().uuidString)", directoryHint: .isDirectory)
+        let root = base.appending(path: "root", directoryHint: .isDirectory)
+        let outside = base.appending(path: "outside", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+
+        try FileManager.default.createSymbolicLink(
+            at: root.appending(path: "link"),
+            withDestinationURL: outside
+        )
+
+        #expect(throws: FileSafety.Error.self) {
+            try FileSafety.destination(root: root, relativePath: "link/file.txt")
+        }
+    }
+
+    @Test func objectNamesRejectPathComponents() throws {
+        #expect(try ObjectNameValidator.validate(" photo.jpg ") == "photo.jpg")
+        #expect(throws: FileSafety.Error.self) { try ObjectNameValidator.validate("") }
+        #expect(throws: FileSafety.Error.self) { try ObjectNameValidator.validate("nested/name") }
+        #expect(throws: FileSafety.Error.self) { try ObjectNameValidator.validate("..") }
+    }
+
+    @Test func linkTextEscapingUsesTheOutputContext() {
+        #expect(LinkEscaping.markdownAlt("a]b\\c") == "a\\]b\\\\c")
+        #expect(LinkEscaping.htmlAttribute("a\"<&") == "a&quot;&lt;&amp;")
+        #expect(
+            LinkEscaping.markdownImage(name: "a]b.png", url: "https://example.test/a.png")
+                == "![a\\]b.png](https://example.test/a.png)"
+        )
+        #expect(
+            LinkEscaping.htmlImage(name: "a\"<&.png", url: "https://example.test/a.png")
+                == "<img src=\"https://example.test/a.png\" alt=\"a&quot;&lt;&amp;.png\" />"
+        )
+    }
+}

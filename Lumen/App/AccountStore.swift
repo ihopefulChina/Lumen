@@ -11,14 +11,10 @@ enum AccountStore {
         }
     }
 
-    static func save(_ accounts: [OSSAccount]) {
-        do {
-            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-            let data = try JSONEncoder().encode(accounts)
-            try data.write(to: fileURL, options: .atomic)
-        } catch {
-            // Persistence failure is surfaced when the user next launches.
-        }
+    static func save(_ accounts: [OSSAccount]) throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let data = try JSONEncoder().encode(accounts)
+        try data.write(to: fileURL, options: .atomic)
     }
 
     static func secretAccount(_ id: UUID) -> String { id.uuidString }

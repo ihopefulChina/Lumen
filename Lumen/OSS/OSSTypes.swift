@@ -121,13 +121,13 @@ struct OSSAccount: Identifiable, Hashable, Codable, Sendable {
     }
 
     func publicURL(bucketName: String, bucket: OSSBucket?, key: String) -> URL? {
-        let encoded = key.split(separator: "/").map { OSSSigner.uriEncode(String($0), encodeSlash: true) }.joined(separator: "/")
         let cdn = OSSEndpoint.normalize(cdnDomain)
-        if !cdn.isEmpty {
-            return URL(string: "https://\(cdn)/\(encoded)")
-        }
-        let host = objectHost(bucketName: bucketName, bucket: bucket)
-        return URL(string: "https://\(host)/\(encoded)")
+        let host = cdn.isEmpty ? objectHost(bucketName: bucketName, bucket: bucket) : cdn
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = host
+        components.percentEncodedPath = "/" + OSSSigner.uriEncode(key, encodeSlash: false)
+        return components.url
     }
 
     var prefersSignedLinks: Bool {

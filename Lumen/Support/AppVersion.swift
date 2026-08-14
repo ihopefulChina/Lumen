@@ -19,13 +19,20 @@ enum AppVersion {
         return value
     }
 
-    static func parts(_ raw: String) -> [Int] {
-        normalized(raw).split(separator: ".").map { Int($0) ?? 0 }
+    static func parts(_ raw: String) -> [Int]? {
+        let value = normalized(raw)
+        guard !value.isEmpty else { return nil }
+        let components = value.split(separator: ".", omittingEmptySubsequences: false)
+        guard !components.isEmpty,
+              components.allSatisfy({ !$0.isEmpty && $0.allSatisfy(\.isNumber) })
+        else {
+            return nil
+        }
+        return components.compactMap { Int($0) }
     }
 
     static func isNewer(_ candidate: String, than current: String) -> Bool {
-        let left = parts(candidate)
-        let right = parts(current)
+        guard let left = parts(candidate), let right = parts(current) else { return false }
         let count = max(left.count, right.count)
         for index in 0..<count {
             let a = index < left.count ? left[index] : 0
