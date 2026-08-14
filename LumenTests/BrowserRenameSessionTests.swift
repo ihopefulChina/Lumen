@@ -112,6 +112,18 @@ struct BrowserRenameSessionTests {
         #expect(model.renameSession == nil)
     }
 
+    @Test func committingRenameCannotBeCancelledAsIfTheRemoteOperationStopped() {
+        let model = Self.model()
+        model.replaceSelection(["a.txt"])
+        #expect(model.beginRenaming())
+        model.setRenameCommitting(true)
+
+        model.cancelRenaming()
+
+        #expect(model.renameSession?.key == "a.txt")
+        #expect(model.renameSession?.isCommitting == true)
+    }
+
     private static func model() -> BrowserModel {
         let suite = "LumenTests.BrowserRenameSession.\(UUID().uuidString)"
         let model = BrowserModel(defaults: UserDefaults(suiteName: suite)!)

@@ -273,6 +273,7 @@ final class BrowserModel {
     }
 
     func cancelRenaming() {
+        guard renameSession?.isCommitting != true else { return }
         renameSession = nil
     }
 

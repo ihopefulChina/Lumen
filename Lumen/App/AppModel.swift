@@ -818,14 +818,19 @@ final class AppModel {
 
     func cloudDragPayload(clickedKey: String) -> CloudDragPayload {
         let actionableKeys = browser.actionableSelectionKeys
-        let keys = actionableKeys.contains(clickedKey)
-            ? actionableKeys
-            : [clickedKey]
+        let keys: Set<String>
+        if actionableKeys.contains(clickedKey) {
+            keys = actionableKeys
+        } else if browser.visibleKeys.contains(clickedKey) {
+            keys = [clickedKey]
+        } else {
+            keys = []
+        }
         return CloudDragPayload(
             accountID: selectedAccountID ?? UUID(),
             bucketName: selectedBucketName ?? "",
-            objectKeys: browser.objects.filter { keys.contains($0.key) }.map(\.key),
-            folderPrefixes: browser.folders.filter { keys.contains($0.prefix) }.map(\.prefix)
+            objectKeys: browser.visibleObjects.filter { keys.contains($0.key) }.map(\.key),
+            folderPrefixes: browser.visibleFolders.filter { keys.contains($0.prefix) }.map(\.prefix)
         )
     }
 

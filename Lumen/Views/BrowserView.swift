@@ -515,13 +515,13 @@ struct BrowserView: View {
             switch session.kind {
             case .object:
                 guard let object = model.browser.objects.first(where: { $0.key == session.key }) else {
-                    model.browser.cancelRenaming()
+                    model.browser.finishRenaming()
                     return
                 }
                 succeeded = await model.rename(object, to: session.draft)
             case .folder:
                 guard let folder = model.browser.folders.first(where: { $0.prefix == session.key }) else {
-                    model.browser.cancelRenaming()
+                    model.browser.finishRenaming()
                     return
                 }
                 succeeded = await model.renameFolder(folder, to: session.draft)

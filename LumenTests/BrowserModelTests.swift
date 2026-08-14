@@ -127,6 +127,27 @@ struct BrowserModelTests {
         #expect(model.selectionAnchorKey == nil)
     }
 
+    @Test func hiddenClickedKeyCannotCreateACloudDragPayload() {
+        let services = AppServices(accounts: [])
+        let app = AppModel(kind: .settings, services: services)
+        app.browser.imagesOnly = false
+        app.browser.objects = [
+            OSSObject(
+                key: "hidden.txt",
+                size: 1,
+                etag: "hidden",
+                lastModified: nil,
+                storageClass: "Standard"
+            )
+        ]
+        app.browser.searchText = "visible"
+
+        let payload = app.cloudDragPayload(clickedKey: "hidden.txt")
+
+        #expect(payload.objectKeys.isEmpty)
+        #expect(payload.folderPrefixes.isEmpty)
+    }
+
     @Test func sizeSortingKeepsFoldersFirstAndUsesTheRequestedDirection() {
         let model = BrowserModel(defaults: Self.defaults())
         model.imagesOnly = false
