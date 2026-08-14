@@ -12,11 +12,13 @@
 <p align="center">
   <a href="https://ihopefulchina.github.io/Lumen/"><strong>访问官网</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg">下载 Lumen 0.0.6</a>
+  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.7.dmg">下载 Lumen 0.0.7</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/ihopefulChina/Lumen/releases">版本记录</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/ihopefulChina/Lumen/issues">问题反馈</a>
+  <a href="https://ihopefulchina.github.io/Lumen/support.html">使用支持</a>
+  &nbsp;·&nbsp;
+  <a href="https://ihopefulchina.github.io/Lumen/privacy.html">隐私说明</a>
 </p>
 
 <p align="center">
@@ -45,7 +47,7 @@ Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口�
 
 - 在同一 Bucket 内复制、移动或拖放文件与文件夹。
 - 像访达一样在网格或列表中原地重命名；文件默认只选中主名，扩展名保持不动。
-- 重命名或移动完成后可点顶部提示中的「撤销」，也可按 `⌘Z` 恢复到原位置。
+- 重命名或移动完成后可点顶部提示中的「撤销」，也可按 `⌘Z` 恢复到原位置；开启版本控制的 Bucket 还能撤销刚刚完成的删除。
 - 重命名文件夹时保留完整子目录结构。
 - 所有目标会先做冲突检查；Lumen 不会静默覆盖已有对象。
 - 云端移动会在复制全部成功后才删除源对象，失败时尽量回滚新建目标。
@@ -54,20 +56,23 @@ Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口�
 
 - 拖入文件或整个文件夹，保留原目录结构；大文件自动分片上传。
 - 从文件选择器、剪贴板或 Dock 图标接收素材。
-- 批量下载文件和完整文件夹，失败任务可沿原路径重试。
+- 批量下载文件和完整文件夹；短暂网络错误自动退避重试，失败任务可沿原路径重新开始。
+- 重开应用后仍保留传输结果；未完成任务会明确标记为中断，不会误称为字节级续传。
 - 复制原始链接、Markdown、HTML，或为私有对象生成临时签名 URL。
 - 使用 OSS 图片处理加载缩略图，减少不必要的原图下载。
 
 ### 默认把安全放在前面
 
 - AccessKey Secret 和 STS Token 保存在 macOS 钥匙串，不写入项目文件或偏好设置。
+- 新账号默认使用私有 ACL；切换到公共权限前必须明确确认。
+- 账号配置采用原子写入并保留上一份有效备份，损坏时优先恢复而不是静默清空。
 - 上传与下载会核对 OSS 返回的 CRC64；下载通过校验后才写入最终位置。
 - 不完整的目录列表会阻止整文件夹移动、复制、下载或删除。
 - 软件更新使用 Ed25519 签名，并在解压前验证安装包。
 
 ## 开始使用
 
-1. [下载 Lumen 0.0.6](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.6.dmg)。
+1. [下载 Lumen 0.0.7](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.7.dmg)。
 2. 打开 DMG，把 Lumen 拖到「应用程序」。
 3. 添加阿里云 OSS 账号，选择地域，然后双击进入 Bucket。
 4. 把文件拖进窗口，或按 `⌘O` 开始上传。
@@ -92,7 +97,7 @@ assets/{yyyy}/{MM}/{dd}/
 
 在菜单栏选择「Lumen → 检查更新…」，或在「设置 → 通用」开启自动检查。发现新版本后，点击安装即可完成下载与签名验证；安装结束后 Lumen 会自动退出并重新打开。
 
-已安装 0.0.4 或 0.0.5 的用户可以直接在软件内升级到 0.0.6。0.0.3 及更早版本尚未内置更新器，需要先手动安装一次当前版本。
+已安装 0.0.4 或更高版本的用户可以直接在软件内升级到 0.0.7。0.0.3 及更早版本尚未内置更新器，需要先手动安装一次当前版本。
 
 ## 快捷键
 
@@ -108,19 +113,19 @@ assets/{yyyy}/{MM}/{dd}/
 | 网格 / 列表 | `⌘1` / `⌘2` |
 | 快速查看 | `Space` |
 | 重命名 | `Return` |
-| 撤销最近一次重命名或移动 | `⌘Z` |
+| 撤销最近一次可恢复的云端操作 | `⌘Z` |
 | 打开选中项 | `⌘↓` 或双击 |
 | 取消重命名或选择 / 删除 | `Esc` / `Delete` |
 
 ## 安装与系统要求
 
-Lumen 0.0.6 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
+Lumen 0.0.7 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
 
 ## 账号与权限
 
 - 建议创建权限最小化的 RAM 子用户，不要使用阿里云主账号 AccessKey。
 - 从旧版本升级时，Lumen 会先把旧凭证写入钥匙串并回读确认，成功后才移除原明文记录。
-- 新账号默认 ACL 为「公共读」。保存前会显示公开访问提醒；不需要公开访问时请改为「私有」。
+- 新账号默认 ACL 为「私有」。改为公共读或公共读写前，Lumen 会说明影响并要求确认。
 - 私有对象默认生成 1 小时有效的签名 URL；配置 CDN 域名后，公开链接会优先使用 CDN 地址。
 
 ## 范围与限制
@@ -128,8 +133,8 @@ Lumen 0.0.6 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
 - Lumen 专注对象浏览与传输，不创建 Bucket，也不管理未完成的分片等控制台资源。
 - OSS 没有真正的文件夹；新建文件夹实际创建空目录占位对象。
 - 单个目录最多读取 30 页，通常约 3 万条对象。达到上限时会显示未完整加载，并阻止可能遗漏内容的批量操作。
-- 删除直接作用于 OSS，没有本地回收站；执行前会要求确认。
-- 撤销只保留当前会话内最近一次成功的重命名或同 Bucket 移动；复制、上传、新建文件夹和删除不能撤销。
+- 删除直接作用于 OSS，执行前会要求确认。只有 Bucket 开启版本控制且 OSS 返回精确 delete marker 时，Lumen 才会提供撤销；其他删除是永久的。
+- 撤销只保留当前会话内最近一次成功且可恢复的云端操作，不提供重做；复制、上传与新建文件夹不能撤销。
 - 如果原位置已被其他客户端创建同名对象，Lumen 会拒绝撤销，绝不会覆盖该对象。
 - 云端复制与移动目前限定在同一 Bucket 内。
 - 图片缩略图依赖 Bucket 已开通 OSS 图片处理。
@@ -155,7 +160,9 @@ xcodebuild -project Lumen.xcodeproj \
 
 ## 参与项目
 
-欢迎提交 [Issue](https://github.com/ihopefulChina/Lumen/issues) 或 Pull Request。报告问题时，请附上 macOS 版本、Lumen 版本、可复现步骤，以及已隐藏 AccessKey、Bucket 名和对象 URL 的截图或日志。
+欢迎提交 [Issue](https://github.com/ihopefulChina/Lumen/issues/new/choose) 或 Pull Request。请先阅读 [CONTRIBUTING.md](CONTRIBUTING.md)；报告问题时，可从「帮助 → 复制诊断信息」取得已脱敏摘要，并确保截图只含虚拟数据。
+
+使用说明与常见问题见 [支持页面](https://ihopefulchina.github.io/Lumen/support.html)，本地数据与网络边界见 [隐私说明](https://ihopefulchina.github.io/Lumen/privacy.html)。尚未公开的漏洞请按 [Security Policy](SECURITY.md) 私密报告。
 
 ## License
 

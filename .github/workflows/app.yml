@@ -1,0 +1,75 @@
+name: App
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      REAL_OSS_SMOKE: "0"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v6
+
+      - name: Resolve pinned packages
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project Lumen.xcodeproj \
+            -scheme Lumen \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -skipPackageUpdates
+          git diff --exit-code -- Lumen.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+
+      - name: Run tests
+        run: |
+          xcodebuild \
+            -project Lumen.xcodeproj \
+            -scheme Lumen \
+            -destination 'platform=macOS,arch=arm64' \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -skipPackageUpdates \
+            test
+
+      - name: Build Release
+        run: |
+          xcodebuild \
+            -project Lumen.xcodeproj \
+            -scheme Lumen \
+            -configuration Release \
+            -destination 'platform=macOS,arch=arm64' \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -skipPackageUpdates \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Analyze
+        run: |
+          xcodebuild \
+            -project Lumen.xcodeproj \
+            -scheme Lumen \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=arm64' \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -skipPackageUpdates \
+            CODE_SIGNING_ALLOWED=NO \
+            analyze
+
+      - name: Validate repository metadata
+        run: |
+          scripts/validate-website.sh
+          bash -n scripts/*.sh
+          zsh -n scripts/*.sh
+          plutil -lint Info.plist Lumen/PrivacyInfo.xcprivacy
+          ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].each { |file| YAML.load_file(file, aliases: true) }'

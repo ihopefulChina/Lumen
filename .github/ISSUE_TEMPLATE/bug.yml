@@ -1,0 +1,50 @@
+name: Bug 报告
+description: 报告可复现的问题；请先移除账号、Bucket、对象路径和密钥。
+title: "[Bug] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请勿粘贴 AccessKey、STS Token、签名 URL、Bucket 名、对象键、本地路径或请求 ID。可在 Lumen 的“帮助”菜单复制已脱敏诊断信息。
+  - type: textarea
+    id: summary
+    attributes:
+      label: 问题
+      description: 简洁说明实际发生了什么。
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开…
+        2. 选择…
+        3. 执行…
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: 已脱敏诊断信息
+      description: 从“帮助 → 复制诊断信息”粘贴；也可以留空。
+      render: text
+  - type: textarea
+    id: media
+    attributes:
+      label: 截图或录屏
+      description: 仅上传虚拟数据，或先遮盖账号、Bucket、对象名、路径和 URL。
+  - type: checkboxes
+    id: redaction
+    attributes:
+      label: 隐私确认
+      options:
+        - label: 我已确认内容中没有 AccessKey、Token、签名 URL 或真实存储数据。
+          required: true
