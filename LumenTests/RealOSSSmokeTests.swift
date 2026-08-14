@@ -51,7 +51,7 @@ struct RealOSSSmokeTests {
         let specialData = Data("路径与签名 smoke ✓\n".utf8)
 
         let localRoot = FileManager.default.temporaryDirectory
-            .appending(path: "lumen-v003-oss-smoke-\(UUID().uuidString)", directoryHint: .isDirectory)
+            .appending(path: "lumen-v004-oss-smoke-\(UUID().uuidString)", directoryHint: .isDirectory)
         try FileManager.default.createDirectory(at: localRoot, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: localRoot) }
         let largeURL = localRoot.appending(path: "large.bin")

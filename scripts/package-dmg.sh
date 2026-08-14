@@ -3,27 +3,31 @@ set -euo pipefail
 
 script_dir="${0:A:h}"
 repo_dir="${script_dir:h}"
-version="0.0.3"
-build_number="3"
-derived_dir="$repo_dir/.build/release-v003"
+version="0.0.4"
+build_number="4"
+sparkle_account="studio.lumen.oss"
+derived_dir="$repo_dir/.build/release-v004"
 app_path="$derived_dir/Build/Products/Release/Lumen.app"
 dist_dir="$repo_dir/dist"
 output_path="$dist_dir/Lumen-$version.dmg"
+appcast_path="$dist_dir/appcast.xml"
+tracked_appcast_path="$repo_dir/appcast.xml"
 
 if [[ -e "$output_path" ]]; then
     print -u2 "Refusing to overwrite existing artifact: $output_path"
     exit 2
 fi
 
-stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/lumen-v003-dmg.XXXXXX")"
+stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/lumen-v004-dmg.XXXXXX")"
 temp_dmg="$stage_dir/Lumen-$version.dmg"
 mount_dir="$stage_dir/mount"
+appcast_dir="$stage_dir/appcast"
 mounted=0
 cleanup() {
     if [[ "$mounted" == "1" ]]; then
         hdiutil detach "$mount_dir" -quiet || true
     fi
-    if [[ "$stage_dir" == "${TMPDIR:-/tmp}"/lumen-v003-dmg.* ]]; then
+    if [[ "$stage_dir" == "${TMPDIR:-/tmp}"/lumen-v004-dmg.* ]]; then
         rm -rf "$stage_dir"
     fi
 }
@@ -36,6 +40,9 @@ xcodebuild \
     -configuration Release \
     -destination 'platform=macOS,arch=arm64' \
     -derivedDataPath "$derived_dir" \
+    -onlyUsePackageVersionsFromResolvedFile \
+    -skipPackageUpdates \
+    -packageAuthorizationProvider netrc \
     clean build \
     CODE_SIGN_IDENTITY=- \
     CODE_SIGN_STYLE=Manual \
@@ -80,4 +87,41 @@ fi
 
 hdiutil detach "$mount_dir" -quiet
 mounted=0
+
+sparkle_dir="$derived_dir/SourcePackages/artifacts/sparkle/Sparkle"
+generate_appcast="$sparkle_dir/bin/generate_appcast"
+generate_keys="$sparkle_dir/bin/generate_keys"
+sign_update="$sparkle_dir/bin/sign_update"
+[[ -x "$generate_appcast" ]]
+[[ -x "$generate_keys" ]]
+[[ -x "$sign_update" ]]
+
+expected_public_key="$(plutil -extract SUPublicEDKey raw "$app_path/Contents/Info.plist")"
+signing_public_key="$("$generate_keys" --account "$sparkle_account" -p)"
+[[ "$signing_public_key" == "$expected_public_key" ]]
+
+mkdir -p "$appcast_dir"
+ditto "$output_path" "$appcast_dir/Lumen-$version.dmg"
+ditto "$repo_dir/docs/releases/v$version.md" "$appcast_dir/Lumen-$version.md"
+if [[ -f "$tracked_appcast_path" ]]; then
+    ditto "$tracked_appcast_path" "$appcast_dir/appcast.xml"
+fi
+
+"$generate_appcast" \
+    --account "$sparkle_account" \
+    --download-url-prefix "https://github.com/ihopefulChina/Lumen/releases/download/v$version/" \
+    --link "https://github.com/ihopefulChina/Lumen/releases/tag/v$version" \
+    --embed-release-notes \
+    --maximum-deltas 0 \
+    "$appcast_dir"
+
+signature="$(xmllint --xpath "string(//*[local-name()='enclosure' and @*[local-name()='version']='$build_number']/@*[local-name()='edSignature'])" "$appcast_dir/appcast.xml")"
+declared_length="$(xmllint --xpath "string(//*[local-name()='enclosure' and @*[local-name()='version']='$build_number']/@length)" "$appcast_dir/appcast.xml")"
+[[ -n "$signature" ]]
+[[ "$declared_length" == "$(stat -f %z "$output_path")" ]]
+"$sign_update" --verify "$output_path" "$signature"
+ditto "$appcast_dir/appcast.xml" "$appcast_path"
+ditto "$appcast_dir/appcast.xml" "$tracked_appcast_path"
+
 shasum -a 256 "$output_path"
+shasum -a 256 "$appcast_path"
