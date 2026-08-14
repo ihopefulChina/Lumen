@@ -100,6 +100,10 @@ expected_public_key="$(plutil -extract SUPublicEDKey raw "$app_path/Contents/Inf
 signing_public_key="$("$generate_keys" --account "$sparkle_account" -p)"
 [[ "$signing_public_key" == "$expected_public_key" ]]
 
+private_key_path="$stage_dir/sparkle-signing.key"
+"$generate_keys" --account "$sparkle_account" -x "$private_key_path"
+chmod 600 "$private_key_path"
+
 mkdir -p "$appcast_dir"
 ditto "$output_path" "$appcast_dir/Lumen-$version.dmg"
 ditto "$repo_dir/docs/releases/v$version.md" "$appcast_dir/Lumen-$version.md"
@@ -108,18 +112,19 @@ if [[ -f "$tracked_appcast_path" ]]; then
 fi
 
 "$generate_appcast" \
-    --account "$sparkle_account" \
+    --ed-key-file "$private_key_path" \
     --download-url-prefix "https://github.com/ihopefulChina/Lumen/releases/download/v$version/" \
     --link "https://github.com/ihopefulChina/Lumen/releases/tag/v$version" \
     --embed-release-notes \
     --maximum-deltas 0 \
     "$appcast_dir"
 
-signature="$(xmllint --xpath "string(//*[local-name()='enclosure' and @*[local-name()='version']='$build_number']/@*[local-name()='edSignature'])" "$appcast_dir/appcast.xml")"
-declared_length="$(xmllint --xpath "string(//*[local-name()='enclosure' and @*[local-name()='version']='$build_number']/@length)" "$appcast_dir/appcast.xml")"
+signature="$(xmllint --xpath "string(//*[local-name()='item' and *[local-name()='version' and text()='$build_number']]/*[local-name()='enclosure']/@*[local-name()='edSignature'])" "$appcast_dir/appcast.xml")"
+declared_length="$(xmllint --xpath "string(//*[local-name()='item' and *[local-name()='version' and text()='$build_number']]/*[local-name()='enclosure']/@length)" "$appcast_dir/appcast.xml")"
 [[ -n "$signature" ]]
 [[ "$declared_length" == "$(stat -f %z "$output_path")" ]]
-"$sign_update" --verify "$output_path" "$signature"
+"$sign_update" --verify --ed-key-file "$private_key_path" "$output_path" "$signature"
+unlink "$private_key_path"
 ditto "$appcast_dir/appcast.xml" "$appcast_path"
 ditto "$appcast_dir/appcast.xml" "$tracked_appcast_path"
 
