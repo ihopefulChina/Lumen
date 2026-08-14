@@ -3,6 +3,42 @@
     <channel>
         <title>Lumen</title>
         <item>
+            <title>0.0.5</title>
+            <pubDate>Sat, 15 Aug 2026 05:24:20 +0800</pubDate>
+            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.5</link>
+            <sparkle:version>5</sparkle:version>
+            <sparkle:shortVersionString>0.0.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[## Lumen 0.0.5
+
+这一版继续收紧 Lumen 的访达式交互：重命名回到内容本身，搜索结果与实际操作范围保持一致，同时完成第一条可在软件内直接安装并重启的正式升级路径。
+
+### 访达式重命名
+
+- 在网格或列表中选中一个项目，按 Return 直接原地重命名。
+- 文件默认只选中主名，保留最后一个扩展名；文件夹会选中完整名称。
+- 按 Return 提交、Esc 取消；网络失败或名称冲突时保留编辑内容，方便直接修改后重试。
+- 双击仍然打开项目，`⌘↓` 也可打开当前选择；原有 `⌘O` 上传快捷键保持不变。
+
+### 搜索与操作安全
+
+- 搜索明确限定在当前文件夹，路径切换后自动清空搜索条件。
+- 搜索、素材过滤或刷新隐藏项目时，会同步移除不可见的选择、高亮与键盘焦点。
+- 删除、下载、复制、移动和拖放只接收当前可见选择，避免对已经过滤掉的对象误操作。
+
+### 更新体验
+
+- 设置页会明确说明安装结束后自动重新打开 Lumen，并在更新器未就绪时禁用检查按钮。
+- 0.0.4 用户可通过「Lumen → 检查更新…」直接安装 0.0.5；更新包继续使用 Ed25519 签名验证。
+
+系统要求：Apple Silicon，macOS 15 或更高版本。公开 DMG 使用 ad-hoc 签名，尚未经过 Apple 公证。
+
+> 0.0.3 及更早版本需要手动安装当前版本；从 0.0.4 开始可以在 Lumen 内完成升级。
+]]></description>
+            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.5/Lumen-0.0.5.dmg" length="3850924" type="application/octet-stream" sparkle:edSignature="dN3tUo3Q+rhnzIobSXIA+bDAvgcPUxdG9DhbYjelQ66r0YCSuVt3/djZ9R8qU6fQ8+4kO5HLX2WR/l5za5lUDw=="/>
+        </item>
+        <item>
             <title>0.0.4</title>
             <pubDate>Fri, 14 Aug 2026 23:03:45 +0800</pubDate>
             <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.4</link>
