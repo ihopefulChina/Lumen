@@ -9,7 +9,7 @@ private let realOSSSmokeEnabled = false
 #endif
 
 struct RealOSSSmokeTests {
-    private let prefix = "lumen-v003-smoke/"
+    private let prefix = "lumen-v004-smoke/"
 
     @Test(.enabled(
         if: realOSSSmokeEnabled,
@@ -40,8 +40,14 @@ struct RealOSSSmokeTests {
         let largeKey = checkedKey("multipart/large.bin")
         let specialKey = checkedKey("special/空 格+?#.txt")
         let renamedKey = checkedKey("renamed/small-renamed.txt")
-        let cleanupKeys = [smallKey, largeKey, specialKey, renamedKey]
-        let smallData = Data("Lumen 0.0.3 real OSS smoke\n".utf8)
+        let copiedKey = checkedKey("copied/small-renamed.txt")
+        let movedKey = checkedKey("moved/small-renamed.txt")
+        let folderRenamedKey = checkedKey("folder-renamed/small-renamed.txt")
+        let cleanupKeys = [
+            smallKey, largeKey, specialKey, renamedKey,
+            copiedKey, movedKey, folderRenamedKey
+        ]
+        let smallData = Data("Lumen 0.0.4 real OSS smoke\n".utf8)
         let specialData = Data("路径与签名 smoke ✓\n".utf8)
 
         let localRoot = FileManager.default.temporaryDirectory
@@ -73,6 +79,27 @@ struct RealOSSSmokeTests {
             try await client.renameObject(from: smallKey, to: renamedKey, overwrite: false)
             #expect(!(try await client.objectExists(key: smallKey)))
             #expect(try await client.objectData(key: renamedKey) == smallData)
+
+            try await client.copyPrefix(
+                from: checkedKey("renamed/"),
+                to: checkedKey("copied/")
+            )
+            #expect(try await client.objectData(key: copiedKey) == smallData)
+            #expect(try await client.objectData(key: renamedKey) == smallData)
+
+            try await client.movePrefix(
+                from: checkedKey("copied/"),
+                to: checkedKey("moved/")
+            )
+            #expect(!(try await client.objectExists(key: copiedKey)))
+            #expect(try await client.objectData(key: movedKey) == smallData)
+
+            try await client.movePrefix(
+                from: checkedKey("moved/"),
+                to: checkedKey("folder-renamed/")
+            )
+            #expect(!(try await client.objectExists(key: movedKey)))
+            #expect(try await client.objectData(key: folderRenamedKey) == smallData)
 
             let signedURL = try #require(client.presignedURL(key: renamedKey))
             #expect(signedURL.scheme == "https")

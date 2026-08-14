@@ -7,7 +7,7 @@ struct BrowserView: View {
     @Environment(AppModel.self) private var model
     @Binding var showFileImporter: Bool
     @State private var photos: [PhotosPickerItem] = []
-    @State private var renameTarget: OSSObject?
+    @State private var renameTarget: BrowserRenameTarget?
     @State private var renameText = ""
 
     var body: some View {
@@ -51,6 +51,13 @@ struct BrowserView: View {
             } isTargeted: { targeted in
                 model.browser.setDropTarget(model.browser.prefix, active: targeted)
             }
+            .dropDestination(for: CloudDragPayload.self) { payloads, _ in
+                guard let payload = payloads.first else { return false }
+                model.moveCloudItems(payload, to: model.browser.prefix)
+                return true
+            } isTargeted: { targeted in
+                model.browser.setDropTarget(model.browser.prefix, active: targeted)
+            }
             .onPasteCommand(of: [.image, .fileURL, .gif, .webP, .png, .jpeg]) { _ in
                 model.pasteFromClipboard()
             }
@@ -65,12 +72,32 @@ struct BrowserView: View {
                 Button("取消", role: .cancel) { renameTarget = nil }
                 Button("重命名") {
                     if let renameTarget {
-                        Task { await model.rename(renameTarget, to: renameText) }
+                        Task {
+                            switch renameTarget {
+                            case .object(let object):
+                                await model.rename(object, to: renameText)
+                            case .folder(let folder):
+                                await model.renameFolder(folder, to: renameText)
+                            }
+                        }
                     }
                     renameTarget = nil
                 }
             } message: {
-                Text("不会覆盖已有同名对象。")
+                Text("不会覆盖已有同名项目。")
+            }
+            .overlay(alignment: .top) {
+                if model.isOrganizingCloud {
+                    HStack(spacing: 8) {
+                        ProgressView().controlSize(.small)
+                        Text("正在整理云端项目…")
+                    }
+                    .font(.callout.weight(.medium))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(.bar, in: Capsule())
+                    .padding(.top, 8)
+                }
             }
     }
 
@@ -171,6 +198,16 @@ struct BrowserView: View {
                         } isTargeted: { targeted in
                             model.browser.setDropTarget(folder.prefix, active: targeted)
                         }
+                        .dropDestination(for: CloudDragPayload.self) { payloads, _ in
+                            guard let payload = payloads.first else { return false }
+                            model.moveCloudItems(payload, to: folder.prefix)
+                            return true
+                        } isTargeted: { targeted in
+                            model.browser.setDropTarget(folder.prefix, active: targeted)
+                        }
+                        .draggable(model.cloudDragPayload(clickedKey: folder.prefix)) {
+                            dragPreview(name: folder.name, symbol: "folder.fill")
+                        }
                     }
                     ForEach(model.browser.visibleObjects) { object in
                         AssetCell(
@@ -188,6 +225,9 @@ struct BrowserView: View {
                             }
                             .onAppear { selectForMenu(object.key) }
                             objectMenu(object)
+                        }
+                        .draggable(model.cloudDragPayload(clickedKey: object.key)) {
+                            dragPreview(name: object.name, symbol: object.isImage ? "photo" : "doc")
                         }
                     }
                 }
@@ -233,6 +273,9 @@ struct BrowserView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
+                .draggable(model.cloudDragPayload(clickedKey: row.id)) {
+                    dragPreview(name: row.name, symbol: row.symbol)
+                }
                 .onTapGesture(count: 2) {
                     if let folder = row.folder {
                         model.openFolder(folder)
@@ -245,6 +288,13 @@ struct BrowserView: View {
                         Color.clear
                             .dropDestination(for: URL.self) { urls, _ in
                                 model.upload(urls: urls, to: folder.prefix, applyTemplate: false)
+                                return true
+                            } isTargeted: { targeted in
+                                model.browser.setDropTarget(folder.prefix, active: targeted)
+                            }
+                            .dropDestination(for: CloudDragPayload.self) { payloads, _ in
+                                guard let payload = payloads.first else { return false }
+                                model.moveCloudItems(payload, to: folder.prefix)
                                 return true
                             } isTargeted: { targeted in
                                 model.browser.setDropTarget(folder.prefix, active: targeted)
@@ -316,6 +366,10 @@ struct BrowserView: View {
 
     @ViewBuilder
     private func backgroundMenu() -> some View {
+        if model.cloudClipboard != nil {
+            Button("粘贴到此处") { model.pasteCloudItems() }
+            Divider()
+        }
         Button("上传…") { showFileImporter = true }
         Button("从剪贴板上传") { model.pasteFromClipboard() }
         Button("新建文件夹…") { model.wantsNewFolder = true }
@@ -339,6 +393,14 @@ struct BrowserView: View {
             selectForMenu(folder.prefix)
             model.downloadSelection()
         }
+        Button("复制") {
+            selectForMenu(folder.prefix)
+            model.copyCloudSelection(clickedKey: folder.prefix)
+        }
+        Button("重命名…") {
+            renameTarget = .folder(folder)
+            renameText = folder.name
+        }
         Divider()
         Button(deleteTitle(clickedKey: folder.prefix), role: .destructive) {
             selectForMenu(folder.prefix)
@@ -357,12 +419,16 @@ struct BrowserView: View {
             model.copyURLs(style: .markdown)
         }
         Divider()
+        Button("复制") {
+            selectForMenu(object.key)
+            model.copyCloudSelection(clickedKey: object.key)
+        }
         Button(downloadTitle(clickedKey: object.key)) {
             selectForMenu(object.key)
             model.downloadSelection()
         }
         Button("重命名…") {
-            renameTarget = object
+            renameTarget = .object(object)
             renameText = object.name
         }
         Divider()
@@ -423,6 +489,14 @@ struct BrowserView: View {
         model.browser.select(key: object.key, modifiers: modifiers)
     }
 
+    private func dragPreview(name: String, symbol: String) -> some View {
+        Label(name, systemImage: symbol)
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(.bar, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+    }
+
     private func importPhotos(_ items: [PhotosPickerItem]) async {
         guard !items.isEmpty else { return }
         var urls: [URL] = []
@@ -437,6 +511,18 @@ struct BrowserView: View {
         photos = []
         if !urls.isEmpty {
             model.upload(urls: urls, ownedTemporaryURLs: Set(urls))
+        }
+    }
+}
+
+private enum BrowserRenameTarget: Identifiable {
+    case object(OSSObject)
+    case folder(OSSFolder)
+
+    var id: String {
+        switch self {
+        case .object(let object): object.key
+        case .folder(let folder): folder.prefix
         }
     }
 }
@@ -494,6 +580,13 @@ private struct PathBar: View {
                         } isTargeted: { targeted in
                             model.browser.setDropTarget(crumb.prefix, active: targeted)
                         }
+                        .dropDestination(for: CloudDragPayload.self) { payloads, _ in
+                            guard let payload = payloads.first else { return false }
+                            model.moveCloudItems(payload, to: crumb.prefix)
+                            return true
+                        } isTargeted: { targeted in
+                            model.browser.setDropTarget(crumb.prefix, active: targeted)
+                        }
                     }
                 }
             }
@@ -530,6 +623,13 @@ private struct PathBar: View {
 
     @ViewBuilder
     private func pathMenu(prefix: String, isCurrent: Bool) -> some View {
+        if model.cloudClipboard != nil {
+            Button("粘贴到此处") {
+                guard let payload = model.cloudClipboard else { return }
+                Task { await model.organizeCloud(payload, to: prefix, mode: .copy) }
+            }
+            Divider()
+        }
         Button("复制路径") {
             model.copyFolderPath(prefix, includeBucket: false)
         }

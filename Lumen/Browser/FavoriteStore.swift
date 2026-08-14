@@ -56,6 +56,30 @@ final class FavoriteStore {
         save()
     }
 
+    func replacePrefix(
+        accountID: UUID,
+        bucketName: String,
+        source: String,
+        destination: String
+    ) {
+        var changed = false
+        for index in items.indices where
+            items[index].accountID == accountID
+                && items[index].bucketName == bucketName
+                && (items[index].prefix == source || items[index].prefix.hasPrefix(source)) {
+            let relative = String(items[index].prefix.dropFirst(source.count))
+            items[index].prefix = destination + relative
+            if items[index].prefix == destination {
+                items[index].name = PathTemplate.lastComponent(destination)
+            }
+            changed = true
+        }
+        if changed {
+            items = items.uniqued(on: \FavoriteLocation.id)
+            save()
+        }
+    }
+
     private func save() {
         guard let data = try? JSONEncoder().encode(items) else { return }
         defaults.set(data, forKey: Keys.locations)

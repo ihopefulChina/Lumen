@@ -60,6 +60,8 @@ final class AppModel {
     var isLoadingHead = false
     var wantsDeleteConfirmation = false
     var wantsNewFolder = false
+    var isOrganizingCloud = false
+    var cloudClipboard: CloudDragPayload?
     var pendingOpenURLs: [URL] = []
     private var pendingOwnedTemporaryURLs: Set<URL> = []
     private var ownedPreviewURLs: Set<URL> = []
@@ -743,6 +745,10 @@ final class AppModel {
     }
 
     func rename(_ object: OSSObject, to raw: String) async {
+        guard !isOrganizingCloud else {
+            present("请等待当前云端整理完成", error: true)
+            return
+        }
         guard let client = makeClient() else { return }
         let name: String
         do {
@@ -753,10 +759,149 @@ final class AppModel {
         }
         let dest = PathTemplate.join(PathTemplate.parentPrefix(object.key), key: name)
         guard dest != object.key else { return }
+        isOrganizingCloud = true
+        defer { isOrganizingCloud = false }
         do {
             try await client.renameObject(from: object.key, to: dest, overwrite: false)
             await refreshListing()
             browser.select(key: dest, modifiers: [])
+        } catch {
+            present(error.localizedDescription, error: true)
+        }
+    }
+
+    func renameFolder(_ folder: OSSFolder, to raw: String) async {
+        guard !isOrganizingCloud else {
+            present("请等待当前云端整理完成", error: true)
+            return
+        }
+        guard let client = makeClient(),
+              let accountID = selectedAccountID,
+              let bucketName = selectedBucketName
+        else { return }
+        let name: String
+        do {
+            name = try ObjectNameValidator.validate(raw)
+        } catch {
+            present(error.localizedDescription, error: true)
+            return
+        }
+        let destination = PathTemplate.join(
+            PathTemplate.parentPrefix(folder.prefix),
+            key: name
+        ) + "/"
+        guard destination != folder.prefix else { return }
+
+        isOrganizingCloud = true
+        defer { isOrganizingCloud = false }
+        do {
+            try await client.movePrefix(from: folder.prefix, to: destination)
+            favorites.replacePrefix(
+                accountID: accountID,
+                bucketName: bucketName,
+                source: folder.prefix,
+                destination: destination
+            )
+            await refreshListing()
+            browser.select(key: destination, modifiers: [])
+            present("已重命名“\(folder.name)”")
+        } catch {
+            present(error.localizedDescription, error: true)
+        }
+    }
+
+    func cloudDragPayload(clickedKey: String) -> CloudDragPayload {
+        let keys = browser.selectedKeys.contains(clickedKey)
+            ? browser.selectedKeys
+            : [clickedKey]
+        return CloudDragPayload(
+            accountID: selectedAccountID ?? UUID(),
+            bucketName: selectedBucketName ?? "",
+            objectKeys: browser.objects.filter { keys.contains($0.key) }.map(\.key),
+            folderPrefixes: browser.folders.filter { keys.contains($0.prefix) }.map(\.prefix)
+        )
+    }
+
+    func copyCloudSelection(clickedKey: String) {
+        let payload = cloudDragPayload(clickedKey: clickedKey)
+        guard !payload.objectKeys.isEmpty || !payload.folderPrefixes.isEmpty else { return }
+        cloudClipboard = payload
+        let count = payload.objectKeys.count + payload.folderPrefixes.count
+        present("已复制 \(count) 项，可在目标文件夹粘贴")
+    }
+
+    func pasteCloudItems() {
+        guard let payload = cloudClipboard else { return }
+        Task { await organizeCloud(payload, to: browser.prefix, mode: .copy) }
+    }
+
+    func moveCloudItems(_ payload: CloudDragPayload, to destinationPrefix: String) {
+        Task { await organizeCloud(payload, to: destinationPrefix, mode: .move) }
+    }
+
+    func organizeCloud(
+        _ payload: CloudDragPayload,
+        to destinationPrefix: String,
+        mode: CloudOperationMode
+    ) async {
+        guard !isOrganizingCloud else {
+            present("请等待当前云端整理完成", error: true)
+            return
+        }
+        guard payload.accountID == selectedAccountID,
+              payload.bucketName == selectedBucketName
+        else {
+            present("只能在同一个存储空间内整理项目", error: true)
+            return
+        }
+        guard let client = makeClient(),
+              let accountID = selectedAccountID,
+              let bucketName = selectedBucketName
+        else { return }
+
+        isOrganizingCloud = true
+        defer { isOrganizingCloud = false }
+        do {
+            var mappings = payload.objectKeys.map { sourceKey in
+                CloudObjectMapping(
+                    sourceKey: sourceKey,
+                    destinationKey: PathTemplate.join(
+                        destinationPrefix,
+                        key: PathTemplate.lastComponent(sourceKey)
+                    )
+                )
+            }
+            var movedPrefixes: [(source: String, destination: String)] = []
+            var selection = Set(mappings.map(\.destinationKey))
+            for sourcePrefix in payload.folderPrefixes {
+                let destination = PathTemplate.join(
+                    destinationPrefix,
+                    key: PathTemplate.lastComponent(sourcePrefix)
+                ) + "/"
+                mappings.append(contentsOf: try await client.prefixMappings(
+                    from: sourcePrefix,
+                    to: destination
+                ))
+                movedPrefixes.append((sourcePrefix, destination))
+                selection.insert(destination)
+            }
+
+            try await client.performCloudOperation(mappings, mode: mode)
+            if mode == .move {
+                for pair in movedPrefixes {
+                    favorites.replacePrefix(
+                        accountID: accountID,
+                        bucketName: bucketName,
+                        source: pair.source,
+                        destination: pair.destination
+                    )
+                }
+            }
+            browser.clearSelection()
+            await refreshListing()
+            browser.replaceSelection(selection)
+            let count = payload.objectKeys.count + payload.folderPrefixes.count
+            present(mode == .move ? "已移动 \(count) 项" : "已复制 \(count) 项")
         } catch {
             present(error.localizedDescription, error: true)
         }

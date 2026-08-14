@@ -219,6 +219,55 @@ struct OSSClientTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path))
     }
 
+    @Test func prefixPlanPreservesRelativePaths() throws {
+        let plan = try CloudObjectOperation.planPrefix(
+            source: "old/",
+            destination: "new/",
+            keys: ["old/", "old/a.jpg", "old/sub/b.jpg"]
+        )
+
+        #expect(plan.map(\.destinationKey) == ["new/", "new/a.jpg", "new/sub/b.jpg"])
+    }
+
+    @Test func prefixCannotMoveInsideItself() {
+        #expect(throws: CloudObjectOperationError.self) {
+            try CloudObjectOperation.planPrefix(
+                source: "old/",
+                destination: "old/sub/",
+                keys: ["old/a.jpg"]
+            )
+        }
+    }
+
+    @Test func failedPrefixCopyNeverDeletesASourceObject() async throws {
+        let listing = Data("""
+        <ListBucketResult>
+          <IsTruncated>false</IsTruncated>
+          <Contents><Key>old/a.txt</Key><Size>1</Size><ETag>a</ETag></Contents>
+          <Contents><Key>old/b.txt</Key><Size>1</Size><ETag>b</ETag></Contents>
+        </ListBucketResult>
+        """.utf8)
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: [:], data: listing),
+            .response(status: 404, headers: [:], data: Self.errorXML(code: "NoSuchKey", message: "missing", requestID: "head-a")),
+            .response(status: 404, headers: [:], data: Self.errorXML(code: "NoSuchKey", message: "missing", requestID: "head-b")),
+            .response(status: 200, headers: [:], data: Data()),
+            .response(status: 500, headers: [:], data: Self.errorXML(code: "InternalError", message: "copy failed", requestID: "copy-b")),
+            .response(status: 204, headers: [:], data: Data())
+        ])
+
+        await #expect(throws: (any Error).self) {
+            try await Self.client(transport: transport).movePrefix(from: "old/", to: "new/")
+        }
+
+        let requests = await transport.recordedRequests()
+        let deletedPaths = requests
+            .filter { $0.httpMethod == "DELETE" }
+            .compactMap { $0.url?.path }
+        #expect(deletedPaths == ["/new/a.txt"])
+        #expect(!deletedPaths.contains(where: { $0.hasPrefix("/old/") }))
+    }
+
     private static func client(transport: any OSSHTTPTransport) -> OSSClient {
         OSSClient(
             credentials: OSSCredentials(

@@ -98,6 +98,27 @@ struct BrowserModelTests {
         #expect(store.items.isEmpty)
     }
 
+    @Test func movingAFolderUpdatesNestedFavoriteLocations() {
+        let defaults = Self.defaults()
+        let accountID = UUID()
+        let store = FavoriteStore(defaults: defaults)
+        store.add(.init(
+            accountID: accountID,
+            bucketName: "assets",
+            prefix: "old/sub/",
+            name: "sub"
+        ))
+
+        store.replacePrefix(
+            accountID: accountID,
+            bucketName: "assets",
+            source: "old/",
+            destination: "new/"
+        )
+
+        #expect(store.items.first?.prefix == "new/sub/")
+    }
+
     @Test func nativeTableSelectionKeepsAKeyboardFocusAndAnchor() {
         let model = Self.model()
 

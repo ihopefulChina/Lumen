@@ -105,7 +105,9 @@ struct OSSClient: Sendable {
             let response = try await perform(method: "GET", bucket: bucket, key: nil, query: query)
             let listing = try OSSXML.listing(from: response.data)
             objects.append(contentsOf: listing.objects.filter { object in
-                if object.key == prefix { return false }
+                if object.key == prefix {
+                    return includePlaceholders && object.isFolderPlaceholder
+                }
                 if object.isFolderPlaceholder { return includePlaceholders }
                 return true
             })
@@ -220,6 +222,73 @@ struct OSSClient: Sendable {
     func renameObject(from sourceKey: String, to destKey: String, overwrite: Bool) async throws {
         try await copyObject(from: sourceKey, to: destKey, overwrite: overwrite)
         try await deleteObject(key: sourceKey)
+    }
+
+    func copyPrefix(from sourcePrefix: String, to destinationPrefix: String) async throws {
+        let mappings = try await prefixMappings(from: sourcePrefix, to: destinationPrefix)
+        try await performCloudOperation(mappings, mode: .copy)
+    }
+
+    func movePrefix(from sourcePrefix: String, to destinationPrefix: String) async throws {
+        let mappings = try await prefixMappings(from: sourcePrefix, to: destinationPrefix)
+        try await performCloudOperation(mappings, mode: .move)
+    }
+
+    func prefixMappings(from sourcePrefix: String, to destinationPrefix: String) async throws -> [CloudObjectMapping] {
+        let listing = try await listAllObjects(prefix: sourcePrefix, includePlaceholders: true)
+        guard !listing.truncated else {
+            throw CloudObjectOperationError.incompleteListing
+        }
+        guard !listing.objects.isEmpty else {
+            throw CloudObjectOperationError.emptySource
+        }
+        return try CloudObjectOperation.planPrefix(
+            source: sourcePrefix,
+            destination: destinationPrefix,
+            keys: listing.objects.map(\.key)
+        )
+    }
+
+    func performCloudOperation(
+        _ mappings: [CloudObjectMapping],
+        mode: CloudOperationMode
+    ) async throws {
+        guard !mappings.isEmpty else { throw CloudObjectOperationError.emptySource }
+        try CloudObjectOperation.validate(mappings)
+
+        for mapping in mappings {
+            try Task.checkCancellation()
+            if try await objectExists(key: mapping.destinationKey) {
+                throw CloudObjectOperationError.destinationExists(mapping.destinationKey)
+            }
+        }
+
+        var copied: [CloudObjectMapping] = []
+        do {
+            for mapping in mappings {
+                try Task.checkCancellation()
+                try await copyObject(
+                    from: mapping.sourceKey,
+                    to: mapping.destinationKey,
+                    overwrite: false
+                )
+                copied.append(mapping)
+            }
+        } catch {
+            for mapping in copied.reversed() {
+                try? await deleteObject(key: mapping.destinationKey)
+            }
+            throw error
+        }
+
+        guard mode == .move else { return }
+        for mapping in mappings.sorted(by: { $0.sourceKey.count > $1.sourceKey.count }) {
+            do {
+                try await deleteObject(key: mapping.sourceKey)
+            } catch {
+                throw CloudObjectOperationError.sourceCleanupFailed(mapping.sourceKey)
+            }
+        }
     }
 
     @discardableResult
