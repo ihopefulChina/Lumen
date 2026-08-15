@@ -40,10 +40,9 @@ extension TransferJob {
 
 struct TransferWindow: View {
     @Environment(AppModel.self) private var model
-    @State private var filter: TransferFilter = .all
     @State private var selection: Set<UUID> = []
 
-    private var jobs: [TransferJob] { filter.filter(model.transfers.jobs) }
+    private var jobs: [TransferJob] { model.transferFilter.filter(model.transfers.jobs) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -65,7 +64,8 @@ struct TransferWindow: View {
 
     private var controls: some View {
         HStack(spacing: 12) {
-            Picker("筛选", selection: $filter) {
+            @Bindable var model = model
+            Picker("筛选", selection: $model.transferFilter) {
                 ForEach(TransferFilter.allCases) { item in
                     Text(item.title).tag(item)
                 }
@@ -210,7 +210,7 @@ struct TransferWindow: View {
     }
 
     private var emptyTitle: String {
-        filter == .all ? "没有传输" : "没有\(filter.title)的传输"
+        model.transferFilter == .all ? "没有传输" : "没有\(model.transferFilter.title)的传输"
     }
 
     private func reveal(_ job: TransferJob) {

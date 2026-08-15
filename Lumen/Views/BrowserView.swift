@@ -482,6 +482,10 @@ struct BrowserView: View {
             beginRenaming(key: object.key)
         }
         .disabled(model.isOrganizingCloud)
+        Button("版本历史…") {
+            selectForMenu(object.key)
+            model.presentVersionHistory(for: object)
+        }
         Divider()
         Button(deleteTitle(clickedKey: object.key), role: .destructive) {
             selectForMenu(object.key)

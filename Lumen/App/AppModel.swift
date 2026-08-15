@@ -44,6 +44,10 @@ final class AppModel {
         get { services.showMenuBarExtra }
         set { services.showMenuBarExtra = newValue }
     }
+    var transferFilter: TransferFilter {
+        get { services.transferFilter }
+        set { services.transferFilter = newValue }
+    }
 
     var selectedAccountID: OSSAccount.ID?
     var buckets: [OSSBucket] = []
@@ -54,6 +58,9 @@ final class AppModel {
     var searchController = BucketSearchController()
 
     var showInspector = false
+    var versionHistoryModel: VersionHistoryModel?
+    var showVersionHistory = false
+    var activeSmartLocation: SmartLocation?
     var showAccountSheet = false
     var editingAccount: OSSAccount?
     var isLoadingBuckets = false
@@ -1043,6 +1050,64 @@ final class AppModel {
               let client = makeClient()
         else { return NSItemProvider() }
         return FinderExportCoordinator.itemProvider(for: payload, client: client)
+    }
+
+    func presentVersionHistory(for object: OSSObject) {
+        guard let client = makeClient() else { return }
+        versionHistoryModel = VersionHistoryModel(
+            title: "“\(object.name)”的版本",
+            prefix: object.key,
+            markerOnly: false,
+            client: client,
+            onRecovered: { [weak self] in self?.didRecoverCloudObject() }
+        )
+        showVersionHistory = true
+    }
+
+    @discardableResult
+    func openSmartLocation(_ location: SmartLocation) -> Bool {
+        if location == .failedTransfers {
+            transferFilter = .failed
+            activeSmartLocation = location
+            return true
+        }
+        guard selectedBucket != nil, let client = makeClient() else {
+            present("请先选择一个 Bucket", error: true)
+            return false
+        }
+        activeSmartLocation = location
+        switch location {
+        case .recent:
+            searchScope = .bucket
+            browser.searchText = ""
+            searchFilter = .recentObjects(days: 7)
+            Task { await runBucketSearch() }
+        case .large:
+            searchScope = .bucket
+            browser.searchText = ""
+            searchFilter = .largeObjects
+            Task { await runBucketSearch() }
+        case .deleted:
+            versionHistoryModel = VersionHistoryModel(
+                title: "已删除的对象",
+                prefix: "",
+                markerOnly: true,
+                client: client,
+                onRecovered: { [weak self] in self?.didRecoverCloudObject() }
+            )
+            showVersionHistory = true
+        case .failedTransfers:
+            break
+        }
+        return true
+    }
+
+    private func didRecoverCloudObject() {
+        if let accountID = selectedAccountID, let bucketName = selectedBucketName {
+            searchController.invalidate(accountID: accountID, bucketName: bucketName)
+        }
+        scheduleListingRefresh()
+        present("对象已恢复")
     }
 
     func copyCloudSelection(clickedKey: String) {

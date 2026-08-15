@@ -34,6 +34,7 @@ final class AppServices {
     var updates = AppUpdater()
     var favorites = FavoriteStore()
     var showMenuBarExtra = false
+    var transferFilter = TransferFilter.all
     weak var focused: AppModel?
 
     private var didBootstrap = false

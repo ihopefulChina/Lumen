@@ -2,6 +2,7 @@ import SwiftUI
 
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.openWindow) private var openWindow
     @State private var accountToDelete: OSSAccount?
 
     var body: some View {
@@ -14,6 +15,13 @@ struct SidebarView: View {
                 }
             }
         )) {
+            Section("位置") {
+                locationButton(.recent, symbol: "clock")
+                locationButton(.large, symbol: "externaldrive.badge.plus")
+                locationButton(.deleted, symbol: "trash")
+                locationButton(.failedTransfers, symbol: "exclamationmark.arrow.triangle.2.circlepath")
+            }
+
             if !model.favorites.items.isEmpty {
                 Section("常用") {
                     ForEach(model.favorites.items) { favorite in
@@ -135,5 +143,17 @@ struct SidebarView: View {
         } message: {
             Text("只删除这台 Mac 上的登录信息，不会改动云端数据。")
         }
+    }
+
+    private func locationButton(_ location: SmartLocation, symbol: String) -> some View {
+        Button {
+            if model.openSmartLocation(location), location == .failedTransfers {
+                openWindow(id: "transfers")
+            }
+        } label: {
+            Label(location.title, systemImage: symbol)
+        }
+        .buttonStyle(.plain)
+        .disabled(location != .failedTransfers && model.selectedBucket == nil)
     }
 }

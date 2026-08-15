@@ -162,6 +162,11 @@ private struct RootPresentation: ViewModifier {
             .sheet(isPresented: $model.showInspector) {
                 InspectorView()
             }
+            .sheet(isPresented: $model.showVersionHistory) {
+                if let history = model.versionHistoryModel {
+                    VersionHistoryView(history: history)
+                }
+            }
             .fileImporter(
                 isPresented: $showFileImporter,
                 allowedContentTypes: ImageKind.importTypes,
