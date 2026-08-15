@@ -167,6 +167,11 @@ private struct RootPresentation: ViewModifier {
                     VersionHistoryView(history: history)
                 }
             }
+            .sheet(isPresented: $model.showObjectProperties) {
+                if let properties = model.objectPropertiesModel {
+                    ObjectPropertiesView(properties: properties)
+                }
+            }
             .fileImporter(
                 isPresented: $showFileImporter,
                 allowedContentTypes: ImageKind.importTypes,

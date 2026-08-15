@@ -60,6 +60,8 @@ final class AppModel {
     var showInspector = false
     var versionHistoryModel: VersionHistoryModel?
     var showVersionHistory = false
+    var objectPropertiesModel: ObjectPropertiesModel?
+    var showObjectProperties = false
     var activeSmartLocation: SmartLocation?
     var showAccountSheet = false
     var editingAccount: OSSAccount?
@@ -1064,6 +1066,16 @@ final class AppModel {
         showVersionHistory = true
     }
 
+    func presentObjectProperties(for object: OSSObject) {
+        guard let client = makeClient() else { return }
+        objectPropertiesModel = ObjectPropertiesModel(
+            object: object,
+            client: client,
+            onSaved: { [weak self] in self?.didSaveObjectProperties() }
+        )
+        showObjectProperties = true
+    }
+
     @discardableResult
     func openSmartLocation(_ location: SmartLocation) -> Bool {
         if location == .failedTransfers {
@@ -1108,6 +1120,14 @@ final class AppModel {
         }
         scheduleListingRefresh()
         present("对象已恢复")
+    }
+
+    private func didSaveObjectProperties() {
+        if let accountID = selectedAccountID, let bucketName = selectedBucketName {
+            searchController.invalidate(accountID: accountID, bucketName: bucketName)
+        }
+        scheduleListingRefresh()
+        present("对象属性已存储")
     }
 
     func copyCloudSelection(clickedKey: String) {

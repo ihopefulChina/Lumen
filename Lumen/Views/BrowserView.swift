@@ -486,6 +486,10 @@ struct BrowserView: View {
             selectForMenu(object.key)
             model.presentVersionHistory(for: object)
         }
+        Button("对象属性…") {
+            selectForMenu(object.key)
+            model.presentObjectProperties(for: object)
+        }
         Divider()
         Button(deleteTitle(clickedKey: object.key), role: .destructive) {
             selectForMenu(object.key)
