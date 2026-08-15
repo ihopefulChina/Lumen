@@ -4,6 +4,18 @@ import Testing
 
 @MainActor
 struct TransferEngineTests {
+    @Test func clearingHistoryKeepsActiveTransfers() {
+        let engine = TransferEngine()
+        let running = Self.persistedJob(status: .running)
+        let completed = Self.persistedJob(status: .completed)
+        let failed = Self.persistedJob(status: .failed)
+        engine.jobs = [running, completed, failed]
+
+        engine.clearFinished()
+
+        #expect(engine.jobs == [running])
+    }
+
     @Test func journalRoundTripRemovesLocalPathsAndSignedURLs() throws {
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "lumen-transfer-journal-\(UUID().uuidString)", directoryHint: .isDirectory)

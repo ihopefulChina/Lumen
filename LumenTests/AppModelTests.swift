@@ -70,10 +70,82 @@ struct AppModelTests {
         #expect(model.canShowInformation)
     }
 
+    @Test func applyingPreferredViewUpdatesEveryOpenWindow() {
+        let defaults = Self.defaults()
+        let services = AppServices(accounts: [], settings: AppSettings(defaults: defaults))
+        let first = AppModel(services: services)
+        let second = AppModel(services: services)
+        let settings = AppModel(kind: .settings, services: services)
+
+        settings.applyPreferredViewModeToAllSessions(.list)
+
+        #expect(first.browser.viewMode == .list)
+        #expect(second.browser.viewMode == .list)
+        #expect(settings.settings.preferredViewMode == .list)
+    }
+
+    @Test func testingAnAccountDoesNotChangeTheCurrentSelection() async throws {
+        let account = OSSAccount(
+            id: UUID(),
+            name: "Studio",
+            accessKeyId: "test",
+            regionID: "cn-hangzhou",
+            endpointOverride: "",
+            cdnDomain: "",
+            defaultACL: .default,
+            prefixTemplate: "",
+            useTransferAccelerate: false,
+            createdAt: .now
+        )
+        let transport = AccountTestTransport()
+        let services = AppServices(accounts: [account])
+        let model = AppModel(kind: .settings, services: services) { _, _ in
+            OSSClient(
+                credentials: OSSCredentials(
+                    accessKeyId: "test",
+                    accessKeySecret: "secret",
+                    securityToken: nil
+                ),
+                region: "cn-hangzhou",
+                endpointHost: "oss-cn-hangzhou.aliyuncs.com",
+                bucket: nil,
+                transport: transport
+            )
+        }
+        model.selectedAccountID = nil
+
+        let bucketCount = try await model.testAccount(account)
+
+        #expect(bucketCount == 2)
+        #expect(model.selectedAccountID == nil)
+    }
+
     private static func defaults() -> UserDefaults {
         let suite = "Lumen.AppModelTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         return defaults
+    }
+}
+
+private actor AccountTestTransport: OSSHTTPTransport {
+    func send(
+        _ request: URLRequest,
+        body: OSSHTTPBody,
+        download: Bool,
+        onProgress: (@Sendable (Int64, Int64) -> Void)?
+    ) async throws -> OSSHTTPResult {
+        let xml = """
+        <ListAllMyBucketsResult><Buckets>
+          <Bucket><Name>design-assets</Name><Location>oss-cn-hangzhou</Location></Bucket>
+          <Bucket><Name>website</Name><Location>oss-cn-shanghai</Location></Bucket>
+        </Buckets></ListAllMyBucketsResult>
+        """
+        return OSSHTTPResult(
+            status: 200,
+            headers: [:],
+            data: Data(xml.utf8),
+            temporaryDownloadURL: nil
+        )
     }
 }

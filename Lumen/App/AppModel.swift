@@ -176,6 +176,13 @@ final class AppModel {
         browser.viewMode = mode
     }
 
+    func applyPreferredViewModeToAllSessions(_ mode: BrowserViewMode) {
+        settings.preferredViewMode = mode
+        for session in services.sessions {
+            session.browser.viewMode = mode
+        }
+    }
+
     func bootstrap() {
         services.bootstrapIfNeeded()
         guard !didLoadWindow else { return }
@@ -407,6 +414,11 @@ final class AppModel {
             present(error.localizedDescription, error: true)
             return nil
         }
+    }
+
+    func testAccount(_ account: OSSAccount) async throws -> Int {
+        let client = try clientProvider(account, nil)
+        return try await client.listBuckets().count
     }
 
     func saveAccount(_ draft: AccountDraft) async throws {

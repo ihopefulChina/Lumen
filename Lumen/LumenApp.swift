@@ -18,7 +18,7 @@ struct LumenApp: App {
         Settings {
             SettingsView()
                 .environment(AppModel.settingsSession)
-                .frame(width: 520, height: 560)
+                .frame(width: 620, height: 600)
         }
 
         Window("Lumen 帮助", id: "help") {
