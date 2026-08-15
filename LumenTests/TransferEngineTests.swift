@@ -202,6 +202,39 @@ struct TransferEngineTests {
         #expect(replaced == [.useOriginal, .useOriginal, .useOriginal])
     }
 
+    @Test func transferCenterFiltersJobsBySemanticState() {
+        var queued = Self.persistedJob(status: .queued)
+        queued.id = UUID()
+        var paused = Self.persistedJob(status: .paused)
+        paused.id = UUID()
+        var completed = Self.persistedJob(status: .completed)
+        completed.id = UUID()
+        var failed = Self.persistedJob(status: .failed)
+        failed.id = UUID()
+        let jobs = [queued, paused, completed, failed]
+
+        #expect(TransferFilter.all.filter(jobs).map(\.id) == jobs.map(\.id))
+        #expect(TransferFilter.active.filter(jobs).map(\.id) == [queued.id, paused.id])
+        #expect(TransferFilter.completed.filter(jobs).map(\.id) == [completed.id])
+        #expect(TransferFilter.failed.filter(jobs).map(\.id) == [failed.id])
+    }
+
+    @Test func revealIsAvailableOnlyForACompletedDownloadWithALocalFile() throws {
+        let file = try Self.temporaryFile(named: "reveal.txt")
+        defer { try? FileManager.default.removeItem(at: file) }
+        var download = Self.persistedJob(status: .completed)
+        download.kind = .download
+        download.localURL = file
+        var upload = download
+        upload.kind = .upload
+        var missing = download
+        missing.localURL = file.appendingPathExtension("missing")
+
+        #expect(download.canRevealInFinder)
+        #expect(!upload.canRevealInFinder)
+        #expect(!missing.canRevealInFinder)
+    }
+
     @Test func clearingHistoryKeepsActiveTransfers() {
         let engine = TransferEngine()
         let running = Self.persistedJob(status: .running)

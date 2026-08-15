@@ -10,6 +10,7 @@ final class TransferEngine {
     var concurrency = 3
     var downloadConcurrency = 3
     var onUploadFinished: (@MainActor () -> Void)?
+    var onAllFinished: (@MainActor () -> Void)?
 
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var resources: [UUID: TransferResource] = [:]
@@ -775,6 +776,9 @@ final class TransferEngine {
             runningDownloads = max(0, runningDownloads - 1)
         }
         pumpFinished()
+        if activeCount == 0 {
+            onAllFinished?()
+        }
     }
 
     private func pumpFinished() {

@@ -4,6 +4,7 @@ import SwiftUI
 struct TransferTray: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openWindow) private var openWindow
     @State private var expanded = true
 
     private var jobs: [TransferJob] { model.transfers.jobs }
@@ -56,10 +57,15 @@ struct TransferTray: View {
             .accessibilityLabel(expanded ? "收起传输列表" : "展开传输列表")
             .help(expanded ? "收起传输列表" : "展开传输列表")
             Spacer()
-            if jobs.contains(where: { !$0.isActive }) {
-                Button("清除已结束") {
-                    model.transfers.clearFinished()
-                }
+            Button("打开传输中心") {
+                openWindow(id: "transfers")
+            }
+            .controlSize(.small)
+            if jobs.contains(where: { $0.status == .running }) {
+                Button("全部暂停") { model.transfers.pauseAll() }
+                    .controlSize(.small)
+            } else if jobs.contains(where: { $0.status == .paused }) {
+                Button("全部继续") { model.transfers.resumeAll() }
                 .controlSize(.small)
             }
             if model.transfers.activeCount > 0 {
@@ -114,7 +120,27 @@ private struct TransferRow: View {
                 .font(.caption.monospacedDigit())
                 .foregroundStyle(.secondary)
                 .frame(width: 56, alignment: .trailing)
-            if job.isActive {
+            if job.status == .running {
+                Button {
+                    model.transfers.pause(job.id)
+                } label: {
+                    Image(systemName: "pause.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("暂停 \(job.title)")
+                .help("暂停 \(job.title)")
+            } else if job.status == .paused {
+                Button {
+                    model.transfers.resume(job.id)
+                } label: {
+                    Image(systemName: "play.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("继续 \(job.title)")
+                .help("继续 \(job.title)")
+            } else if job.isActive {
                 Button {
                     model.transfers.cancel(job.id)
                 } label: {
@@ -193,7 +219,7 @@ struct TransferMenu: View {
             let jobs = model.transfers.jobs
             ForEach(jobs.prefix(12)) { job in
                 Button("\(job.title) · \(status(job))") {
-                    openWindow(id: "main")
+                    openWindow(id: "transfers")
                 }
             }
             if jobs.count > 12 {
@@ -201,6 +227,7 @@ struct TransferMenu: View {
             }
         }
         Divider()
+        Button("打开传输中心") { openWindow(id: "transfers") }
         Button("打开 Lumen") { openWindow(id: "main") }
         if model.transfers.activeCount > 0 {
             Button("取消全部") { model.transfers.cancelAll() }

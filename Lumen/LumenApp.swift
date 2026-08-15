@@ -26,6 +26,12 @@ struct LumenApp: App {
         }
         .defaultSize(width: 860, height: 640)
 
+        Window("传输", id: "transfers") {
+            TransferWindow()
+                .environment(AppModel.settingsSession)
+        }
+        .defaultSize(width: 920, height: 560)
+
         MenuBarExtra(isInserted: menuBarBinding) {
             TransferMenu()
                 .environment(AppServices.shared.focused ?? AppModel.settingsSession)
@@ -164,6 +170,21 @@ struct LumenCommands: Commands {
             Button("检查更新…") {
                 AppServices.shared.updates.checkForUpdates()
             }
+        }
+        CommandMenu("传输") {
+            Button("打开传输中心") {
+                openWindow(id: "transfers")
+            }
+            .keyboardShortcut("l", modifiers: [.command, .option])
+            Divider()
+            Button("全部暂停") {
+                AppServices.shared.transfers.pauseAll()
+            }
+            .disabled(!AppServices.shared.transfers.jobs.contains(where: { $0.status == .running }))
+            Button("全部继续") {
+                AppServices.shared.transfers.resumeAll()
+            }
+            .disabled(!AppServices.shared.transfers.jobs.contains(where: { $0.status == .paused }))
         }
         CommandGroup(replacing: .help) {
             Button("Lumen 帮助") {

@@ -1,6 +1,7 @@
 import AppKit
 import Foundation
 import Observation
+import UserNotifications
 
 enum AppLinks {
     static let website = URL(string: "https://ihopefulchina.github.io/Lumen/")!
@@ -90,10 +91,24 @@ final class AppServices {
     func bootstrapIfNeeded() {
         guard !didBootstrap else { return }
         didBootstrap = true
+        transfers.concurrency = settings.concurrentUploads
+        transfers.downloadConcurrency = settings.concurrentDownloads
         transfers.restore(accounts: accounts)
         updates.automaticallyChecksForUpdates = settings.checkUpdatesAutomatically
         transfers.onUploadFinished = { [weak self] in
             self?.sessions.forEach { $0.scheduleListingRefresh() }
+        }
+        transfers.onAllFinished = { [weak self] in
+            guard let self else { return }
+            showMenuBarExtra = false
+            guard settings.notifyWhenTransfersFinish else { return }
+            let content = UNMutableNotificationContent()
+            content.title = "传输已完成"
+            content.body = "Lumen 已处理完传输队列。"
+            content.sound = .default
+            UNUserNotificationCenter.current().add(
+                UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+            )
         }
     }
 
