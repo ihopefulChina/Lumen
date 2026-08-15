@@ -1037,6 +1037,14 @@ final class AppModel {
         )
     }
 
+    func finderItemProvider(clickedKey: String) -> NSItemProvider {
+        let payload = cloudDragPayload(clickedKey: clickedKey)
+        guard (!payload.objectKeys.isEmpty || !payload.folderPrefixes.isEmpty),
+              let client = makeClient()
+        else { return NSItemProvider() }
+        return FinderExportCoordinator.itemProvider(for: payload, client: client)
+    }
+
     func copyCloudSelection(clickedKey: String) {
         let payload = cloudDragPayload(clickedKey: clickedKey)
         guard !payload.objectKeys.isEmpty || !payload.folderPrefixes.isEmpty else { return }

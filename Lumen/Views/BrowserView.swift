@@ -234,7 +234,9 @@ struct BrowserView: View {
                         } isTargeted: { targeted in
                             model.browser.setDropTarget(folder.prefix, active: targeted)
                         }
-                        .draggable(model.cloudDragPayload(clickedKey: folder.prefix)) {
+                        .onDrag {
+                            model.finderItemProvider(clickedKey: folder.prefix)
+                        } preview: {
                             dragPreview(name: folder.name, symbol: "folder.fill")
                         }
                     }
@@ -259,7 +261,9 @@ struct BrowserView: View {
                             .onAppear { selectForMenu(object.key) }
                             objectMenu(object)
                         }
-                        .draggable(model.cloudDragPayload(clickedKey: object.key)) {
+                        .onDrag {
+                            model.finderItemProvider(clickedKey: object.key)
+                        } preview: {
                             dragPreview(name: object.name, symbol: object.isImage ? "photo" : "doc")
                         }
                     }
@@ -318,7 +322,9 @@ struct BrowserView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-                .draggable(model.cloudDragPayload(clickedKey: row.id)) {
+                .onDrag {
+                    model.finderItemProvider(clickedKey: row.id)
+                } preview: {
                     dragPreview(name: row.name, symbol: row.symbol)
                 }
                 .onTapGesture(count: 2) {

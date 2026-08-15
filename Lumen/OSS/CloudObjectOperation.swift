@@ -23,7 +23,7 @@ struct CloudDragPayload: Codable, Hashable, Transferable, Sendable {
     }
 }
 
-private extension UTType {
+extension UTType {
     static let lumenCloudItems = UTType(exportedAs: "studio.lumen.oss.cloud-items")
 }
 
