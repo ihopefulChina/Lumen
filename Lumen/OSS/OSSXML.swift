@@ -83,6 +83,44 @@ enum OSSXML {
         )
     }
 
+    static func versionPage(from data: Data) throws -> OSSVersionPage {
+        let root = try parse(data)
+        let versions = root.children("Version").compactMap { node -> OSSObjectVersion? in
+            guard let key = node.child("Key")?.string,
+                  let versionID = node.child("VersionId")?.string,
+                  !key.isEmpty, !versionID.isEmpty
+            else { return nil }
+            return OSSObjectVersion(
+                key: key,
+                versionID: versionID,
+                isLatest: node.child("IsLatest")?.string.lowercased() == "true",
+                lastModified: ISO8601DateParser.date(node.child("LastModified")?.string),
+                etag: (node.child("ETag")?.string ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "\"")),
+                size: Int64(node.child("Size")?.string ?? "0") ?? 0,
+                storageClass: node.child("StorageClass")?.string ?? ""
+            )
+        }
+        let markers = root.children("DeleteMarker").compactMap { node -> OSSDeleteMarkerVersion? in
+            guard let key = node.child("Key")?.string,
+                  let versionID = node.child("VersionId")?.string,
+                  !key.isEmpty, !versionID.isEmpty
+            else { return nil }
+            return OSSDeleteMarkerVersion(
+                key: key,
+                versionID: versionID,
+                isLatest: node.child("IsLatest")?.string.lowercased() == "true",
+                lastModified: ISO8601DateParser.date(node.child("LastModified")?.string)
+            )
+        }
+        return OSSVersionPage(
+            versions: versions,
+            deleteMarkers: markers,
+            isTruncated: root.child("IsTruncated")?.string.lowercased() == "true",
+            nextKeyMarker: root.child("NextKeyMarker")?.string,
+            nextVersionIDMarker: root.child("NextVersionIdMarker")?.string
+        )
+    }
+
     static func uploadId(from data: Data) throws -> String {
         let root = try parse(data)
         guard let id = root.child("UploadId")?.string, !id.isEmpty else {

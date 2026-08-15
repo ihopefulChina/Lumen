@@ -148,6 +148,64 @@ struct OSSClient: Sendable {
         }
     }
 
+    func listObjectVersions(
+        prefix: String,
+        keyMarker: String? = nil,
+        versionIDMarker: String? = nil
+    ) async throws -> OSSVersionPage {
+        guard let bucket else { throw Self.missingBucket }
+        var query = [("versions", ""), ("max-keys", "1000")]
+        if !prefix.isEmpty { query.append(("prefix", prefix)) }
+        if let keyMarker, let versionIDMarker {
+            query.append(("key-marker", keyMarker))
+            query.append(("version-id-marker", versionIDMarker))
+        }
+        let response = try await perform(method: "GET", bucket: bucket, key: nil, query: query)
+        return try OSSXML.versionPage(from: response.data)
+    }
+
+    func listAllVersions(prefix: String) async throws -> OSSVersionListing {
+        var versions: [OSSObjectVersion] = []
+        var markers: [OSSDeleteMarkerVersion] = []
+        var keyMarker: String?
+        var versionMarker: String?
+        var incomplete = false
+        var pages = 0
+        repeat {
+            let page = try await listObjectVersions(
+                prefix: prefix,
+                keyMarker: keyMarker,
+                versionIDMarker: versionMarker
+            )
+            pages += 1
+            versions.append(contentsOf: page.versions)
+            markers.append(contentsOf: page.deleteMarkers)
+            guard page.isTruncated else { break }
+            guard let nextKey = page.nextKeyMarker,
+                  let nextVersion = page.nextVersionIDMarker,
+                  nextKey != keyMarker || nextVersion != versionMarker,
+                  pages < Self.maxListPages
+            else {
+                incomplete = true
+                break
+            }
+            keyMarker = nextKey
+            versionMarker = nextVersion
+        } while true
+        return OSSVersionListing(versions: versions, deleteMarkers: markers, incomplete: incomplete)
+    }
+
+    func restoreVersion(key: String, versionID: String) async throws {
+        guard let bucket else { throw Self.missingBucket }
+        try await copyObject(
+            fromBucket: bucket,
+            sourceKey: key,
+            sourceVersionID: versionID,
+            to: key,
+            overwrite: true
+        )
+    }
+
     func head(key: String) async throws -> ObjectHead {
         guard let bucket else { throw Self.missingBucket }
         let response = try await perform(method: "HEAD", bucket: bucket, key: key)
@@ -240,10 +298,36 @@ struct OSSClient: Sendable {
 
     func copyObject(from sourceKey: String, to destKey: String, overwrite: Bool = true) async throws {
         guard let bucket else { throw Self.missingBucket }
-        let source = "/" + bucket + "/" + OSSSigner.uriEncode(sourceKey, encodeSlash: false)
+        try await copyObject(
+            fromBucket: bucket,
+            sourceKey: sourceKey,
+            sourceVersionID: nil,
+            to: destKey,
+            overwrite: overwrite
+        )
+    }
+
+    func copyObject(
+        fromBucket sourceBucket: String,
+        sourceKey: String,
+        sourceVersionID: String? = nil,
+        to destKey: String,
+        overwrite: Bool = true,
+        replacingMetadata headersToReplace: [String: String]? = nil
+    ) async throws {
+        guard let bucket else { throw Self.missingBucket }
+        var source = "/" + OSSSigner.uriEncode(sourceBucket, encodeSlash: true)
+            + "/" + OSSSigner.uriEncode(sourceKey, encodeSlash: false)
+        if let sourceVersionID {
+            source += "?versionId=" + OSSSigner.uriEncode(sourceVersionID, encodeSlash: true)
+        }
         var headers = ["x-oss-copy-source": source]
         if !overwrite {
             headers["x-oss-forbid-overwrite"] = "true"
+        }
+        if let headersToReplace {
+            headers["x-oss-metadata-directive"] = "REPLACE"
+            headers.merge(headersToReplace) { _, replacement in replacement }
         }
         _ = try await perform(
             method: "PUT",
