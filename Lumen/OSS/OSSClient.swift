@@ -167,6 +167,8 @@ struct OSSClient: Sendable {
         fileURL: URL,
         contentType: String,
         acl: ObjectACL,
+        checkpoint: MultipartUploadCheckpoint? = nil,
+        onCheckpoint: (@Sendable (MultipartUploadCheckpoint?) -> Void)? = nil,
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil
     ) async throws -> Bool {
         guard let bucket else { throw Self.missingBucket }
@@ -180,6 +182,8 @@ struct OSSClient: Sendable {
                 contentType: contentType,
                 acl: acl,
                 localCRC64: localCRC64,
+                checkpoint: checkpoint,
+                onCheckpoint: onCheckpoint,
                 onProgress: onProgress
             )
         }
@@ -400,80 +404,118 @@ struct OSSClient: Sendable {
         contentType: String,
         acl: ObjectACL,
         localCRC64: UInt64,
+        checkpoint suppliedCheckpoint: MultipartUploadCheckpoint?,
+        onCheckpoint: (@Sendable (MultipartUploadCheckpoint?) -> Void)?,
         onProgress: (@Sendable (Int64, Int64) -> Void)?
     ) async throws -> Bool {
         guard let bucket else { throw Self.missingBucket }
-        var initiateHeaders = ["Content-Type": contentType]
-        if acl != .default {
-            initiateHeaders["x-oss-object-acl"] = acl.rawValue
-        }
-        let initiated = try await perform(
-            method: "POST",
-            bucket: bucket,
-            key: key,
-            query: [("uploads", "")],
-            headers: initiateHeaders
-        )
-        let uploadId = try OSSXML.uploadId(from: initiated.data)
-        do {
-            var parts: [(Int, String)] = []
-            var offset: Int64 = 0
-            var partNumber = 1
-            let handle = try FileHandle(forReadingFrom: fileURL)
-            defer { try? handle.close() }
-            while offset < size {
-                try Task.checkCancellation()
-                let thisSize = min(Self.partSize, size - offset)
-                try handle.seek(toOffset: UInt64(offset))
-                let chunk = try handle.read(upToCount: Int(thisSize)) ?? Data()
-                let partResponse = try await perform(
-                    method: "PUT",
-                    bucket: bucket,
-                    key: key,
-                    query: [("partNumber", String(partNumber)), ("uploadId", uploadId)],
-                    headers: ["Content-Type": contentType],
-                    body: chunk
-                )
-                let etag = (partResponse.headers.value("ETag") ?? "")
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                guard !etag.isEmpty else {
-                    throw OSSServiceError(statusCode: partResponse.status, code: "MissingETag", message: "分片未返回 ETag", requestId: "")
-                }
-                parts.append((partNumber, etag))
-                offset += thisSize
-                partNumber += 1
-                onProgress?(offset, size)
-            }
+        let values = try fileURL.resourceValues(forKeys: [.contentModificationDateKey])
+        let modifiedAt = values.contentModificationDate ?? .distantPast
+        let totalParts = Int((size + Self.partSize - 1) / Self.partSize)
 
-            let completeBody = completeXML(parts: parts)
-            let completed = try await perform(
+        var state: MultipartUploadCheckpoint
+        if let suppliedCheckpoint,
+           suppliedCheckpoint.bucketName == bucket,
+           suppliedCheckpoint.objectKey == key,
+           suppliedCheckpoint.sourceSize == size,
+           abs(suppliedCheckpoint.sourceModifiedAt.timeIntervalSince(modifiedAt)) < 0.001,
+           suppliedCheckpoint.partSize == Self.partSize,
+           !suppliedCheckpoint.uploadID.isEmpty,
+           Set(suppliedCheckpoint.completedParts.map(\.number)).count == suppliedCheckpoint.completedParts.count,
+           suppliedCheckpoint.completedParts.allSatisfy({ (1...totalParts).contains($0.number) && !$0.etag.isEmpty }) {
+            state = suppliedCheckpoint
+        } else {
+            var initiateHeaders = ["Content-Type": contentType]
+            if acl != .default {
+                initiateHeaders["x-oss-object-acl"] = acl.rawValue
+            }
+            let initiated = try await perform(
                 method: "POST",
                 bucket: bucket,
                 key: key,
-                query: [("uploadId", uploadId)],
-                headers: ["Content-Type": "application/xml"],
-                body: completeBody
+                query: [("uploads", "")],
+                headers: initiateHeaders
             )
-            return try Self.verifyCRC64(local: localCRC64, headers: completed.headers)
-        } catch {
-            let client = self
-            await Task.detached {
-                _ = try? await client.perform(
-                    method: "DELETE",
-                    bucket: bucket,
-                    key: key,
-                    query: [("uploadId", uploadId)],
-                    checksCancellation: false
-                )
-            }.value
-            throw error
+            state = MultipartUploadCheckpoint(
+                bucketName: bucket,
+                objectKey: key,
+                sourceSize: size,
+                sourceModifiedAt: modifiedAt,
+                partSize: Self.partSize,
+                uploadID: try OSSXML.uploadId(from: initiated.data),
+                completedParts: []
+            )
         }
+        onCheckpoint?(state)
+
+        var parts = Dictionary(uniqueKeysWithValues: state.completedParts.map { ($0.number, $0) })
+        var transferred = parts.keys.reduce(Int64(0)) { result, number in
+            let offset = Int64(number - 1) * Self.partSize
+            return result + min(Self.partSize, max(0, size - offset))
+        }
+        onProgress?(transferred, size)
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+        for partNumber in 1...totalParts where parts[partNumber] == nil {
+            try Task.checkCancellation()
+            let offset = Int64(partNumber - 1) * Self.partSize
+            let thisSize = min(Self.partSize, size - offset)
+            try handle.seek(toOffset: UInt64(offset))
+            let chunk = try handle.read(upToCount: Int(thisSize)) ?? Data()
+            guard chunk.count == Int(thisSize) else {
+                throw OSSServiceError(statusCode: 0, code: "ShortRead", message: "读取上传分片失败", requestId: "")
+            }
+            let response = try await perform(
+                method: "PUT",
+                bucket: bucket,
+                key: key,
+                query: [("partNumber", String(partNumber)), ("uploadId", state.uploadID)],
+                headers: ["Content-Type": contentType],
+                body: chunk
+            )
+            let etag = (response.headers.value("ETag") ?? "")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            guard !etag.isEmpty else {
+                throw OSSServiceError(statusCode: response.status, code: "MissingETag", message: "分片未返回 ETag", requestId: "")
+            }
+            parts[partNumber] = MultipartCompletedPart(number: partNumber, etag: etag)
+            state.completedParts = parts.values.sorted { $0.number < $1.number }
+            onCheckpoint?(state)
+            transferred += thisSize
+            onProgress?(transferred, size)
+        }
+
+        let completed = try await perform(
+            method: "POST",
+            bucket: bucket,
+            key: key,
+            query: [("uploadId", state.uploadID)],
+            headers: ["Content-Type": "application/xml"],
+            body: completeXML(parts: state.completedParts)
+        )
+        let verified = try Self.verifyCRC64(local: localCRC64, headers: completed.headers)
+        onCheckpoint?(nil)
+        return verified
     }
 
-    private func completeXML(parts: [(Int, String)]) -> Data {
+    func abortMultipartUpload(_ checkpoint: MultipartUploadCheckpoint) async throws {
+        guard let bucket else { throw Self.missingBucket }
+        guard checkpoint.bucketName == bucket else {
+            throw OSSServiceError(statusCode: 0, code: "CheckpointBucketMismatch", message: "上传检查点不属于当前存储空间", requestId: "")
+        }
+        _ = try await perform(
+            method: "DELETE",
+            bucket: bucket,
+            key: checkpoint.objectKey,
+            query: [("uploadId", checkpoint.uploadID)],
+            checksCancellation: false
+        )
+    }
+
+    private func completeXML(parts: [MultipartCompletedPart]) -> Data {
         var xml = "<CompleteMultipartUpload>"
-        for (number, etag) in parts {
-            xml += "<Part><PartNumber>\(number)</PartNumber><ETag>\"\(etag)\"</ETag></Part>"
+        for part in parts.sorted(by: { $0.number < $1.number }) {
+            xml += "<Part><PartNumber>\(part.number)</PartNumber><ETag>\"\(part.etag)\"</ETag></Part>"
         }
         xml += "</CompleteMultipartUpload>"
         return Data(xml.utf8)

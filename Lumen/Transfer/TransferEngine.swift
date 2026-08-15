@@ -492,11 +492,11 @@ final class TransferEngine {
         }
         mutate(id) { $0.status = .running }
         do {
-            let integrityVerified = try await client.putObject(key: key, fileURL: fileURL, contentType: contentType, acl: acl) { [weak self] sent, total in
+            let integrityVerified = try await client.putObject(key: key, fileURL: fileURL, contentType: contentType, acl: acl, onProgress: { [weak self] sent, total in
                 Task { @MainActor in
                     self?.recordProgress(id, transferred: sent, total: total)
                 }
-            }
+            })
             mutate(id) { job in
                 job.status = .completed
                 job.transferred = job.total

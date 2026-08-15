@@ -133,15 +133,14 @@ struct OSSClientTests {
         #expect(try Data(contentsOf: destination) == Data("original".utf8))
     }
 
-    @Test func multipartFailureAbortsUploadExactlyOnce() async throws {
+    @Test func multipartCancellationPreservesCheckpointWithoutAborting() async throws {
         let transport = StubOSSTransport(steps: [
             .response(
                 status: 200,
                 headers: [:],
                 data: Data("<InitiateMultipartUploadResult><UploadId>u-1</UploadId></InitiateMultipartUploadResult>".utf8)
             ),
-            .cancel,
-            .response(status: 204, headers: [:], data: Data())
+            .cancel
         ])
         let file = FileManager.default.temporaryDirectory
             .appending(path: "lumen-multipart-\(UUID().uuidString).bin")
@@ -151,19 +150,104 @@ struct OSSClientTests {
         try handle.close()
         defer { try? FileManager.default.removeItem(at: file) }
 
+        let checkpoints = CheckpointRecorder()
         await #expect(throws: CancellationError.self) {
             try await Self.client(transport: transport).putObject(
                 key: "large.bin",
                 fileURL: file,
                 contentType: "application/octet-stream",
-                acl: .private
+                acl: .private,
+                onCheckpoint: { checkpoint in
+                    checkpoints.append(checkpoint)
+                }
             )
         }
 
         let requests = await transport.recordedRequests()
-        #expect(requests.count == 3)
-        #expect(requests[2].httpMethod == "DELETE")
-        #expect(requests[2].url?.query == "uploadId=u-1")
+        #expect(requests.count == 2)
+        #expect(requests.allSatisfy { $0.httpMethod != "DELETE" })
+        #expect(checkpoints.values.last??.uploadID == "u-1")
+    }
+
+    @Test func multipartUploadEmitsAReusableCheckpointAfterEveryPart() async throws {
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 200,
+                headers: [:],
+                data: Data("<InitiateMultipartUploadResult><UploadId>u-1</UploadId></InitiateMultipartUploadResult>".utf8)
+            ),
+            .response(status: 200, headers: ["ETag": "\"etag-1\""], data: Data()),
+            .response(status: 200, headers: ["ETag": "\"etag-2\""], data: Data()),
+            .response(status: 200, headers: [:], data: Data())
+        ])
+        let file = try Self.multipartFile(parts: 2)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let checkpoints = CheckpointRecorder()
+
+        _ = try await Self.client(transport: transport).putObject(
+            key: "large.bin",
+            fileURL: file,
+            contentType: "application/octet-stream",
+            acl: .private,
+            onCheckpoint: { checkpoints.append($0) }
+        )
+
+        #expect(checkpoints.values.compactMap { $0?.completedParts.count } == [0, 1, 2])
+        #expect(checkpoints.values.last! == nil)
+    }
+
+    @Test func multipartUploadSkipsPartsAlreadyInAValidCheckpoint() async throws {
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: ["ETag": "etag-2"], data: Data()),
+            .response(status: 200, headers: [:], data: Data())
+        ])
+        let file = try Self.multipartFile(parts: 2)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        let checkpoint = MultipartUploadCheckpoint(
+            bucketName: "bucket",
+            objectKey: "large.bin",
+            sourceSize: Int64(values.fileSize!),
+            sourceModifiedAt: values.contentModificationDate!,
+            partSize: OSSClient.partSize,
+            uploadID: "u-1",
+            completedParts: [MultipartCompletedPart(number: 1, etag: "etag-1")]
+        )
+
+        _ = try await Self.client(transport: transport).putObject(
+            key: "large.bin",
+            fileURL: file,
+            contentType: "application/octet-stream",
+            acl: .private,
+            checkpoint: checkpoint
+        )
+
+        let requests = await transport.recordedRequests()
+        #expect(requests.count == 2)
+        #expect(requests[0].url?.query?.contains("partNumber=2") == true)
+        #expect(requests[1].httpMethod == "POST")
+        #expect(requests[1].url?.query == "uploadId=u-1")
+    }
+
+    @Test func multipartAbortIsAnExplicitDelete() async throws {
+        let checkpoint = MultipartUploadCheckpoint(
+            bucketName: "bucket",
+            objectKey: "large.bin",
+            sourceSize: OSSClient.partSize,
+            sourceModifiedAt: .distantPast,
+            partSize: OSSClient.partSize,
+            uploadID: "u-1",
+            completedParts: []
+        )
+        let transport = StubOSSTransport(steps: [
+            .response(status: 204, headers: [:], data: Data())
+        ])
+
+        try await Self.client(transport: transport).abortMultipartUpload(checkpoint)
+
+        let request = try #require(await transport.recordedRequests().first)
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.url?.query == "uploadId=u-1")
     }
 
     @Test func renameConflictNeverDeletesSource() async throws {
@@ -427,6 +511,27 @@ struct OSSClientTests {
 
     private static func errorXML(code: String, message: String, requestID: String) -> Data {
         Data("<Error><Code>\(code)</Code><Message>\(message)</Message><RequestId>\(requestID)</RequestId></Error>".utf8)
+    }
+
+    private static func multipartFile(parts: Int) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-multipart-\(UUID().uuidString).bin")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: UInt64(Int64(parts) * OSSClient.partSize))
+        try handle.close()
+        return url
+    }
+}
+
+private final class CheckpointRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [MultipartUploadCheckpoint?] = []
+
+    var values: [MultipartUploadCheckpoint?] { lock.withLock { storage } }
+
+    func append(_ checkpoint: MultipartUploadCheckpoint?) {
+        lock.withLock { storage.append(checkpoint) }
     }
 }
 
