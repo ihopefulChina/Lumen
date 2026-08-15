@@ -172,6 +172,14 @@ private struct RootPresentation: ViewModifier {
                     ObjectPropertiesView(properties: properties)
                 }
             }
+            .sheet(isPresented: $model.showCrossBucketPreflight) {
+                if let preflight = model.crossBucketPreflight {
+                    CrossBucketPreflightView(
+                        preflight: preflight,
+                        confirm: model.confirmCrossBucketOperation
+                    )
+                }
+            }
             .fileImporter(
                 isPresented: $showFileImporter,
                 allowedContentTypes: ImageKind.importTypes,

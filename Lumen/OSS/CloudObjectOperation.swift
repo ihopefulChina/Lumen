@@ -15,6 +15,7 @@ struct CloudObjectMapping: Hashable, Sendable {
 struct CloudDragPayload: Codable, Hashable, Transferable, Sendable {
     var accountID: UUID
     var bucketName: String
+    var sourceRegionID: String? = nil
     var objectKeys: [String]
     var folderPrefixes: [String]
 

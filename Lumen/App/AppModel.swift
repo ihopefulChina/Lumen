@@ -62,6 +62,8 @@ final class AppModel {
     var showVersionHistory = false
     var objectPropertiesModel: ObjectPropertiesModel?
     var showObjectProperties = false
+    var crossBucketPreflight: CrossBucketPreflight?
+    var showCrossBucketPreflight = false
     var activeSmartLocation: SmartLocation?
     var showAccountSheet = false
     var editingAccount: OSSAccount?
@@ -1041,6 +1043,7 @@ final class AppModel {
         return CloudDragPayload(
             accountID: selectedAccountID ?? UUID(),
             bucketName: selectedBucketName ?? "",
+            sourceRegionID: selectedBucket?.regionID ?? selectedAccount?.regionID,
             objectKeys: browser.visibleObjects.filter { keys.contains($0.key) }.map(\.key),
             folderPrefixes: browser.visibleFolders.filter { keys.contains($0.prefix) }.map(\.prefix)
         )
@@ -1159,7 +1162,7 @@ final class AppModel {
         guard payload.accountID == selectedAccountID,
               payload.bucketName == selectedBucketName
         else {
-            present("只能在同一个存储空间内整理项目", error: true)
+            await prepareCrossBucketOperation(payload, to: destinationPrefix, mode: mode)
             return
         }
         guard let client = makeClient(),
@@ -1232,6 +1235,184 @@ final class AppModel {
             )
         } catch {
             present(error.localizedDescription, error: true)
+        }
+    }
+
+    private func prepareCrossBucketOperation(
+        _ payload: CloudDragPayload,
+        to destinationPrefix: String,
+        mode: CloudOperationMode
+    ) async {
+        guard let sourceAccount = accounts.first(where: { $0.id == payload.accountID }),
+              let destinationAccount = selectedAccount,
+              let destinationBucket = selectedBucket,
+              let destinationClient = makeClient()
+        else {
+            present("来源账号已不可用，无法继续", error: true)
+            return
+        }
+        let sourceRegion = payload.sourceRegionID ?? sourceAccount.regionID
+        let sourceBucket = buckets.first(where: { $0.name == payload.bucketName })
+            ?? OSSBucket(
+                name: payload.bucketName,
+                regionID: sourceRegion,
+                location: sourceRegion,
+                extranetEndpoint: "",
+                createdAt: nil
+            )
+        let sourceClient: OSSClient
+        do {
+            sourceClient = try clientProvider(sourceAccount, sourceBucket)
+        } catch {
+            present(error.localizedDescription, error: true)
+            return
+        }
+
+        isOrganizingCloud = true
+        defer { isOrganizingCloud = false }
+        do {
+            var folders: [String: [OSSObject]] = [:]
+            for prefix in payload.folderPrefixes {
+                let listing = try await sourceClient.listAllObjects(prefix: prefix)
+                guard !listing.truncated else { throw CloudObjectOperationError.incompleteListing }
+                folders[prefix] = listing.objects
+            }
+            var plan = try CrossBucketOperation.plan(
+                sourceAccountID: sourceAccount.id,
+                destinationAccountID: destinationAccount.id,
+                sourceRegion: sourceBucket.regionID,
+                destinationRegion: destinationBucket.regionID,
+                destinationPrefix: destinationPrefix,
+                objectKeys: payload.objectKeys,
+                folders: folders
+            )
+            for index in plan.mappings.indices where plan.mappings[index].expectedSize == 0 {
+                plan.mappings[index].expectedSize = try await sourceClient.head(
+                    key: plan.mappings[index].sourceKey
+                ).contentLength ?? 0
+            }
+            plan.knownBytes = plan.mappings.reduce(0) { partial, mapping in
+                let (sum, overflow) = partial.addingReportingOverflow(max(0, mapping.expectedSize))
+                return overflow ? Int64.max : sum
+            }
+
+            var renamed = 0
+            var filtered: [CrossBucketMapping] = []
+            var reserved = Set(plan.mappings.map(\.destinationKey))
+            for var mapping in plan.mappings {
+                let exists = try await destinationClient.objectExists(key: mapping.destinationKey)
+                guard exists else { filtered.append(mapping); continue }
+                switch settings.transferConflictPolicy {
+                case .skip:
+                    continue
+                case .replace:
+                    filtered.append(mapping)
+                case .ask, .keepBoth:
+                    var candidate = TransferConflictPlanner.availableKey(
+                        for: mapping.destinationKey,
+                        existing: reserved
+                    )
+                    while try await destinationClient.objectExists(key: candidate) {
+                        reserved.insert(candidate)
+                        candidate = TransferConflictPlanner.availableKey(
+                            for: mapping.destinationKey,
+                            existing: reserved
+                        )
+                    }
+                    mapping.destinationKey = candidate
+                    reserved.insert(candidate)
+                    renamed += 1
+                    filtered.append(mapping)
+                }
+            }
+            plan.mappings = filtered
+            guard !filtered.isEmpty else {
+                present("所有同名项目都已跳过")
+                return
+            }
+            crossBucketPreflight = CrossBucketPreflight(
+                plan: plan,
+                mode: mode,
+                sourceAccount: sourceAccount,
+                sourceBucket: sourceBucket,
+                destinationAccount: destinationAccount,
+                destinationBucket: destinationBucket,
+                sourceClient: sourceClient,
+                destinationClient: destinationClient,
+                overwrite: settings.transferConflictPolicy == .replace,
+                renamedConflicts: renamed
+            )
+            showCrossBucketPreflight = true
+        } catch {
+            present(error.localizedDescription, error: true)
+        }
+    }
+
+    func confirmCrossBucketOperation() {
+        guard let preflight = crossBucketPreflight else { return }
+        crossBucketPreflight = nil
+        Task { await executeCrossBucketOperation(preflight) }
+    }
+
+    private func executeCrossBucketOperation(_ preflight: CrossBucketPreflight) async {
+        guard !isOrganizingCloud else { return }
+        isOrganizingCloud = true
+        defer { isOrganizingCloud = false }
+        var copied: [CrossBucketMapping] = []
+        let temporaryRoot = FileManager.default.temporaryDirectory.appending(
+            path: "Lumen-CrossBucket-\(UUID().uuidString)",
+            directoryHint: .isDirectory
+        )
+        defer { try? FileManager.default.removeItem(at: temporaryRoot) }
+        do {
+            if preflight.plan.method == .relay {
+                try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
+            }
+            for mapping in preflight.plan.mappings {
+                try Task.checkCancellation()
+                if preflight.plan.method == .serverSide {
+                    try await preflight.destinationClient.copyObject(
+                        fromBucket: preflight.sourceBucket.name,
+                        sourceKey: mapping.sourceKey,
+                        to: mapping.destinationKey,
+                        overwrite: preflight.overwrite
+                    )
+                } else {
+                    let local = temporaryRoot.appending(path: UUID().uuidString)
+                    let head = try await preflight.sourceClient.head(key: mapping.sourceKey)
+                    _ = try await preflight.sourceClient.downloadResumable(
+                        key: mapping.sourceKey,
+                        to: local,
+                        within: temporaryRoot,
+                        expectedSize: head.contentLength ?? mapping.expectedSize,
+                        speedLimit: settings.downloadSpeedLimit
+                    )
+                    _ = try await preflight.destinationClient.putObject(
+                        key: mapping.destinationKey,
+                        fileURL: local,
+                        contentType: head.contentType ?? "application/octet-stream",
+                        acl: preflight.destinationAccount.defaultACL,
+                        speedLimit: settings.uploadSpeedLimit
+                    )
+                    if let tags = try? await preflight.sourceClient.getObjectTags(key: mapping.sourceKey), !tags.isEmpty {
+                        try await preflight.destinationClient.putObjectTags(key: mapping.destinationKey, tags: tags)
+                    }
+                    try? FileManager.default.removeItem(at: local)
+                }
+                copied.append(mapping)
+            }
+            if preflight.mode == .move {
+                for mapping in preflight.plan.mappings {
+                    _ = try await preflight.sourceClient.deleteObject(key: mapping.sourceKey)
+                }
+            }
+            await refreshListing()
+            present(preflight.mode == .move ? "已移动 \(copied.count) 个对象" : "已复制 \(copied.count) 个对象")
+        } catch {
+            for mapping in copied.reversed() {
+                _ = try? await preflight.destinationClient.deleteObject(key: mapping.destinationKey)
+            }
+            present("跨 Bucket 操作未完成：\(error.localizedDescription)", error: true)
         }
     }
 
