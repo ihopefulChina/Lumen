@@ -241,6 +241,9 @@ struct ObjectHead: Sendable {
     var acl: String?
     var storageClass: String?
     var crc64: UInt64? = nil
+    var cacheControl: String? = nil
+    var contentDisposition: String? = nil
+    var userMetadata: [String: String] = [:]
 }
 
 struct OSSDeleteReceipt: Equatable, Sendable {

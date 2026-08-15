@@ -128,6 +128,37 @@ enum OSSXML {
         }
         return id
     }
+
+    static func tags(from data: Data) throws -> [OSSObjectTag] {
+        let root = try parse(data)
+        let set = root.child("TagSet") ?? root
+        let tags = set.children("Tag").compactMap { node -> OSSObjectTag? in
+            guard let key = node.child("Key")?.string, !key.isEmpty else { return nil }
+            return OSSObjectTag(key: key, value: node.child("Value")?.string ?? "")
+        }
+        guard tags.count <= 10, Set(tags.map { $0.key.lowercased() }).count == tags.count else {
+            throw OSSServiceError(statusCode: 0, code: "InvalidTags", message: "对象标签格式无效", requestId: "")
+        }
+        return tags
+    }
+
+    static func taggingData(_ tags: [OSSObjectTag]) -> Data {
+        var xml = "<Tagging><TagSet>"
+        for tag in tags {
+            xml += "<Tag><Key>\(escape(tag.key))</Key><Value>\(escape(tag.value))</Value></Tag>"
+        }
+        xml += "</TagSet></Tagging>"
+        return Data(xml.utf8)
+    }
+
+    private static func escape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
+    }
 }
 
 enum ISO8601DateParser {

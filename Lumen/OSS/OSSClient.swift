@@ -210,6 +210,11 @@ struct OSSClient: Sendable {
         guard let bucket else { throw Self.missingBucket }
         let response = try await perform(method: "HEAD", bucket: bucket, key: key)
         let headers = response.headers
+        let metadata = Dictionary(uniqueKeysWithValues: headers.compactMap { header -> (String, String)? in
+            let lower = header.key.lowercased()
+            guard lower.hasPrefix("x-oss-meta-") else { return nil }
+            return (String(lower.dropFirst("x-oss-meta-".count)), header.value)
+        })
         return ObjectHead(
             contentType: headers.value("Content-Type"),
             contentLength: headers.value("Content-Length").flatMap(Int64.init),
@@ -217,7 +222,59 @@ struct OSSClient: Sendable {
             etag: headers.value("ETag")?.trimmingCharacters(in: CharacterSet(charactersIn: "\"")),
             acl: headers.value("x-oss-object-acl"),
             storageClass: headers.value("x-oss-storage-class"),
-            crc64: headers.value("x-oss-hash-crc64ecma").flatMap(UInt64.init)
+            crc64: headers.value("x-oss-hash-crc64ecma").flatMap(UInt64.init),
+            cacheControl: headers.value("Cache-Control"),
+            contentDisposition: headers.value("Content-Disposition"),
+            userMetadata: metadata
+        )
+    }
+
+    func getObjectTags(key: String) async throws -> [OSSObjectTag] {
+        guard let bucket else { throw Self.missingBucket }
+        let response = try await perform(
+            method: "GET",
+            bucket: bucket,
+            key: key,
+            query: [("tagging", "")]
+        )
+        return try OSSXML.tags(from: response.data)
+    }
+
+    func putObjectTags(key: String, tags: [OSSObjectTag]) async throws {
+        guard let bucket else { throw Self.missingBucket }
+        guard tags.count <= 10,
+              tags.allSatisfy({ !$0.key.isEmpty && !$0.key.contains("\r") && !$0.key.contains("\n") }),
+              Set(tags.map { $0.key.lowercased() }).count == tags.count
+        else {
+            throw OSSServiceError(statusCode: 0, code: "InvalidTags", message: "对象标签格式无效", requestId: "")
+        }
+        _ = try await perform(
+            method: "PUT",
+            bucket: bucket,
+            key: key,
+            query: [("tagging", "")],
+            headers: ["Content-Type": "application/xml"],
+            body: OSSXML.taggingData(tags)
+        )
+    }
+
+    func replaceMetadata(key: String, properties: OSSObjectProperties) async throws {
+        guard let bucket else { throw Self.missingBucket }
+        var headers: [String: String] = [:]
+        if !properties.contentType.isEmpty { headers["Content-Type"] = properties.contentType }
+        if !properties.cacheControl.isEmpty { headers["Cache-Control"] = properties.cacheControl }
+        if !properties.contentDisposition.isEmpty { headers["Content-Disposition"] = properties.contentDisposition }
+        for (key, value) in properties.userMetadata {
+            let normalized = key.lowercased().hasPrefix("x-oss-meta-")
+                ? key.lowercased()
+                : "x-oss-meta-\(key.lowercased())"
+            headers[normalized] = value
+        }
+        try await copyObject(
+            fromBucket: bucket,
+            sourceKey: key,
+            to: key,
+            replacingMetadata: headers
         )
     }
 
