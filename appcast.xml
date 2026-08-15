@@ -3,6 +3,58 @@
     <channel>
         <title>Lumen</title>
         <item>
+            <title>0.0.9</title>
+            <pubDate>Sat, 15 Aug 2026 10:15:49 +0800</pubDate>
+            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.9</link>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>0.0.9</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Lumen 0.0.9
+
+这一版补齐了一套更完整的 Finder 工作流：从整个 Bucket 找到对象，可靠地传输和整理，再在需要时恢复历史内容。
+
+## 查找
+
+- 搜索可在「当前文件夹」与「当前 Bucket」之间切换。
+- Bucket 搜索支持类型、大小和修改时间筛选，显示分页扫描进度，也可以随时停止。
+- 侧边栏新增最近修改、大文件、已删除对象和失败传输。
+
+## 传输
+
+- 新增独立传输中心，可暂停、继续、重试、调整队列顺序，并显示速度和剩余时间。
+- multipart 上传与 Range 下载会保存检查点；暂停或重新打开 Lumen 后可继续。
+- 新增上传/下载独立并发数、方向限速、默认下载位置、冲突策略和完成通知。
+- 同名项目可选择询问、替换、跳过或按访达方式保留两者。
+
+## 恢复
+
+- 对象菜单新增版本历史，可将历史版本恢复为新的当前版本。
+- 「已删除」位置可以恢复精确的 delete marker。
+- 新增对象属性编辑，可修改 Web 属性、用户元数据和最多十个 OSS 标签。
+
+## 整理
+
+- OSS 文件或文件夹可以直接拖到访达；多选会保留在「Lumen 下载」目录中。
+- 复制后切换 Bucket 再粘贴，可安全地跨 Bucket 复制或移动。
+- 同账号同地域使用云端复制；跨地域或跨账号会在确认后经由这台 Mac 中转。
+- 跨 Bucket 移动只在全部复制成功后删除来源。
+
+## Mac 体验
+
+- 支持原生窗口标签页，`Command–N` 新建窗口，`Option–Command–L` 打开传输中心。
+- 更新了帮助、README、官网与完全虚拟的产品截图。
+
+## 系统要求
+
+- macOS 15 或更高版本
+- Apple Silicon Mac
+
+完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
+]]></description>
+            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.9/Lumen-0.0.9.dmg" length="4559737" type="application/octet-stream" sparkle:edSignature="/m7hQyIJy285lIbSvbveUmblth4Ihf3rNXS7hDt+xbBUSL9aGhlfWEKSl80jLXipuxCDT6VXezJCinGdfwsxDQ=="/>
+        </item>
+        <item>
             <title>0.0.8</title>
             <pubDate>Sat, 15 Aug 2026 08:48:30 +0800</pubDate>
             <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.8</link>
@@ -65,44 +117,6 @@
 完整使用说明与问题反馈入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
 ]]></description>
             <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.7/Lumen-0.0.7.dmg" length="3991843" type="application/octet-stream" sparkle:edSignature="8+JLTN+ocFBGpJRAOai3+ky9q2WgGGMGeIogWUGw1vM4qk2V+4ETnhp1KiMFVkzKyLbj3qWeXdUsGE947sDdCg=="/>
-        </item>
-        <item>
-            <title>0.0.6</title>
-            <pubDate>Sat, 15 Aug 2026 05:54:14 +0800</pubDate>
-            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.6</link>
-            <sparkle:version>6</sparkle:version>
-            <sparkle:shortVersionString>0.0.6</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## Lumen 0.0.6
-
-这一版补上访达工作流里最重要的安全感：重命名或移动之后，可以立即反悔。
-
-### 安全撤销
-
-- 对象重命名、文件夹重命名和同一 Bucket 内移动完成后，顶部提示会显示「撤销」。
-- 也可以从「编辑」菜单撤销，或直接按 `⌘Z`。
-- 文件夹撤销会恢复完整目录结构，以及随路径移动的侧边栏收藏。
-- 撤销前会检查原位置；如果其他客户端已经创建同名对象，Lumen 会停止并保留撤销机会，不会覆盖远端内容。
-- 失败的撤销可以重试，只有云端逆操作完整成功后才会清除记录。
-
-### 明确的边界
-
-- 0.0.6 保留当前会话内最近一次可撤销操作，不提供多级历史或重做。
-- 复制、上传、新建文件夹和删除不会显示成可撤销；删除仍会在执行前确认。
-- 撤销只在原账号和原 Bucket 中可用，切换回来后可继续操作。
-
-### 仍然熟悉的 Mac 操作
-
-- Return 原地重命名，Esc 取消编辑，双击或 `⌘↓` 打开，空格快速查看。
-- 文本编辑中的 `⌘Z` 仍优先撤销输入内容，不会误触发云端移动。
-- 普通状态提示保持短暂，带撤销动作的提示会停留更久，两个按钮拥有独立点击区域。
-
-系统要求：Apple Silicon，macOS 15 或更高版本。安装包和软件内更新使用 Sparkle Ed25519 签名验证。
-
-> 已安装 0.0.4 或 0.0.5 的用户可以在「Lumen → 检查更新…」中直接安装 0.0.6，安装完成后软件会自动重新打开。0.0.3 及更早版本需要手动安装当前版本。
-]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.6/Lumen-0.0.6.dmg" length="3870997" type="application/octet-stream" sparkle:edSignature="T69hSp/mYuJ2jO4iu1sGKoFAtAwznavxSJILIVPZj7czv1WQ8gCZ+FqKPnl4H6TOjDF1MhWUlVhMx31Z19QBBQ=="/>
         </item>
     </channel>
 </rss>
