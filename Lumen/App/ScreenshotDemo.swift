@@ -25,7 +25,7 @@ enum ScreenshotDemo {
         regionID: "cn-hangzhou",
         endpointOverride: "",
         cdnDomain: "media.example.com",
-        defaultACL: .private,
+        defaultACL: .default,
         prefixTemplate: "assets/{yyyy}/{MM}/{dd}/",
         useTransferAccelerate: true,
         createdAt: Date(timeIntervalSince1970: 1_765_756_800)
@@ -40,7 +40,7 @@ enum ScreenshotDemo {
             regionID: "cn-hangzhou",
             endpointOverride: "",
             cdnDomain: "media.example.com",
-            defaultACL: .private,
+            defaultACL: .default,
             prefixTemplate: "assets/{yyyy}/{MM}/{dd}/",
             useTransferAccelerate: true,
             createdAt: Date(timeIntervalSince1970: 1_765_756_800)

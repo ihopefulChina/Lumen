@@ -31,4 +31,31 @@ struct AppModelTests {
         #expect(model.banner?.isError == false)
         #expect(model.banner?.action == .undoCloudOperation)
     }
+
+    @Test func preferredBrowserViewPersists() {
+        let defaults = Self.defaults()
+        let first = AppSettings(defaults: defaults)
+
+        first.preferredViewMode = .list
+
+        #expect(AppSettings(defaults: defaults).preferredViewMode == .list)
+    }
+
+    @Test func newWindowUsesPreferredBrowserView() {
+        let defaults = Self.defaults()
+        let settings = AppSettings(defaults: defaults)
+        settings.preferredViewMode = .list
+        let services = AppServices(accounts: [], settings: settings)
+
+        let model = AppModel(services: services)
+
+        #expect(model.browser.viewMode == .list)
+    }
+
+    private static func defaults() -> UserDefaults {
+        let suite = "Lumen.AppModelTests.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        return defaults
+    }
 }

@@ -139,6 +139,7 @@ final class AppModel {
         self.settings = services.settings
         self.updates = services.updates
         self.favorites = services.favorites
+        browser.viewMode = services.settings.preferredViewMode
         if kind == .window, let source = services.focused {
             selectedAccountID = source.selectedAccountID
             buckets = source.buckets
@@ -164,6 +165,11 @@ final class AppModel {
 
     func becomeFocused() {
         services.register(self)
+    }
+
+    func setPreferredViewMode(_ mode: BrowserViewMode) {
+        settings.preferredViewMode = mode
+        browser.viewMode = mode
     }
 
     func bootstrap() {
@@ -1495,7 +1501,7 @@ struct AccountDraft: Identifiable {
             regionID: "cn-hangzhou",
             endpointOverride: "",
             cdnDomain: "",
-            defaultACL: .private,
+            defaultACL: .default,
             prefixTemplate: "",
             useTransferAccelerate: false,
             createdAt: .now

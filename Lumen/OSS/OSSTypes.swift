@@ -137,7 +137,7 @@ struct OSSAccount: Identifiable, Hashable, Codable, Sendable {
 
     var prefersSignedLinks: Bool {
         cdnDomain.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && (defaultACL == .private)
+            && (defaultACL == .default || defaultACL == .private)
     }
 }
 

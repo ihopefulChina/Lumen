@@ -61,8 +61,8 @@ struct RootView: View {
             openSelection: { openFocusedItem(model) },
             refresh: { Task { await model.refreshListing() } },
             quickLook: { Task { await model.quickLookSelection() } },
-            grid: { Motion.run(reduceMotion) { model.browser.viewMode = .grid } },
-            list: { Motion.run(reduceMotion) { model.browser.viewMode = .list } },
+            grid: { Motion.run(reduceMotion) { model.setPreferredViewMode(.grid) } },
+            list: { Motion.run(reduceMotion) { model.setPreferredViewMode(.list) } },
             goBack: { model.goBack() },
             goForward: { model.goForward() },
             selectAll: { model.browser.selectAllVisible() },
@@ -304,7 +304,12 @@ private struct WorkspaceView: View {
                 }
                 .help("排序项目")
 
-                Picker("视图", selection: $model.browser.viewMode) {
+                Picker("视图", selection: Binding(
+                    get: { model.browser.viewMode },
+                    set: { mode in
+                        Motion.run(reduceMotion) { model.setPreferredViewMode(mode) }
+                    }
+                )) {
                     ForEach(BrowserViewMode.allCases) { mode in
                         Label(mode.title, systemImage: mode.symbol).tag(mode)
                     }

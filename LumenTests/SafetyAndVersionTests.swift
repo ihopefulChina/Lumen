@@ -50,8 +50,25 @@ struct SafetyAndVersionTests {
         #expect(try Data(contentsOf: repository.backupURL) == Data("broken-backup".utf8))
     }
 
-    @Test func aNewAccountStartsPrivate() {
-        #expect(AccountDraft.fresh().defaultACL == .private)
+    @Test func aNewAccountInheritsItsBucketPermission() {
+        #expect(AccountDraft.fresh().defaultACL == .default)
+    }
+
+    @Test func inheritedBucketPermissionUsesASignedLinkFallback() {
+        let account = OSSAccount(
+            id: UUID(),
+            name: "Inherited",
+            accessKeyId: "test",
+            regionID: "cn-hangzhou",
+            endpointOverride: "",
+            cdnDomain: "",
+            defaultACL: .default,
+            prefixTemplate: "",
+            useTransferAccelerate: false,
+            createdAt: .now
+        )
+
+        #expect(account.prefersSignedLinks)
     }
 
     @Test func newlyPublicPermissionsRequireConfirmation() {
