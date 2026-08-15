@@ -40,4 +40,8 @@ struct TransferJob: Identifiable, Equatable, Codable, Sendable {
     var isResumable: Bool {
         status == .paused || status == .failed
     }
+
+    var isFinished: Bool {
+        status == .completed || status == .failed || status == .cancelled
+    }
 }
