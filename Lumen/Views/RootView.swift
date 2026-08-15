@@ -63,6 +63,13 @@ struct RootView: View {
             quickLook: { Task { await model.quickLookSelection() } },
             canShowInformation: model.canShowInformation,
             showInformation: { model.showInspector = true },
+            canActOnObject: model.browser.primarySelection != nil && model.browser.selectedObjects.count == 1,
+            showVersionHistory: {
+                if let object = model.browser.primarySelection { model.presentVersionHistory(for: object) }
+            },
+            showObjectProperties: {
+                if let object = model.browser.primarySelection { model.presentObjectProperties(for: object) }
+            },
             grid: { Motion.run(reduceMotion) { model.setPreferredViewMode(.grid) } },
             list: { Motion.run(reduceMotion) { model.setPreferredViewMode(.list) } },
             goBack: { model.goBack() },

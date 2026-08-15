@@ -54,21 +54,27 @@ struct HelpView: View {
             }
             helpSection("像访达一样浏览") {
                 Text("单击选择，双击打开文件夹或预览文件。按住 Command 多选，Shift 连续选择；Return 重命名，空格快速查看，Command–1 / Command–2 切换网格与列表。")
+                Text("搜索栏可切换“当前文件夹”和“当前 Bucket”。Bucket 搜索会显示扫描进度，可按类型、大小和修改日期筛选，也可随时停止。")
+                Text("把云端文件或文件夹直接拖到访达，Lumen 会在放下后安全下载；多选会放进“Lumen 下载”文件夹。")
             }
         case .transfers:
-            helpSection("失败与重试") {
-                Text("短暂断网、限流和服务端故障会自动重试。应用退出时仍在进行的任务会在下次打开后显示为“传输中断”，可以从传输列表重新开始；这不是字节级续传。")
-                Text("若原文件或下载目录的访问权限已失效，Lumen 会保留历史并说明为何不能直接重试。")
+            helpSection("暂停、继续与恢复") {
+                Text("从“传输 › 打开传输中心”查看完整队列。大文件上传会保存已完成分片，下载会保存已完成字节范围；暂停或重新打开 Lumen 后可从检查点继续。取消会清理对应临时数据。")
+                Text("若原文件、下载目录权限或云端对象状态已经变化，Lumen 会保留记录并说明为何不能继续。")
             }
             helpSection("同名项目") {
-                Text("上传遇到同名对象时会先询问覆盖或跳过；下载不会覆盖本地已有文件。上传完成后的“已校验”表示 OSS 返回的 CRC64 与本地内容一致。")
+                Text("可在设置中选择每次询问、替换、跳过或保留两者。保留两者会像访达一样生成带编号的名称；下载不会静默覆盖本地文件。")
             }
         case .recovery:
             helpSection("撤销云端整理") {
                 Text("重命名和移动成功后，可以立即按 Command–Z 撤销。撤销只在原账号与原 Bucket 中生效。")
             }
             helpSection("恢复删除") {
-                Text("Bucket 开启版本控制时，OSS 会为删除操作返回 delete marker。Lumen 只在拿到精确 marker 版本后提供撤销；未开启版本控制时，删除是永久的。")
+                Text("在对象菜单打开“版本历史”，可把任一历史版本恢复为新的当前版本；侧边栏“已删除”可移除精确 delete marker 来恢复对象。Bucket 必须已在 OSS 启用版本控制。")
+            }
+            helpSection("对象属性与跨 Bucket 整理") {
+                Text("“对象属性”可编辑 Content-Type、缓存行为、下载文件名、用户元数据和最多十个标签。无效或重复的键不会提交。")
+                Text("复制后切换到另一个 Bucket 再粘贴，会先显示来源、目标、数量、大小和传输方式。同账号同地域使用云端复制，其他情况经由这台 Mac；移动总是在全部复制成功后才删除来源。")
             }
             helpSection("账号配置恢复") {
                 Text("Lumen 会为可读取的账号配置保留上一份备份。主配置损坏时会自动恢复并保留损坏文件；若备份也不可读，请复制诊断信息并通过支持入口反馈。诊断信息不包含账号标识或密钥。")
@@ -81,8 +87,11 @@ struct HelpView: View {
         case .shortcuts:
             Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 12) {
                 shortcut("Command–O", "上传图片")
+                shortcut("Command–N", "新建窗口；窗口可合并为标签页")
+                shortcut("Shift–Command–A", "添加账号")
                 shortcut("Shift–Command–V", "从剪贴板上传")
                 shortcut("Shift–Command–N", "新建文件夹")
+                shortcut("Option–Command–L", "打开传输中心")
                 shortcut("Command–Z", "撤销上一步可恢复的云端操作")
                 shortcut("Command–1 / Command–2", "网格 / 列表")
                 shortcut("Command–[ / Command–]", "后退 / 前进")

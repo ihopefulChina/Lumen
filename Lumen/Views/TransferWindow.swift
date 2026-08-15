@@ -4,6 +4,7 @@ import SwiftUI
 enum TransferFilter: String, CaseIterable, Identifiable {
     case all
     case active
+    case paused
     case completed
     case failed
 
@@ -13,6 +14,7 @@ enum TransferFilter: String, CaseIterable, Identifiable {
         switch self {
         case .all: "全部"
         case .active: "进行中"
+        case .paused: "已暂停"
         case .completed: "已完成"
         case .failed: "失败"
         }
@@ -23,6 +25,7 @@ enum TransferFilter: String, CaseIterable, Identifiable {
             switch self {
             case .all: true
             case .active: job.isActive || job.status == .paused
+            case .paused: job.status == .paused
             case .completed: job.status == .completed
             case .failed: job.status == .failed
             }

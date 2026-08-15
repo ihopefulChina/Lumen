@@ -241,6 +241,7 @@ struct TransferEngineTests {
 
         #expect(TransferFilter.all.filter(jobs).map(\.id) == jobs.map(\.id))
         #expect(TransferFilter.active.filter(jobs).map(\.id) == [queued.id, paused.id])
+        #expect(TransferFilter.paused.filter(jobs).map(\.id) == [paused.id])
         #expect(TransferFilter.completed.filter(jobs).map(\.id) == [completed.id])
         #expect(TransferFilter.failed.filter(jobs).map(\.id) == [failed.id])
     }
