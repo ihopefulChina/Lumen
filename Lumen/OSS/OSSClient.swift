@@ -169,6 +169,7 @@ struct OSSClient: Sendable {
         fileURL: URL,
         contentType: String,
         acl: ObjectACL,
+        speedLimit: TransferSpeedLimit = .unlimited,
         checkpoint: MultipartUploadCheckpoint? = nil,
         onCheckpoint: (@Sendable (MultipartUploadCheckpoint?) -> Void)? = nil,
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil
@@ -184,6 +185,7 @@ struct OSSClient: Sendable {
                 contentType: contentType,
                 acl: acl,
                 localCRC64: localCRC64,
+                speedLimit: speedLimit,
                 checkpoint: checkpoint,
                 onCheckpoint: onCheckpoint,
                 onProgress: onProgress
@@ -195,6 +197,7 @@ struct OSSClient: Sendable {
         if acl != .default {
             headers["x-oss-object-acl"] = acl.rawValue
         }
+        let startedAt = Date()
         let response = try await perform(
             method: "PUT",
             bucket: bucket,
@@ -203,6 +206,7 @@ struct OSSClient: Sendable {
             fileURL: fileURL,
             onProgress: onProgress
         )
+        try await TransferThrottle.wait(bytes: size, startedAt: startedAt, limit: speedLimit)
         return try Self.verifyCRC64(local: localCRC64, headers: response.headers)
     }
 
@@ -363,6 +367,7 @@ struct OSSClient: Sendable {
         to destination: URL,
         within root: URL,
         expectedSize: Int64,
+        speedLimit: TransferSpeedLimit = .unlimited,
         checkpoint suppliedCheckpoint: RangeDownloadCheckpoint? = nil,
         onCheckpoint: (@Sendable (RangeDownloadCheckpoint?) -> Void)? = nil,
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil
@@ -435,6 +440,7 @@ struct OSSClient: Sendable {
             try Task.checkCancellation()
             let start = state.completedBytes
             let end = min(total - 1, start + Self.downloadChunkSize - 1)
+            let startedAt = Date()
             let response = try await perform(
                 method: "GET",
                 bucket: bucket,
@@ -452,6 +458,11 @@ struct OSSClient: Sendable {
             }
             try handle.write(contentsOf: response.data)
             try handle.synchronize()
+            try await TransferThrottle.wait(
+                bytes: Int64(response.data.count),
+                startedAt: startedAt,
+                limit: speedLimit
+            )
             state.completedBytes = end + 1
             onCheckpoint?(state)
             onProgress?(state.completedBytes, total)
@@ -537,6 +548,7 @@ struct OSSClient: Sendable {
         contentType: String,
         acl: ObjectACL,
         localCRC64: UInt64,
+        speedLimit: TransferSpeedLimit,
         checkpoint suppliedCheckpoint: MultipartUploadCheckpoint?,
         onCheckpoint: (@Sendable (MultipartUploadCheckpoint?) -> Void)?,
         onProgress: (@Sendable (Int64, Int64) -> Void)?
@@ -598,6 +610,7 @@ struct OSSClient: Sendable {
             guard chunk.count == Int(thisSize) else {
                 throw OSSServiceError(statusCode: 0, code: "ShortRead", message: "读取上传分片失败", requestId: "")
             }
+            let startedAt = Date()
             let response = try await perform(
                 method: "PUT",
                 bucket: bucket,
@@ -606,6 +619,7 @@ struct OSSClient: Sendable {
                 headers: ["Content-Type": contentType],
                 body: chunk
             )
+            try await TransferThrottle.wait(bytes: thisSize, startedAt: startedAt, limit: speedLimit)
             let etag = (response.headers.value("ETag") ?? "")
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
             guard !etag.isEmpty else {

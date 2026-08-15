@@ -9,6 +9,8 @@ final class TransferEngine {
     var jobs: [TransferJob] = []
     var concurrency = 3
     var downloadConcurrency = 3
+    var uploadSpeedLimit = TransferSpeedLimit.unlimited
+    var downloadSpeedLimit = TransferSpeedLimit.unlimited
     var onUploadFinished: (@MainActor () -> Void)?
     var onAllFinished: (@MainActor () -> Void)?
 
@@ -190,6 +192,7 @@ final class TransferEngine {
             account: account,
             bucket: bucket,
             concurrentUploads: settings.concurrentUploads,
+            speedLimit: settings.uploadSpeedLimit,
             playCompleteSound: settings.playCompleteSound,
             excludingSources: excludingSources
         )
@@ -211,7 +214,8 @@ final class TransferEngine {
             client: client,
             account: account,
             bucket: bucket,
-            scopedRoot: folder
+            scopedRoot: folder,
+            speedLimit: downloadSpeedLimit
         )
     }
 
@@ -220,7 +224,8 @@ final class TransferEngine {
         client: OSSClient,
         account: OSSAccount? = nil,
         bucket: OSSBucket? = nil,
-        scopedRoot: URL
+        scopedRoot: URL,
+        speedLimit: TransferSpeedLimit? = nil
     ) {
         guard !items.isEmpty else { return }
         let rootLease = SecurityScopeLease(url: scopedRoot)
@@ -248,7 +253,8 @@ final class TransferEngine {
                     bucket: bucket,
                     object: item.object,
                     destination: dest,
-                    scopedRoot: scopedRoot
+                    scopedRoot: scopedRoot,
+                    speedLimit: speedLimit ?? downloadSpeedLimit
                 )
             )
             if let account,
@@ -409,6 +415,7 @@ final class TransferEngine {
                     account: upload.account,
                     bucket: upload.bucket,
                     concurrentUploads: concurrency,
+                    speedLimit: upload.speedLimit,
                     playCompleteSound: upload.playSound
                 )
             }
@@ -418,7 +425,8 @@ final class TransferEngine {
                 client: download.client,
                 account: download.account,
                 bucket: download.bucket,
-                scopedRoot: download.scopedRoot
+                scopedRoot: download.scopedRoot,
+                speedLimit: download.speedLimit
             )
         }
     }
@@ -463,10 +471,12 @@ final class TransferEngine {
         account: OSSAccount,
         bucket: OSSBucket?,
         concurrentUploads: Int,
+        speedLimit: TransferSpeedLimit,
         playCompleteSound: Bool,
         excludingSources: Set<URL> = []
     ) {
         concurrency = concurrentUploads
+        uploadSpeedLimit = speedLimit
         for item in plan.items {
             if let failure = item.failure {
                 jobs.append(
@@ -520,6 +530,7 @@ final class TransferEngine {
                     contentType: item.contentType,
                     acl: account.defaultACL,
                     options: plan.options,
+                    speedLimit: speedLimit,
                     playSound: playCompleteSound
                 )
             )
@@ -550,6 +561,7 @@ final class TransferEngine {
         fileURL: URL,
         contentType: String,
         acl: ObjectACL,
+        speedLimit: TransferSpeedLimit,
         playSound: Bool
     ) async {
         guard await waitForSlot(id: id, kind: .upload) else {
@@ -574,6 +586,7 @@ final class TransferEngine {
                 fileURL: fileURL,
                 contentType: contentType,
                 acl: acl,
+                speedLimit: speedLimit,
                 checkpoint: suppliedCheckpoint,
                 onCheckpoint: { [weak self] checkpoint in
                     Task { @MainActor in
@@ -625,6 +638,7 @@ final class TransferEngine {
                     fileURL: upload.preparedFileURL,
                     contentType: upload.contentType,
                     acl: upload.acl,
+                    speedLimit: upload.speedLimit,
                     playSound: upload.playSound
                 )
             }
@@ -635,7 +649,8 @@ final class TransferEngine {
                     client: download.client,
                     key: download.object.key,
                     destination: download.destination,
-                    root: download.scopedRoot
+                    root: download.scopedRoot,
+                    speedLimit: download.speedLimit
                 )
             }
         }
@@ -687,7 +702,8 @@ final class TransferEngine {
         client: OSSClient,
         key: String,
         destination: URL,
-        root: URL
+        root: URL,
+        speedLimit: TransferSpeedLimit
     ) async {
         guard await waitForSlot(id: id, kind: .download) else {
             if jobs.first(where: { $0.id == id })?.status == .cancelled {
@@ -712,6 +728,7 @@ final class TransferEngine {
                 to: destination,
                 within: root,
                 expectedSize: expectedSize,
+                speedLimit: speedLimit,
                 checkpoint: suppliedCheckpoint,
                 onCheckpoint: { [weak self] checkpoint in
                     Task { @MainActor in
@@ -861,6 +878,7 @@ final class TransferEngine {
         var contentType: String
         var acl: ObjectACL
         var options: UploadPreparationOptions
+        var speedLimit: TransferSpeedLimit
         var playSound: Bool
     }
 
@@ -871,6 +889,7 @@ final class TransferEngine {
         var object: OSSObject
         var destination: URL
         var scopedRoot: URL
+        var speedLimit: TransferSpeedLimit
     }
 
     private func restore(
@@ -910,6 +929,7 @@ final class TransferEngine {
                         imagesOnly: upload.imagesOnly,
                         convertHEIC: upload.convertHEIC
                     ),
+                    speedLimit: uploadSpeedLimit,
                     playSound: upload.playSound
                 )
             )
@@ -937,7 +957,8 @@ final class TransferEngine {
                     bucket: download.bucket,
                     object: download.object,
                     destination: destination,
-                    scopedRoot: root
+                    scopedRoot: root,
+                    speedLimit: downloadSpeedLimit
                 )
             )
         }

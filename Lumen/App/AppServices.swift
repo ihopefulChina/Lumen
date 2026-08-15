@@ -93,6 +93,8 @@ final class AppServices {
         didBootstrap = true
         transfers.concurrency = settings.concurrentUploads
         transfers.downloadConcurrency = settings.concurrentDownloads
+        transfers.uploadSpeedLimit = settings.uploadSpeedLimit
+        transfers.downloadSpeedLimit = settings.downloadSpeedLimit
         transfers.restore(accounts: accounts)
         updates.automaticallyChecksForUpdates = settings.checkUpdatesAutomatically
         transfers.onUploadFinished = { [weak self] in

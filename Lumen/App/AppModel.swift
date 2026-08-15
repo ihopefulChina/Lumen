@@ -1316,12 +1316,14 @@ final class AppModel {
             return
         }
         transfers.downloadConcurrency = settings.concurrentDownloads
+        transfers.downloadSpeedLimit = settings.downloadSpeedLimit
         transfers.enqueueDownloadJobs(
             items: items,
             client: client,
             account: account,
             bucket: bucket,
-            scopedRoot: dest
+            scopedRoot: dest,
+            speedLimit: settings.downloadSpeedLimit
         )
         if truncated {
             present("已加入 \(items.count) 个下载，部分目录未列完")

@@ -75,6 +75,32 @@ struct TransferEngineTests {
         #expect(restored.signedLinkLifetime == .sevenDays)
     }
 
+    @Test func transferThrottleAccountsForTimeAlreadySpentOnTheNetwork() {
+        let limit = TransferSpeedLimit.megabytesPerSecond(1)
+
+        #expect(
+            TransferThrottle.delayNanoseconds(
+                bytes: 1_024 * 1_024,
+                elapsed: 0.25,
+                limit: limit
+            ) == 750_000_000
+        )
+        #expect(
+            TransferThrottle.delayNanoseconds(
+                bytes: 1_024 * 1_024,
+                elapsed: 1.25,
+                limit: limit
+            ) == 0
+        )
+        #expect(
+            TransferThrottle.delayNanoseconds(
+                bytes: 1_024 * 1_024,
+                elapsed: 0,
+                limit: .unlimited
+            ) == 0
+        )
+    }
+
     @Test func pausingPreservesCheckpointAndMakesJobResumable() throws {
         let journal = MemoryTransferJournal()
         let engine = TransferEngine(journal: journal)

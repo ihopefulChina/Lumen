@@ -65,6 +65,34 @@ struct TransferSpeedLimit: RawRepresentable, Codable, Hashable, Sendable {
     }
 }
 
+enum TransferThrottle {
+    nonisolated static func delayNanoseconds(
+        bytes: Int64,
+        elapsed: TimeInterval,
+        limit: TransferSpeedLimit
+    ) -> UInt64 {
+        guard bytes > 0, let bytesPerSecond = limit.bytesPerSecond else { return 0 }
+        let target = Double(bytes) / Double(bytesPerSecond)
+        let remaining = max(0, target - max(0, elapsed))
+        return UInt64((remaining * 1_000_000_000).rounded())
+    }
+
+    nonisolated static func wait(
+        bytes: Int64,
+        startedAt: Date,
+        limit: TransferSpeedLimit
+    ) async throws {
+        let delay = delayNanoseconds(
+            bytes: bytes,
+            elapsed: Date().timeIntervalSince(startedAt),
+            limit: limit
+        )
+        if delay > 0 {
+            try await Task.sleep(nanoseconds: delay)
+        }
+    }
+}
+
 enum DownloadLocation: String, Codable, CaseIterable, Identifiable, Sendable {
     case ask
     case downloads
