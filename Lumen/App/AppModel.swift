@@ -49,6 +49,9 @@ final class AppModel {
     var buckets: [OSSBucket] = []
     var selectedBucketName: String?
     var browser = BrowserModel()
+    var searchScope: BucketSearchScope = .folder
+    var searchFilter: BucketSearchFilter = .all
+    var searchController = BucketSearchController()
 
     var showInspector = false
     var showAccountSheet = false
@@ -224,6 +227,7 @@ final class AppModel {
     }
 
     private func selectBucket(_ bucket: OSSBucket, prefix: String) {
+        searchController.clear()
         invalidateListingAndInspectorRequests()
         selectedBucketName = bucket.name
         lastBucketName = bucket.name
@@ -363,6 +367,40 @@ final class AppModel {
             browser.isLoading = false
             listingLoadTask = nil
         }
+    }
+
+    func runBucketSearch(now: Date = .now) async {
+        guard searchScope == .bucket,
+              let accountID = selectedAccountID,
+              let bucketName = selectedBucketName,
+              let client = makeClient()
+        else {
+            searchController.clear()
+            return
+        }
+        let query = BucketSearchQuery(
+            accountID: accountID,
+            bucketName: bucketName,
+            text: browser.searchText,
+            filter: searchFilter
+        )
+        await searchController.search(query: query, now: now) { token in
+            try await client.listObjectPage(prefix: "", token: token)
+        }
+    }
+
+    func cancelBucketSearch() {
+        searchController.cancel()
+    }
+
+    func openSearchResult(_ object: OSSObject) async {
+        searchScope = .folder
+        browser.searchText = ""
+        searchController.clear()
+        invalidateListingAndInspectorRequests()
+        browser.navigate(to: PathTemplate.parentPrefix(object.key))
+        await refreshListing()
+        browser.replaceSelection([object.key])
     }
 
     func refreshBuckets(selecting preferred: String? = nil) async {
@@ -1348,7 +1386,12 @@ final class AppModel {
     }
 
     func quickLookSelection() async {
-        guard let object = browser.primarySelection, let client = makeClient() else { return }
+        guard let object = browser.primarySelection else { return }
+        await quickLook(object)
+    }
+
+    func quickLook(_ object: OSSObject) async {
+        guard let client = makeClient() else { return }
         let directory = FileManager.default.temporaryDirectory
             .appending(path: "LumenQuickLook", directoryHint: .isDirectory)
         let name = (try? ObjectNameValidator.validate(object.name)) ?? "预览文件"
@@ -1457,6 +1500,7 @@ final class AppModel {
     }
 
     private func invalidateAllBrowserRequests() {
+        searchController.clear()
         bucketLoadTask?.cancel()
         bucketLoadTask = nil
         bucketRequestGate.invalidate()
