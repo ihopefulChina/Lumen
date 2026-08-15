@@ -134,8 +134,8 @@ struct SafetyAndVersionTests {
             finishedAt: .now
         )
         let input = DiagnosticsReport.Input(
-            version: "0.0.7",
-            build: "7",
+            version: "0.0.8",
+            build: "8",
             operatingSystem: "macOS 15.6",
             architecture: "arm64",
             updateFeedHost: "github.com",
@@ -153,7 +153,7 @@ struct SafetyAndVersionTests {
 
         let report = DiagnosticsReport.make(input: input)
 
-        #expect(report.contains("Lumen 0.0.7 (7)"))
+        #expect(report.contains("Lumen 0.0.8 (8)"))
         #expect(report.contains("Configured accounts: 1"))
         #expect(report.contains("Failed transfers: 1"))
         for sensitive in [
