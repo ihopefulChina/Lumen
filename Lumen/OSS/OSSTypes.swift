@@ -240,6 +240,7 @@ struct ObjectHead: Sendable {
     var etag: String?
     var acl: String?
     var storageClass: String?
+    var crc64: UInt64? = nil
 }
 
 struct OSSDeleteReceipt: Equatable, Sendable {

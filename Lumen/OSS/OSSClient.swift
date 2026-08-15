@@ -11,6 +11,7 @@ struct OSSClient: Sendable {
 
     static let multipartThreshold: Int64 = 8 * 1024 * 1024
     static let partSize: Int64 = 8 * 1024 * 1024
+    static let downloadChunkSize: Int64 = 8 * 1024 * 1024
     static let maxListPages = 30
 
     init(
@@ -157,7 +158,8 @@ struct OSSClient: Sendable {
             lastModified: headers.value("Last-Modified").flatMap(OSSSigner.rfc822Date(from:)),
             etag: headers.value("ETag")?.trimmingCharacters(in: CharacterSet(charactersIn: "\"")),
             acl: headers.value("x-oss-object-acl"),
-            storageClass: headers.value("x-oss-storage-class")
+            storageClass: headers.value("x-oss-storage-class"),
+            crc64: headers.value("x-oss-hash-crc64ecma").flatMap(UInt64.init)
         )
     }
 
@@ -353,6 +355,137 @@ struct OSSClient: Sendable {
             onProgress: onProgress
         )
         return response.headers.value("x-oss-hash-crc64ecma") != nil
+    }
+
+    @discardableResult
+    func downloadResumable(
+        key: String,
+        to destination: URL,
+        within root: URL,
+        expectedSize: Int64,
+        checkpoint suppliedCheckpoint: RangeDownloadCheckpoint? = nil,
+        onCheckpoint: (@Sendable (RangeDownloadCheckpoint?) -> Void)? = nil,
+        onProgress: (@Sendable (Int64, Int64) -> Void)? = nil
+    ) async throws -> Bool {
+        guard let bucket else { throw Self.missingBucket }
+        try FileSafety.validate(destination: destination, root: root)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw OSSServiceError(
+                statusCode: 0,
+                code: "LocalFileExists",
+                message: "本地已有同名文件，未覆盖",
+                requestId: ""
+            )
+        }
+        let remote = try await head(key: key)
+        let total = remote.contentLength ?? expectedSize
+        guard total >= 0, expectedSize <= 0 || total == expectedSize else {
+            throw OSSServiceError(
+                statusCode: 0,
+                code: "RemoteObjectChanged",
+                message: "云端文件已发生变化，请重新开始下载",
+                requestId: ""
+            )
+        }
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let partialDirectory = destination.deletingLastPathComponent()
+        let suppliedName = suppliedCheckpoint?.partialFileName ?? ""
+        let suppliedURL = partialDirectory.appending(path: suppliedName)
+        let suppliedSize = (try? suppliedURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+        var state: RangeDownloadCheckpoint
+        if let suppliedCheckpoint,
+           suppliedCheckpoint.bucketName == bucket,
+           suppliedCheckpoint.objectKey == key,
+           suppliedCheckpoint.expectedSize == total,
+           suppliedCheckpoint.etag == remote.etag,
+           suppliedCheckpoint.chunkSize == Self.downloadChunkSize,
+           suppliedCheckpoint.completedBytes >= 0,
+           suppliedCheckpoint.completedBytes <= total,
+           suppliedCheckpoint.completedBytes == total || suppliedCheckpoint.completedBytes % Self.downloadChunkSize == 0,
+           Self.isOwnedPartialFileName(suppliedCheckpoint.partialFileName),
+           suppliedSize == suppliedCheckpoint.completedBytes {
+            state = suppliedCheckpoint
+        } else {
+            state = RangeDownloadCheckpoint(
+                bucketName: bucket,
+                objectKey: key,
+                expectedSize: total,
+                etag: remote.etag,
+                chunkSize: Self.downloadChunkSize,
+                completedBytes: 0,
+                partialFileName: ".lumen-\(UUID().uuidString).partial"
+            )
+            let partial = partialDirectory.appending(path: state.partialFileName)
+            guard FileManager.default.createFile(atPath: partial.path, contents: Data()) else {
+                throw OSSServiceError(statusCode: 0, code: "PartialFile", message: "无法创建下载临时文件", requestId: "")
+            }
+        }
+
+        let partial = partialDirectory.appending(path: state.partialFileName)
+        onCheckpoint?(state)
+        onProgress?(state.completedBytes, total)
+        let handle = try FileHandle(forWritingTo: partial)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        while state.completedBytes < total {
+            try Task.checkCancellation()
+            let start = state.completedBytes
+            let end = min(total - 1, start + Self.downloadChunkSize - 1)
+            let response = try await perform(
+                method: "GET",
+                bucket: bucket,
+                key: key,
+                headers: ["Range": "bytes=\(start)-\(end)"]
+            )
+            let expectedCount = Int(end - start + 1)
+            guard response.status == 206, response.data.count == expectedCount else {
+                throw OSSServiceError(
+                    statusCode: response.status,
+                    code: "InvalidRangeResponse",
+                    message: "下载分片不完整，请稍后重试",
+                    requestId: response.headers.value("x-oss-request-id") ?? ""
+                )
+            }
+            try handle.write(contentsOf: response.data)
+            try handle.synchronize()
+            state.completedBytes = end + 1
+            onCheckpoint?(state)
+            onProgress?(state.completedBytes, total)
+        }
+        try handle.close()
+
+        var verified = false
+        if let crc64 = remote.crc64 {
+            let local = try CRC64XZ.checksum(fileURL: partial)
+            guard local == crc64 else {
+                throw OSSIntegrityError(localCRC64: local, serverValue: String(crc64))
+            }
+            verified = true
+        }
+        try FileSafety.validate(destination: destination, root: root)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw OSSServiceError(statusCode: 0, code: "LocalFileExists", message: "本地已有同名文件，未覆盖", requestId: "")
+        }
+        try FileManager.default.moveItem(at: partial, to: destination)
+        onCheckpoint?(nil)
+        return verified
+    }
+
+    func removePartialDownload(
+        checkpoint: RangeDownloadCheckpoint,
+        destination: URL,
+        within root: URL
+    ) throws {
+        try FileSafety.validate(destination: destination, root: root)
+        guard Self.isOwnedPartialFileName(checkpoint.partialFileName) else { return }
+        let partial = destination.deletingLastPathComponent().appending(path: checkpoint.partialFileName)
+        if FileManager.default.fileExists(atPath: partial.path) {
+            try FileManager.default.removeItem(at: partial)
+        }
     }
 
     func objectData(key: String, process: String? = nil) async throws -> Data {
@@ -700,6 +833,13 @@ struct OSSClient: Sendable {
     private func fileSize(_ url: URL) throws -> Int64 {
         let values = try url.resourceValues(forKeys: [.fileSizeKey])
         return Int64(values.fileSize ?? 0)
+    }
+
+    private static func isOwnedPartialFileName(_ name: String) -> Bool {
+        name.hasPrefix(".lumen-")
+            && name.hasSuffix(".partial")
+            && !name.contains("/")
+            && !name.contains("\\")
     }
 }
 

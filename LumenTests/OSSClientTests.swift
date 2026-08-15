@@ -440,6 +440,112 @@ struct OSSClientTests {
         #expect(!FileManager.default.fileExists(atPath: destination.path))
     }
 
+    @Test func resumableDownloadUsesBoundedByteRangesAndPublishesAtomically() async throws {
+        let directory = try Self.temporaryDirectory(named: "range-download")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "large.bin")
+        let size = 20 * 1_024 * 1_024
+        let first = Data(repeating: 1, count: Int(OSSClient.downloadChunkSize))
+        let second = Data(repeating: 2, count: Int(OSSClient.downloadChunkSize))
+        let third = Data(repeating: 3, count: size - first.count - second.count)
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: ["Content-Length": "\(size)", "ETag": "v1"], data: Data()),
+            .response(status: 206, headers: [:], data: first),
+            .response(status: 206, headers: [:], data: second),
+            .response(status: 206, headers: [:], data: third)
+        ])
+        let recorder = DownloadCheckpointRecorder()
+
+        _ = try await Self.client(transport: transport).downloadResumable(
+            key: "large.bin",
+            to: destination,
+            within: directory,
+            expectedSize: Int64(size),
+            checkpoint: nil,
+            onCheckpoint: { recorder.append($0) }
+        )
+
+        #expect(FileManager.default.fileExists(atPath: destination.path))
+        #expect((try destination.resourceValues(forKeys: [.fileSizeKey])).fileSize == size)
+        let requests = await transport.recordedRequests()
+        #expect(requests.dropFirst().map { $0.value(forHTTPHeaderField: "Range") } == [
+            "bytes=0-8388607",
+            "bytes=8388608-16777215",
+            "bytes=16777216-20971519"
+        ])
+        #expect(recorder.values.compactMap { $0?.completedBytes } == [0, 8_388_608, 16_777_216, 20_971_520])
+        #expect(recorder.values.last! == nil)
+    }
+
+    @Test func resumableDownloadContinuesFromACompleteRange() async throws {
+        let directory = try Self.temporaryDirectory(named: "range-resume")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "large.bin")
+        let partialName = ".lumen-known.partial"
+        let partial = directory.appending(path: partialName)
+        try Data(repeating: 1, count: Int(OSSClient.downloadChunkSize)).write(to: partial)
+        let size = 20 * 1_024 * 1_024
+        let checkpoint = RangeDownloadCheckpoint(
+            bucketName: "bucket",
+            objectKey: "large.bin",
+            expectedSize: Int64(size),
+            etag: "v1",
+            chunkSize: OSSClient.downloadChunkSize,
+            completedBytes: OSSClient.downloadChunkSize,
+            partialFileName: partialName
+        )
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: ["Content-Length": "\(size)", "ETag": "v1"], data: Data()),
+            .response(status: 206, headers: [:], data: Data(repeating: 2, count: Int(OSSClient.downloadChunkSize))),
+            .response(status: 206, headers: [:], data: Data(repeating: 3, count: size - Int(OSSClient.downloadChunkSize * 2)))
+        ])
+
+        _ = try await Self.client(transport: transport).downloadResumable(
+            key: "large.bin",
+            to: destination,
+            within: directory,
+            expectedSize: Int64(size),
+            checkpoint: checkpoint
+        )
+
+        let requests = await transport.recordedRequests()
+        #expect(requests.dropFirst().map { $0.value(forHTTPHeaderField: "Range") } == [
+            "bytes=8388608-16777215",
+            "bytes=16777216-20971519"
+        ])
+    }
+
+    @Test func resumableDownloadKeepsPartialWhenIntegrityCheckFails() async throws {
+        let directory = try Self.temporaryDirectory(named: "range-crc")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "small.bin")
+        let bytes = Data("downloaded".utf8)
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 200,
+                headers: ["Content-Length": "\(bytes.count)", "ETag": "v1", "x-oss-hash-crc64ecma": "1"],
+                data: Data()
+            ),
+            .response(status: 206, headers: [:], data: bytes)
+        ])
+        let recorder = DownloadCheckpointRecorder()
+
+        await #expect(throws: OSSIntegrityError.self) {
+            try await Self.client(transport: transport).downloadResumable(
+                key: "small.bin",
+                to: destination,
+                within: directory,
+                expectedSize: Int64(bytes.count),
+                checkpoint: nil,
+                onCheckpoint: { recorder.append($0) }
+            )
+        }
+
+        let partialName = try #require(recorder.values.compactMap { $0 }.last?.partialFileName)
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+        #expect(FileManager.default.fileExists(atPath: directory.appending(path: partialName).path))
+    }
+
     @Test func prefixPlanPreservesRelativePaths() throws {
         let plan = try CloudObjectOperation.planPrefix(
             source: "old/",
@@ -522,6 +628,13 @@ struct OSSClientTests {
         try handle.close()
         return url
     }
+
+    private static func temporaryDirectory(named name: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-\(name)-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
 }
 
 private final class CheckpointRecorder: @unchecked Sendable {
@@ -531,6 +644,17 @@ private final class CheckpointRecorder: @unchecked Sendable {
     var values: [MultipartUploadCheckpoint?] { lock.withLock { storage } }
 
     func append(_ checkpoint: MultipartUploadCheckpoint?) {
+        lock.withLock { storage.append(checkpoint) }
+    }
+}
+
+private final class DownloadCheckpointRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [RangeDownloadCheckpoint?] = []
+
+    var values: [RangeDownloadCheckpoint?] { lock.withLock { storage } }
+
+    func append(_ checkpoint: RangeDownloadCheckpoint?) {
         lock.withLock { storage.append(checkpoint) }
     }
 }
