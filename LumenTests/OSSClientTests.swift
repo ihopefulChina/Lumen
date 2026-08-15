@@ -234,6 +234,61 @@ struct OSSClientTests {
         #expect(await transport.recordedRequests().count == 1)
     }
 
+    @Test func recursiveObjectPageUsesNoDelimiterAndForwardsTheExactToken() async throws {
+        let firstPage = Data("""
+        <ListBucketResult>
+          <IsTruncated>true</IsTruncated>
+          <NextContinuationToken>next/token + value</NextContinuationToken>
+          <Contents><Key>folder/a.txt</Key><Size>1</Size><ETag>a</ETag></Contents>
+        </ListBucketResult>
+        """.utf8)
+        let secondPage = Data("""
+        <ListBucketResult>
+          <IsTruncated>false</IsTruncated>
+          <Contents><Key>folder/nested/b.txt</Key><Size>2</Size><ETag>b</ETag></Contents>
+        </ListBucketResult>
+        """.utf8)
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: [:], data: firstPage),
+            .response(status: 200, headers: [:], data: secondPage)
+        ])
+        let client = Self.client(transport: transport)
+
+        let first = try await client.listObjectPage(prefix: "folder/")
+        let second = try await client.listObjectPage(prefix: "folder/", token: first.nextToken)
+
+        #expect(first.objects.map(\.key) == ["folder/a.txt"])
+        #expect(second.objects.map(\.key) == ["folder/nested/b.txt"])
+        let requests = await transport.recordedRequests()
+        let firstItems = URLComponents(url: requests[0].url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let secondItems = URLComponents(url: requests[1].url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(!firstItems.contains(where: { $0.name == "delimiter" }))
+        #expect(firstItems.contains(URLQueryItem(name: "list-type", value: "2")))
+        #expect(firstItems.contains(URLQueryItem(name: "max-keys", value: "1000")))
+        #expect(secondItems.contains(URLQueryItem(name: "continuation-token", value: "next/token + value")))
+    }
+
+    @Test func recursiveAggregateStopsWhenATruncatedPageOmitsItsToken() async throws {
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 200,
+                headers: [:],
+                data: Data("""
+                <ListBucketResult>
+                  <IsTruncated>true</IsTruncated>
+                  <Contents><Key>a.txt</Key><Size>1</Size><ETag>a</ETag></Contents>
+                </ListBucketResult>
+                """.utf8)
+            )
+        ])
+
+        let result = try await Self.client(transport: transport).listAllObjects(prefix: "")
+
+        #expect(result.objects.map(\.key) == ["a.txt"])
+        #expect(result.truncated)
+        #expect(await transport.recordedRequests().count == 1)
+    }
+
     @Test func crc64XZMatchesTheStandardCheckVector() {
         #expect(CRC64XZ.checksum(Data("123456789".utf8)) == 0x995D_C9BB_DF19_39FA)
     }

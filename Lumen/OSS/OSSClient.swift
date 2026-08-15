@@ -92,9 +92,22 @@ struct OSSClient: Sendable {
         return ObjectListing(folders: folders, objects: objects, isTruncated: incomplete, nextToken: token)
     }
 
+    /// One recursive page of objects under `prefix`. Unlike `listFolder`, this
+    /// request intentionally omits a delimiter so nested keys are returned.
+    func listObjectPage(prefix: String, token: String? = nil) async throws -> ObjectListing {
+        guard let bucket else { throw Self.missingBucket }
+        var query: [(String, String)] = [
+            ("list-type", "2"),
+            ("max-keys", "1000")
+        ]
+        if !prefix.isEmpty { query.append(("prefix", prefix)) }
+        if let token, !token.isEmpty { query.append(("continuation-token", token)) }
+        let response = try await perform(method: "GET", bucket: bucket, key: nil, query: query)
+        return try OSSXML.listing(from: response.data)
+    }
+
     /// All objects under `prefix`, including nested keys. No delimiter.
     func listAllObjects(prefix: String, includePlaceholders: Bool = false) async throws -> (objects: [OSSObject], truncated: Bool) {
-        guard let bucket else { throw Self.missingBucket }
         var objects: [OSSObject] = []
         var token: String?
         var pages = 0
@@ -102,14 +115,7 @@ struct OSSClient: Sendable {
         var incomplete = false
         repeat {
             pages += 1
-            var query: [(String, String)] = [
-                ("list-type", "2"),
-                ("max-keys", "1000")
-            ]
-            if !prefix.isEmpty { query.append(("prefix", prefix)) }
-            if let token, !token.isEmpty { query.append(("continuation-token", token)) }
-            let response = try await perform(method: "GET", bucket: bucket, key: nil, query: query)
-            let listing = try OSSXML.listing(from: response.data)
+            let listing = try await listObjectPage(prefix: prefix, token: token)
             objects.append(contentsOf: listing.objects.filter { object in
                 if object.key == prefix {
                     return includePlaceholders && object.isFolderPlaceholder
