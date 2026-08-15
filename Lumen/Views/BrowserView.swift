@@ -68,6 +68,9 @@ struct BrowserView: View {
                 Task { await importPhotos(items) }
             }
             .task(id: searchRequest) {
+                #if DEBUG
+                if ScreenshotDemo.currentMode == .browser { return }
+                #endif
                 guard isBucketSearchPresented else {
                     model.searchController.clear()
                     return

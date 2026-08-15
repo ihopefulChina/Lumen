@@ -5,7 +5,7 @@ struct TransferTray: View {
     @Environment(AppModel.self) private var model
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.openWindow) private var openWindow
-    @State private var expanded = true
+    @State private var expanded = false
 
     private var jobs: [TransferJob] { model.transfers.jobs }
 

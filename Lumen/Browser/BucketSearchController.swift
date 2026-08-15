@@ -138,6 +138,13 @@ final class BucketSearchController {
         }
     }
 
+    #if DEBUG
+    func seedForScreenshot(_ snapshot: BucketSearchSnapshot) {
+        apply(snapshot)
+        isSearching = false
+    }
+    #endif
+
     private func apply(_ snapshot: BucketSearchSnapshot) {
         activeQuery = snapshot.query
         results = snapshot.objects
