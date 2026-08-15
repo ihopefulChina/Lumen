@@ -1573,9 +1573,7 @@ final class AppModel {
             }
         }
         guard !items.isEmpty else {
-            if skippedLocal > 0 {
-                present("本地已有同名文件，已跳过 \(skippedLocal) 项")
-            } else if skippedUnsafe > 0 {
+            if skippedUnsafe > 0 {
                 present("对象路径不安全，已跳过 \(skippedUnsafe) 项", error: true)
             }
             return
