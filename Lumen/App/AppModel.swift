@@ -636,30 +636,50 @@ final class AppModel {
             transfers.abandon(plan: plan)
             return
         }
-        var seen = Set<String>()
-        var conflicts: [String] = []
-        var skipSources: Set<URL> = []
-        for item in viable {
-            if existing.contains(item.objectKey) || seen.contains(item.objectKey) {
-                let label = PathTemplate.relative(item.objectKey, under: prefix)
-                if !conflicts.contains(label) {
-                    conflicts.append(label)
-                }
-                skipSources.insert(item.sourceURL)
-            }
-            seen.insert(item.objectKey)
+        let resolutions = TransferConflictPlanner.plan(
+            keys: viable.map(\.objectKey),
+            existing: existing,
+            policy: settings.transferConflictPolicy
+        )
+        let conflicts = zip(viable, resolutions).compactMap { item, resolution -> String? in
+            guard resolution == .ask else { return nil }
+            return PathTemplate.relative(item.objectKey, under: prefix)
         }
-        if conflicts.isEmpty {
-            commit(plan: plan, client: client, account: account, bucket: bucket)
+        if !conflicts.isEmpty {
+            let skipSources = Set(zip(viable, resolutions).compactMap { item, resolution in
+                resolution == .ask ? item.sourceURL : nil
+            })
+            overwritePrompt = OverwritePrompt(
+                plan: plan,
+                client: client,
+                account: account,
+                bucket: bucket,
+                conflicts: Array(Set(conflicts)).sorted(),
+                skipSources: skipSources
+            )
             return
         }
-        overwritePrompt = OverwritePrompt(
-            plan: plan,
+
+        var resolvedPlan = plan
+        var resolutionIndex = 0
+        var excludedSources = Set<URL>()
+        for index in resolvedPlan.items.indices where resolvedPlan.items[index].failure == nil {
+            switch resolutions[resolutionIndex] {
+            case .renamed(let key):
+                resolvedPlan.items[index].objectKey = key
+            case .skip:
+                excludedSources.insert(resolvedPlan.items[index].sourceURL)
+            case .useOriginal, .ask:
+                break
+            }
+            resolutionIndex += 1
+        }
+        commit(
+            plan: resolvedPlan,
             client: client,
             account: account,
             bucket: bucket,
-            conflicts: conflicts,
-            skipSources: skipSources
+            excludingSources: excludedSources
         )
     }
 
@@ -1208,6 +1228,9 @@ final class AppModel {
     }
 
     private func chooseDownloadDirectory(message: String = "选择下载位置") -> URL? {
+        if settings.downloadLocation == .downloads {
+            return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+        }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -1236,10 +1259,6 @@ final class AppModel {
                 url = try FileSafety.destination(root: dest, relativePath: object.name)
             } catch {
                 skippedUnsafe += 1
-                continue
-            }
-            if FileManager.default.fileExists(atPath: url.path) {
-                skippedLocal += 1
                 continue
             }
             items.append((object: object, destination: url))
@@ -1272,10 +1291,6 @@ final class AppModel {
                         skippedUnsafe += 1
                         continue
                     }
-                    if FileManager.default.fileExists(atPath: url.path) {
-                        skippedLocal += 1
-                        continue
-                    }
                     items.append((object: object, destination: url))
                 }
             } catch {
@@ -1291,6 +1306,16 @@ final class AppModel {
             }
             return
         }
+        guard let resolved = resolveDownloadConflicts(items: items, root: dest) else {
+            return
+        }
+        items = resolved.items
+        skippedLocal += resolved.skipped
+        guard !items.isEmpty else {
+            present("本地已有同名文件，已跳过 \(skippedLocal) 项")
+            return
+        }
+        transfers.downloadConcurrency = settings.concurrentDownloads
         transfers.enqueueDownloadJobs(
             items: items,
             client: client,
@@ -1307,13 +1332,77 @@ final class AppModel {
         }
     }
 
+    private func resolveDownloadConflicts(
+        items: [(object: OSSObject, destination: URL)],
+        root: URL
+    ) -> (items: [(object: OSSObject, destination: URL)], skipped: Int)? {
+        let rootPath = root.standardizedFileURL.path
+        let rootPrefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        let relativePaths = items.map { item -> String in
+            let path = item.destination.standardizedFileURL.path
+            return path.hasPrefix(rootPrefix) ? String(path.dropFirst(rootPrefix.count)) : item.object.name
+        }
+        let existing = Set(zip(relativePaths, items).compactMap { relative, item in
+            FileManager.default.fileExists(atPath: item.destination.path) ? relative : nil
+        })
+        var policy = settings.transferConflictPolicy
+        if policy == .ask, !existing.isEmpty {
+            let alert = NSAlert()
+            alert.messageText = existing.count == 1 ? "本地已有同名文件" : "本地已有 \(existing.count) 个同名文件"
+            alert.informativeText = "可以替换现有文件，或跳过这些项目。"
+            alert.addButton(withTitle: "替换")
+            alert.addButton(withTitle: "跳过")
+            alert.addButton(withTitle: "取消")
+            switch alert.runModal() {
+            case .alertFirstButtonReturn: policy = .replace
+            case .alertSecondButtonReturn: policy = .skip
+            default: return nil
+            }
+        }
+        let resolutions = TransferConflictPlanner.plan(
+            keys: relativePaths,
+            existing: existing,
+            policy: policy
+        )
+        var resolved: [(object: OSSObject, destination: URL)] = []
+        var skipped = 0
+        for (index, resolution) in resolutions.enumerated() {
+            let item = items[index]
+            switch resolution {
+            case .skip, .ask:
+                skipped += 1
+            case .renamed(let relative):
+                guard let destination = try? FileSafety.destination(root: root, relativePath: relative) else {
+                    skipped += 1
+                    continue
+                }
+                resolved.append((item.object, destination))
+            case .useOriginal:
+                if existing.contains(relativePaths[index]), policy == .replace {
+                    do {
+                        try FileManager.default.removeItem(at: item.destination)
+                    } catch {
+                        skipped += 1
+                        continue
+                    }
+                }
+                resolved.append(item)
+            }
+        }
+        return (resolved, skipped)
+    }
+
     func copyURLs(style: LinkStyle = .plain) {
         guard let account = selectedAccount, let bucket = selectedBucket else { return }
         let client = account.prefersSignedLinks ? makeClient() : nil
         var usedSigned = false
         let urls = browser.selectedObjects.compactMap { object -> String? in
             let resolved: URL?
-            if let client, let signed = client.presignedURL(key: object.key) {
+            if let client,
+               let signed = client.presignedURL(
+                   key: object.key,
+                   expires: settings.signedLinkLifetime.rawValue
+               ) {
                 usedSigned = true
                 resolved = signed
             } else {
@@ -1332,7 +1421,7 @@ final class AppModel {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(urls.joined(separator: "\n"), forType: .string)
         Haptics.alignment()
-        present(usedSigned ? "已复制签名链接，1 小时内有效" : "已复制 \(urls.count) 条链接")
+        present(usedSigned ? "已复制签名链接，\(settings.signedLinkLifetime.title)内有效" : "已复制 \(urls.count) 条链接")
     }
 
     func loadInspector() async {

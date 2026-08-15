@@ -176,6 +176,32 @@ struct TransferEngineTests {
         #expect(engine.estimatedRemaining(job.id) == 5)
     }
 
+    @Test func keepBothUsesFinderStyleNumberingForFilesAndFolders() {
+        let existing: Set<String> = [
+            "art/hero.png",
+            "art/hero 2.png",
+            "art/Notes/",
+            "README",
+        ]
+
+        #expect(TransferConflictPlanner.availableKey(for: "art/hero.png", existing: existing) == "art/hero 3.png")
+        #expect(TransferConflictPlanner.availableKey(for: "art/Notes/", existing: existing) == "art/Notes 2/")
+        #expect(TransferConflictPlanner.availableKey(for: "README", existing: existing) == "README 2")
+    }
+
+    @Test func conflictPolicyPlansTheWholeBatchDeterministically() {
+        let keys = ["hero.png", "hero.png", "notes.txt"]
+        let existing: Set<String> = ["hero.png"]
+
+        let kept = TransferConflictPlanner.plan(keys: keys, existing: existing, policy: .keepBoth)
+        let skipped = TransferConflictPlanner.plan(keys: keys, existing: existing, policy: .skip)
+        let replaced = TransferConflictPlanner.plan(keys: keys, existing: existing, policy: .replace)
+
+        #expect(kept == [.renamed("hero 2.png"), .renamed("hero 3.png"), .useOriginal])
+        #expect(skipped == [.skip, .skip, .useOriginal])
+        #expect(replaced == [.useOriginal, .useOriginal, .useOriginal])
+    }
+
     @Test func clearingHistoryKeepsActiveTransfers() {
         let engine = TransferEngine()
         let running = Self.persistedJob(status: .running)
