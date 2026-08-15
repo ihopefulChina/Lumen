@@ -61,8 +61,10 @@ struct RootView: View {
             openSelection: { openFocusedItem(model) },
             refresh: { Task { await model.refreshListing() } },
             quickLook: { Task { await model.quickLookSelection() } },
-            grid: { Motion.run(reduceMotion) { model.browser.viewMode = .grid } },
-            list: { Motion.run(reduceMotion) { model.browser.viewMode = .list } },
+            canShowInformation: model.canShowInformation,
+            showInformation: { model.showInspector = true },
+            grid: { Motion.run(reduceMotion) { model.setPreferredViewMode(.grid) } },
+            list: { Motion.run(reduceMotion) { model.setPreferredViewMode(.list) } },
             goBack: { model.goBack() },
             goForward: { model.goForward() },
             selectAll: { model.browser.selectAllVisible() },
@@ -157,6 +159,9 @@ private struct RootPresentation: ViewModifier {
             .sheet(isPresented: $model.showAccountSheet) {
                 AccountSheet(draft: initialAccountDraft)
             }
+            .sheet(isPresented: $model.showInspector) {
+                InspectorView()
+            }
             .fileImporter(
                 isPresented: $showFileImporter,
                 allowedContentTypes: ImageKind.importTypes,
@@ -223,6 +228,11 @@ private struct RootPresentation: ViewModifier {
                 model.showMenuBarExtra = count > 0 && model.settings.showMenuBarWhileTransferring
             }
             .onChange(of: model.browser.selectedKeys) { _, _ in
+                guard model.showInspector else { return }
+                Task { await model.loadInspector() }
+            }
+            .onChange(of: model.showInspector) { _, isPresented in
+                guard isPresented else { return }
                 Task { await model.loadInspector() }
             }
     }
@@ -249,10 +259,6 @@ private struct WorkspaceView: View {
             SidebarView()
         } detail: {
             BrowserView(showFileImporter: $showFileImporter)
-        }
-        .inspector(isPresented: $model.showInspector) {
-            InspectorView()
-                .inspectorColumnWidth(min: 260, ideal: 304, max: 380)
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if model.transfers.hasJobs {
@@ -304,7 +310,12 @@ private struct WorkspaceView: View {
                 }
                 .help("排序项目")
 
-                Picker("视图", selection: $model.browser.viewMode) {
+                Picker("视图", selection: Binding(
+                    get: { model.browser.viewMode },
+                    set: { mode in
+                        Motion.run(reduceMotion) { model.setPreferredViewMode(mode) }
+                    }
+                )) {
                     ForEach(BrowserViewMode.allCases) { mode in
                         Label(mode.title, systemImage: mode.symbol).tag(mode)
                     }
@@ -314,11 +325,12 @@ private struct WorkspaceView: View {
                 .help("切换网格或列表")
 
                 Button {
-                    Motion.run(reduceMotion) { model.showInspector.toggle() }
+                    model.showInspector = true
                 } label: {
-                    Label("信息", systemImage: "sidebar.trailing")
+                    Label("显示信息", systemImage: "info.circle")
                 }
-                .help("显示或隐藏检查器")
+                .disabled(!model.canShowInformation)
+                .help("显示当前文件夹或所选项目的信息（⌘I）")
             }
         }
         .overlay(alignment: .top) {

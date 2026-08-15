@@ -13,6 +13,9 @@ final class AppSettings {
     var imagesOnly: Bool {
         didSet { defaults.set(imagesOnly, forKey: Keys.imagesOnly) }
     }
+    var preferredViewMode: BrowserViewMode {
+        didSet { defaults.set(preferredViewMode.rawValue, forKey: Keys.preferredViewMode) }
+    }
     var playCompleteSound: Bool {
         didSet { defaults.set(playCompleteSound, forKey: Keys.sound) }
     }
@@ -31,6 +34,8 @@ final class AppSettings {
         self.concurrentUploads = min(6, max(1, stored ?? 3))
         self.convertHEIC = defaults.object(forKey: Keys.heic) as? Bool ?? false
         self.imagesOnly = defaults.object(forKey: Keys.imagesOnly) as? Bool ?? true
+        self.preferredViewMode = defaults.string(forKey: Keys.preferredViewMode)
+            .flatMap(BrowserViewMode.init(rawValue:)) ?? .grid
         self.playCompleteSound = defaults.bool(forKey: Keys.sound)
         self.showMenuBarWhileTransferring = defaults.object(forKey: Keys.menuBar) as? Bool ?? true
         self.checkUpdatesAutomatically = defaults.object(forKey: Keys.autoUpdate) as? Bool ?? true
@@ -40,6 +45,7 @@ final class AppSettings {
         static let concurrent = "settings.concurrentUploads"
         static let heic = "settings.convertHEIC"
         static let imagesOnly = "settings.imagesOnly"
+        static let preferredViewMode = "settings.preferredViewMode"
         static let sound = "settings.playCompleteSound"
         static let menuBar = "settings.showMenuBar"
         static let autoUpdate = "settings.checkUpdatesAutomatically"

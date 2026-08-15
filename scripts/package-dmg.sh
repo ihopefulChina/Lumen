@@ -4,10 +4,10 @@ set -euo pipefail
 script_dir="${0:A:h}"
 repo_dir="${script_dir:h}"
 mode="${1:-}"
-version="0.0.7"
-build_number="7"
+version="0.0.8"
+build_number="8"
 sparkle_account="studio.lumen.oss"
-derived_dir="$repo_dir/.build/release-v007-$mode"
+derived_dir="$repo_dir/.build/release-v008-$mode"
 app_path="$derived_dir/Build/Products/Release/Lumen.app"
 dist_dir="$repo_dir/dist"
 tracked_appcast_path="$repo_dir/appcast.xml"
@@ -47,12 +47,12 @@ if [[ "$mode" == "release" ]]; then
         || fail "the configured notarization profile is unavailable"
 fi
 
-stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/lumen-v007-dmg.XXXXXX")"
+stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/lumen-v008-dmg.XXXXXX")"
 temp_dmg="$stage_dir/$artifact_name"
 appcast_dir="$stage_dir/appcast"
 private_key_path="$stage_dir/sparkle-signing.key"
 cleanup() {
-    if [[ "$stage_dir" == "${TMPDIR:-/tmp}"/lumen-v007-dmg.* ]]; then
+    if [[ "$stage_dir" == "${TMPDIR:-/tmp}"/lumen-v008-dmg.* ]]; then
         rm -rf "$stage_dir"
     fi
 }

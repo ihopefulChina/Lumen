@@ -108,6 +108,10 @@ final class AppModel {
         selectedAccount != nil && selectedBucket != nil
     }
 
+    var canShowInformation: Bool {
+        selectedBucket != nil
+    }
+
     var canUndoCloudOperation: Bool {
         if let deletion = lastDeleteUndoOperation {
             return !isOrganizingCloud && isCurrentScope(for: deletion)
@@ -139,6 +143,7 @@ final class AppModel {
         self.settings = services.settings
         self.updates = services.updates
         self.favorites = services.favorites
+        browser.viewMode = services.settings.preferredViewMode
         if kind == .window, let source = services.focused {
             selectedAccountID = source.selectedAccountID
             buckets = source.buckets
@@ -164,6 +169,18 @@ final class AppModel {
 
     func becomeFocused() {
         services.register(self)
+    }
+
+    func setPreferredViewMode(_ mode: BrowserViewMode) {
+        settings.preferredViewMode = mode
+        browser.viewMode = mode
+    }
+
+    func applyPreferredViewModeToAllSessions(_ mode: BrowserViewMode) {
+        settings.preferredViewMode = mode
+        for session in services.sessions {
+            session.browser.viewMode = mode
+        }
     }
 
     func bootstrap() {
@@ -397,6 +414,11 @@ final class AppModel {
             present(error.localizedDescription, error: true)
             return nil
         }
+    }
+
+    func testAccount(_ account: OSSAccount) async throws -> Int {
+        let client = try clientProvider(account, nil)
+        return try await client.listBuckets().count
     }
 
     func saveAccount(_ draft: AccountDraft) async throws {
@@ -1485,6 +1507,11 @@ struct AccountDraft: Identifiable {
     var useTransferAccelerate: Bool
     var createdAt: Date
 
+    var isReadyToSave: Bool {
+        !accessKeyId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     static func fresh() -> AccountDraft {
         AccountDraft(
             id: UUID(),
@@ -1495,7 +1522,7 @@ struct AccountDraft: Identifiable {
             regionID: "cn-hangzhou",
             endpointOverride: "",
             cdnDomain: "",
-            defaultACL: .private,
+            defaultACL: .default,
             prefixTemplate: "",
             useTransferAccelerate: false,
             createdAt: .now

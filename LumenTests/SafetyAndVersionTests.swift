@@ -50,8 +50,45 @@ struct SafetyAndVersionTests {
         #expect(try Data(contentsOf: repository.backupURL) == Data("broken-backup".utf8))
     }
 
-    @Test func aNewAccountStartsPrivate() {
-        #expect(AccountDraft.fresh().defaultACL == .private)
+    @Test func aNewAccountInheritsItsBucketPermission() {
+        #expect(AccountDraft.fresh().defaultACL == .default)
+    }
+
+    @Test func inheritedBucketPermissionUsesASignedLinkFallback() {
+        let account = OSSAccount(
+            id: UUID(),
+            name: "Inherited",
+            accessKeyId: "test",
+            regionID: "cn-hangzhou",
+            endpointOverride: "",
+            cdnDomain: "",
+            defaultACL: .default,
+            prefixTemplate: "",
+            useTransferAccelerate: false,
+            createdAt: .now
+        )
+
+        #expect(account.prefersSignedLinks)
+    }
+
+    @Test func onlyExplicitPublicPermissionsNeedAPublicWarning() {
+        #expect(!ObjectACL.default.isPublic)
+        #expect(!ObjectACL.private.isPublic)
+        #expect(ObjectACL.publicRead.isPublic)
+        #expect(ObjectACL.publicReadWrite.isPublic)
+    }
+
+    @Test func accountDraftRequiresNonWhitespaceCredentials() {
+        var draft = AccountDraft.fresh()
+        draft.accessKeyId = "   "
+        draft.secret = "   "
+
+        #expect(!draft.isReadyToSave)
+
+        draft.accessKeyId = "LTAI-example"
+        draft.secret = "example-secret"
+
+        #expect(draft.isReadyToSave)
     }
 
     @Test func newlyPublicPermissionsRequireConfirmation() {
@@ -97,8 +134,8 @@ struct SafetyAndVersionTests {
             finishedAt: .now
         )
         let input = DiagnosticsReport.Input(
-            version: "0.0.7",
-            build: "7",
+            version: "0.0.8",
+            build: "8",
             operatingSystem: "macOS 15.6",
             architecture: "arm64",
             updateFeedHost: "github.com",
@@ -116,7 +153,7 @@ struct SafetyAndVersionTests {
 
         let report = DiagnosticsReport.make(input: input)
 
-        #expect(report.contains("Lumen 0.0.7 (7)"))
+        #expect(report.contains("Lumen 0.0.8 (8)"))
         #expect(report.contains("Configured accounts: 1"))
         #expect(report.contains("Failed transfers: 1"))
         for sensitive in [

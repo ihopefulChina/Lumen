@@ -18,7 +18,7 @@ struct LumenApp: App {
         Settings {
             SettingsView()
                 .environment(AppModel.settingsSession)
-                .frame(width: 520, height: 560)
+                .frame(width: 620, height: 600)
         }
 
         Window("Lumen 帮助", id: "help") {
@@ -198,6 +198,9 @@ struct LumenCommands: Commands {
             Button("刷新") { actions?.refresh() }
                 .keyboardShortcut("r", modifiers: [.command])
             Button("快速查看") { actions?.quickLook() }
+            Button("显示信息") { actions?.showInformation() }
+                .keyboardShortcut("i", modifiers: [.command])
+                .disabled(actions?.canShowInformation != true)
             Divider()
             Button("网格") { actions?.grid() }
                 .keyboardShortcut("1", modifiers: [.command])
@@ -222,6 +225,8 @@ struct LumenActions {
     var openSelection: () -> Void
     var refresh: () -> Void
     var quickLook: () -> Void
+    var canShowInformation: Bool
+    var showInformation: () -> Void
     var grid: () -> Void
     var list: () -> Void
     var goBack: () -> Void

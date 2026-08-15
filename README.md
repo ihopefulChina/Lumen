@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://ihopefulchina.github.io/Lumen/"><strong>访问官网</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.7.dmg">下载 Lumen 0.0.7</a>
+  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.8.dmg">下载 Lumen 0.0.8</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/ihopefulChina/Lumen/releases">版本记录</a>
   &nbsp;·&nbsp;
@@ -40,7 +40,7 @@ Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口�
 - 在网格和列表之间切换，按名称、日期、大小或类型排序。
 - 收藏经常访问的 OSS 文件夹，从侧边栏一步抵达。
 - 搜索只作用于当前文件夹；过滤结果时会同步清理隐藏选择，避免误操作看不见的对象。
-- 使用方向键移动选择，按空格快速查看，打开检查器查看对象信息。
+- 使用方向键移动选择，按空格快速查看；按 `⌘I` 按需查看当前文件夹或所选对象的信息。
 - 切换账号、Bucket 或路径时，过期的网络响应不会覆盖当前页面。
 
 ### 整理内容
@@ -64,7 +64,7 @@ Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口�
 ### 默认把安全放在前面
 
 - AccessKey Secret 和 STS Token 保存在 macOS 钥匙串，不写入项目文件或偏好设置。
-- 新账号默认使用私有 ACL；切换到公共权限前必须明确确认。
+- 新账号默认继承 Bucket 权限，不擅自改写对象 ACL；明确切换到公共权限前必须确认影响。
 - 账号配置采用原子写入并保留上一份有效备份，损坏时优先恢复而不是静默清空。
 - 上传与下载会核对 OSS 返回的 CRC64；下载通过校验后才写入最终位置。
 - 不完整的目录列表会阻止整文件夹移动、复制、下载或删除。
@@ -72,7 +72,7 @@ Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口�
 
 ## 开始使用
 
-1. [下载 Lumen 0.0.7](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.7.dmg)。
+1. [下载 Lumen 0.0.8](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.8.dmg)。
 2. 打开 DMG，把 Lumen 拖到「应用程序」。
 3. 添加阿里云 OSS 账号，选择地域，然后双击进入 Bucket。
 4. 把文件拖进窗口，或按 `⌘O` 开始上传。
@@ -83,7 +83,7 @@ Lumen 把账号、Bucket、文件和对象信息放进一个原生 macOS 窗口�
 
 <p align="center"><sub>示例 AccessKey 带有 DEMO 标记，不对应任何真实账号。</sub></p>
 
-账号还可配置 STS Token、传输加速、自定义 Endpoint、CDN 域名、默认 ACL 和上传路径模板。路径模板只在 Bucket 根目录生效，例如：
+账号还可配置 STS Token、传输加速、自定义 Endpoint、CDN 域名、对象 ACL 和上传路径模板。默认的「继承存储空间」会沿用目标 Bucket 的权限。路径模板只在 Bucket 根目录生效，例如：
 
 ```text
 assets/{yyyy}/{MM}/{dd}/
@@ -97,7 +97,7 @@ assets/{yyyy}/{MM}/{dd}/
 
 在菜单栏选择「Lumen → 检查更新…」，或在「设置 → 通用」开启自动检查。发现新版本后，点击安装即可完成下载与签名验证；安装结束后 Lumen 会自动退出并重新打开。
 
-已安装 0.0.4 或更高版本的用户可以直接在软件内升级到 0.0.7。0.0.3 及更早版本尚未内置更新器，需要先手动安装一次当前版本。
+已安装 0.0.4 或更高版本的用户可以直接在软件内升级到 0.0.8。0.0.3 及更早版本尚未内置更新器，需要先手动安装一次当前版本。
 
 ## 快捷键
 
@@ -112,6 +112,7 @@ assets/{yyyy}/{MM}/{dd}/
 | 刷新 | `⌘R` |
 | 网格 / 列表 | `⌘1` / `⌘2` |
 | 快速查看 | `Space` |
+| 显示信息 | `⌘I` |
 | 重命名 | `Return` |
 | 撤销最近一次可恢复的云端操作 | `⌘Z` |
 | 打开选中项 | `⌘↓` 或双击 |
@@ -119,14 +120,14 @@ assets/{yyyy}/{MM}/{dd}/
 
 ## 安装与系统要求
 
-Lumen 0.0.7 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
+Lumen 0.0.8 支持 Apple Silicon Mac 和 macOS 15 或更高版本。
 
 ## 账号与权限
 
 - 建议创建权限最小化的 RAM 子用户，不要使用阿里云主账号 AccessKey。
 - 从旧版本升级时，Lumen 会先把旧凭证写入钥匙串并回读确认，成功后才移除原明文记录。
-- 新账号默认 ACL 为「私有」。改为公共读或公共读写前，Lumen 会说明影响并要求确认。
-- 私有对象默认生成 1 小时有效的签名 URL；配置 CDN 域名后，公开链接会优先使用 CDN 地址。
+- 新账号默认 ACL 为「继承存储空间」。改为公共读或公共读写前，Lumen 会说明影响并要求确认。
+- 对继承权限或私有权限的对象，Lumen 会优先生成 1 小时有效的签名 URL；配置 CDN 域名后，链接会优先使用 CDN 地址。
 
 ## 范围与限制
 

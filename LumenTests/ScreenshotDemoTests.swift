@@ -28,7 +28,8 @@ struct ScreenshotDemoTests {
         #expect(draft.name == "Lumen 演示工作室")
         #expect(draft.accessKeyId.contains("DEMO"))
         #expect(draft.secret == "demo-secret-never-used")
-        #expect(draft.defaultACL == .private)
+        #expect(draft.defaultACL == .default)
+        #expect(draft.defaultACL.title == "继承存储空间")
         #expect(draft.prefixTemplate == "assets/{yyyy}/{MM}/{dd}/")
     }
 }

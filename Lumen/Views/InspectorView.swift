@@ -3,21 +3,76 @@ import SwiftUI
 
 struct InspectorView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        Group {
-            if model.browser.selectedKeys.count > 1 {
-                selectionInfo
-            } else if let object = model.browser.primarySelection {
-                objectInfo(object)
-            } else if model.selectedBucket != nil {
-                folderInfo
-            } else {
-                ContentUnavailableView("没有选择", systemImage: "info.circle", description: Text("选中图片、JSON 或文本后，这里会显示详情。"))
+        VStack(spacing: 0) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("信息")
+                        .font(.title2.weight(.semibold))
+                    Text(contextTitle)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+                Spacer()
             }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 16)
+
+            Divider()
+
+            informationContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+
+            Divider()
+
+            HStack {
+                Spacer()
+                Button("完成") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+            }
+            .padding(16)
         }
-        .padding(12)
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .frame(
+            minWidth: 460,
+            idealWidth: 460,
+            maxWidth: 460,
+            minHeight: 440,
+            idealHeight: 560,
+            maxHeight: 680
+        )
+    }
+
+    @ViewBuilder
+    private var informationContent: some View {
+        if model.browser.selectedKeys.count > 1 {
+            selectionInfo
+        } else if let object = model.browser.primarySelection {
+            objectInfo(object)
+        } else if model.selectedBucket != nil {
+            folderInfo
+        } else {
+            ContentUnavailableView(
+                "没有可显示的信息",
+                systemImage: "info.circle",
+                description: Text("先选择一个存储空间。")
+            )
+        }
+    }
+
+    private var contextTitle: String {
+        if model.browser.selectedKeys.count > 1 {
+            return "已选择 \(model.browser.selectedKeys.count) 项"
+        }
+        if let object = model.browser.primarySelection {
+            return object.name
+        }
+        if !model.browser.prefix.isEmpty {
+            return PathTemplate.lastComponent(model.browser.prefix)
+        }
+        return model.selectedBucket?.name ?? "当前项目"
     }
 
     private var selectionInfo: some View {
@@ -28,11 +83,11 @@ struct InspectorView: View {
 
         return VStack(alignment: .leading, spacing: 16) {
             Image(systemName: "doc.on.doc")
-                .font(.system(size: 42, weight: .light))
+                .font(.system(size: 44, weight: .light))
                 .symbolRenderingMode(.hierarchical)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.tint)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 20)
+                .padding(.vertical, 12)
 
             Text("已选择 \(keys.count) 项")
                 .font(.title3.weight(.semibold))
@@ -49,8 +104,8 @@ struct InspectorView: View {
                 Spacer()
                 Button("删除", role: .destructive) { model.requestDeleteSelection() }
             }
-            Spacer()
         }
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
     }
@@ -132,11 +187,18 @@ struct InspectorView: View {
                 }
                 .controlSize(.regular)
             }
+            .padding(20)
         }
     }
 
     private var folderInfo: some View {
         VStack(alignment: .leading, spacing: 12) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 48, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.tint)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
             Text(model.browser.prefix.isEmpty ? (model.selectedBucket?.name ?? "存储空间") : PathTemplate.lastComponent(model.browser.prefix))
                 .font(.title3.weight(.semibold))
             Text(model.browser.prefix.isEmpty ? "/" : "/" + model.browser.prefix)
@@ -158,8 +220,8 @@ struct InspectorView: View {
                 model.downloadCurrentPrefix()
             }
             .controlSize(.regular)
-            Spacer()
         }
+        .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
