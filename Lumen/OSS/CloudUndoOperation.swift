@@ -32,3 +32,16 @@ struct CloudUndoOperation: Equatable, Sendable {
         }
     }
 }
+
+struct OSSDeleteMarker: Equatable, Sendable {
+    var key: String
+    var versionID: String
+}
+
+struct CloudDeleteUndoOperation: Equatable, Sendable {
+    var accountID: UUID
+    var bucketName: String
+    var title: String
+    var markers: [OSSDeleteMarker]
+    var sourceSelection: Set<String>
+}

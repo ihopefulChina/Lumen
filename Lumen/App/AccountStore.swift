@@ -1,20 +1,12 @@
 import Foundation
 
 enum AccountStore {
-    static func load() -> [OSSAccount] {
-        guard FileManager.default.fileExists(atPath: fileURL.path) else { return [] }
-        do {
-            let data = try Data(contentsOf: fileURL)
-            return try JSONDecoder().decode([OSSAccount].self, from: data)
-        } catch {
-            return []
-        }
+    static func load() -> AccountLoadResult {
+        repository.load()
     }
 
     static func save(_ accounts: [OSSAccount]) throws {
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
-        let data = try JSONEncoder().encode(accounts)
-        try data.write(to: fileURL, options: .atomic)
+        try repository.save(accounts)
     }
 
     static func secretAccount(_ id: UUID) -> String { id.uuidString }
@@ -56,7 +48,5 @@ enum AccountStore {
         return base.appending(path: "studio.lumen.oss", directoryHint: .isDirectory)
     }
 
-    private static var fileURL: URL {
-        directory.appending(path: "accounts.json")
-    }
+    private static var repository: AccountRepository { AccountRepository(directory: directory) }
 }

@@ -4,6 +4,121 @@ import Testing
 
 @MainActor
 struct TransferEngineTests {
+    @Test func journalRoundTripRemovesLocalPathsAndSignedURLs() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-transfer-journal-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appending(path: "transfers.json")
+        let journal = FileTransferJournal(url: url)
+        var job = Self.persistedJob(status: .failed)
+        job.localURL = URL(filePath: "/Users/private/Documents/source.txt")
+        job.publicURL = URL(string: "https://example.test/file?Signature=signed-secret")
+        let record = PersistedTransfer(
+            job: job,
+            retry: .upload(
+                PersistedUploadRetry(
+                    accountID: Self.fixedAccount.id,
+                    bucket: nil,
+                    sourceBookmark: Data([1, 2, 3]),
+                    objectKey: "exact/object.txt",
+                    imagesOnly: false,
+                    convertHEIC: false,
+                    playSound: false
+                )
+            )
+        )
+
+        try journal.save([record])
+
+        let storedText = String(decoding: try Data(contentsOf: url), as: UTF8.self)
+        #expect(!storedText.contains("/Users/private"))
+        #expect(!storedText.contains("signed-secret"))
+        #expect(!storedText.contains("Authorization"))
+        let loaded = try journal.load()
+        #expect(loaded.count == 1)
+        #expect(loaded[0].job.localURL == nil)
+        #expect(loaded[0].job.publicURL == nil)
+        #expect(loaded[0].job.objectKey == "exact/object.txt")
+    }
+
+    @Test func runningJobRestoresAsRetryableInterruptedFailure() throws {
+        let source = try Self.temporaryFile(named: "restored-upload.txt")
+        defer { try? FileManager.default.removeItem(at: source) }
+        let bookmark = Data([7, 0, 0, 7])
+        let record = PersistedTransfer(
+            job: Self.persistedJob(status: .running),
+            retry: .upload(
+                PersistedUploadRetry(
+                    accountID: Self.fixedAccount.id,
+                    bucket: nil,
+                    sourceBookmark: bookmark,
+                    objectKey: "chosen/exact.txt",
+                    imagesOnly: false,
+                    convertHEIC: false,
+                    playSound: false
+                )
+            )
+        )
+        let journal = MemoryTransferJournal(records: [record])
+        let engine = TransferEngine(
+            journal: journal,
+            bookmarks: FixedTransferBookmarks(bookmark: bookmark, resolvedURL: source),
+            clientProvider: { _, _ in Self.client(transport: RetryTransport()) }
+        )
+
+        engine.restore(accounts: [Self.fixedAccount])
+
+        let restored = try #require(engine.jobs.first)
+        #expect(restored.status == .failed)
+        #expect(restored.errorMessage == "上次退出时传输中断，可重试")
+        #expect(engine.canRetry(restored.id))
+        #expect(journal.records.first?.job.status == .failed)
+    }
+
+    @Test func staleBookmarkKeepsHistoryAndExplainsWhyRetryIsUnavailable() throws {
+        let record = PersistedTransfer(
+            job: Self.persistedJob(status: .queued),
+            retry: .upload(
+                PersistedUploadRetry(
+                    accountID: Self.fixedAccount.id,
+                    bucket: nil,
+                    sourceBookmark: Data([9]),
+                    objectKey: "chosen/exact.txt",
+                    imagesOnly: false,
+                    convertHEIC: false,
+                    playSound: false
+                )
+            )
+        )
+        let engine = TransferEngine(
+            journal: MemoryTransferJournal(records: [record]),
+            bookmarks: FailingTransferBookmarks(),
+            clientProvider: { _, _ in Self.client(transport: RetryTransport()) }
+        )
+
+        engine.restore(accounts: [Self.fixedAccount])
+
+        let restored = try #require(engine.jobs.first)
+        #expect(restored.status == .failed)
+        #expect(!engine.canRetry(restored.id))
+        #expect(engine.unavailableRetryReason(restored.id) == "原文件或文件夹权限已失效，请重新选择后再上传。")
+    }
+
+    @Test func progressJournalWritesAreThrottled() {
+        let journal = CountingTransferJournal()
+        let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
+        let engine = TransferEngine(journal: journal)
+        let job = Self.persistedJob(status: .running)
+        engine.jobs = [job]
+
+        engine.recordProgress(job.id, transferred: 4, total: 10, at: fixedNow)
+        engine.recordProgress(job.id, transferred: 5, total: 10, at: fixedNow)
+
+        #expect(engine.jobs.first?.transferred == 5)
+        #expect(journal.saveCount == 1)
+        #expect(journal.records.first?.job.transferred == 4)
+    }
+
     @Test func transferResourceFinishesOnlyOnceAndDeletesOwnedTemporaryFile() throws {
         let temporary = FileManager.default.temporaryDirectory
             .appending(path: "lumen-transfer-resource-\(UUID().uuidString)")
@@ -222,7 +337,8 @@ struct TransferEngineTests {
             region: "cn-hangzhou",
             endpointHost: "oss-cn-hangzhou.aliyuncs.com",
             bucket: "bucket",
-            transport: transport
+            transport: transport,
+            retryPolicy: OSSRetryPolicy(maxAttempts: 1, jitter: { 0 })
         )
     }
 
@@ -238,6 +354,35 @@ struct TransferEngineTests {
             prefixTemplate: prefixTemplate,
             useTransferAccelerate: false,
             createdAt: .now
+        )
+    }
+
+    private static let fixedAccount = OSSAccount(
+        id: UUID(uuidString: "F79B4573-CB60-43BC-8C3C-5D4BF98F8180")!,
+        name: "Test",
+        accessKeyId: "test",
+        regionID: "cn-hangzhou",
+        endpointOverride: "",
+        cdnDomain: "",
+        defaultACL: .private,
+        prefixTemplate: "",
+        useTransferAccelerate: false,
+        createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+    )
+
+    private static func persistedJob(status: TransferStatus) -> TransferJob {
+        TransferJob(
+            id: UUID(uuidString: "1B248760-1DE8-483C-9C02-00D5455898D0")!,
+            kind: .upload,
+            status: status,
+            title: "source.txt",
+            objectKey: "exact/object.txt",
+            localURL: nil,
+            transferred: 3,
+            total: 10,
+            errorMessage: nil,
+            publicURL: nil,
+            finishedAt: nil
         )
     }
 
@@ -274,6 +419,58 @@ struct TransferEngineTests {
             try await Task.sleep(for: .milliseconds(10))
         }
         Issue.record("Timed out waiting for upload request")
+    }
+}
+
+private final class MemoryTransferJournal: TransferJournaling, @unchecked Sendable {
+    var records: [PersistedTransfer]
+
+    init(records: [PersistedTransfer] = []) {
+        self.records = records
+    }
+
+    func load() throws -> [PersistedTransfer] {
+        records
+    }
+
+    func save(_ records: [PersistedTransfer]) throws {
+        self.records = records
+    }
+}
+
+private final class CountingTransferJournal: TransferJournaling, @unchecked Sendable {
+    private(set) var records: [PersistedTransfer] = []
+    private(set) var saveCount = 0
+
+    func load() throws -> [PersistedTransfer] { records }
+
+    func save(_ records: [PersistedTransfer]) throws {
+        self.records = records
+        saveCount += 1
+    }
+}
+
+private struct FixedTransferBookmarks: TransferBookmarking {
+    var bookmark: Data
+    var resolvedURL: URL
+
+    func makeBookmark(for url: URL) throws -> Data {
+        bookmark
+    }
+
+    func resolve(_ bookmark: Data) throws -> URL {
+        guard bookmark == self.bookmark else { throw TransferBookmarkError.stale }
+        return resolvedURL
+    }
+}
+
+private struct FailingTransferBookmarks: TransferBookmarking {
+    func makeBookmark(for url: URL) throws -> Data {
+        throw TransferBookmarkError.stale
+    }
+
+    func resolve(_ bookmark: Data) throws -> URL {
+        throw TransferBookmarkError.stale
     }
 }
 

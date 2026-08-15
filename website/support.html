@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>支持 — Lumen</title>
+  <meta name="description" content="Lumen 的安装、OSS 连接、传输、恢复与更新帮助。">
+  <meta name="theme-color" content="#f4f6f9">
+  <link rel="canonical" href="https://ihopefulchina.github.io/Lumen/support.html">
+  <link rel="icon" type="image/png" href="assets/lumen-favicon.png">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="document-page">
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="index.html" aria-label="返回 Lumen 首页">
+        <img src="assets/lumen-favicon.png" width="64" height="64" alt="">
+        <span>Lumen</span>
+      </a>
+      <nav class="main-nav" aria-label="主导航">
+        <a href="index.html">首页</a>
+        <a href="support.html" aria-current="page">支持</a>
+        <a href="privacy.html">隐私</a>
+      </nav>
+      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.7.dmg">下载 0.0.7</a>
+    </div>
+  </header>
+
+  <main id="main" class="document-main">
+    <article class="document-shell">
+      <p class="document-path">lumen / help / support</p>
+      <h1>支持</h1>
+      <p class="document-lead">先确认权限和范围，再处理连接、传输与恢复问题。Lumen 内也有一份可离线查看的原生帮助。</p>
+
+      <section>
+        <h2>无法连接账号</h2>
+        <ol>
+          <li>确认使用 RAM 子用户，而不是主账号 AccessKey；从仅允许访问所需 Bucket 的最小权限开始。</li>
+          <li>检查 AccessKey ID、Secret、可选 STS Token 与地域是否匹配。临时 Token 过期后需要重新填写。</li>
+          <li>使用自定义 Endpoint 时填写完整主机名；私有网络地址只有在当前 Mac 能访问对应网络时才可用。</li>
+          <li>如错误包含权限拒绝，请在阿里云控制台核对列举、读取、上传、删除或复制操作所需的 RAM 权限。</li>
+        </ol>
+      </section>
+
+      <section>
+        <h2>上传或下载失败</h2>
+        <p>短暂断网、限流和 OSS 服务端故障会自动重试。应用退出时未完成的任务会在下次打开后标记为中断，可从传输列表重新开始；Lumen 不会把它描述成字节级续传。</p>
+        <p>下载不会覆盖本地同名文件。若重试按钮不可用，将指针停在信息图标上查看原因；常见情况是原文件已移动，或 macOS 不再允许访问之前选择的目录。</p>
+      </section>
+
+      <section>
+        <h2>删除后能否恢复</h2>
+        <p>只有 Bucket 开启版本控制，并且 OSS 返回精确 delete marker 版本时，Lumen 才会显示“撤销”。此时可立即按 Command–Z。未开启版本控制时，删除是永久的。</p>
+      </section>
+
+      <section>
+        <h2>账号列表异常</h2>
+        <p>Lumen 会保留上一份可读取的账号配置。主配置损坏时会尝试自动恢复并保留损坏文件；如果备份也不可读，请先不要覆盖本地应用数据，然后复制诊断信息并提交 Issue。</p>
+      </section>
+
+      <section>
+        <h2>更新没有出现</h2>
+        <p>在菜单栏选择“Lumen → 检查更新…”。自动检查可在“设置 → 通用”中开启。网络代理或无法访问 GitHub Releases 时，更新检查会失败，可从<a href="https://github.com/ihopefulChina/Lumen/releases" rel="noopener">发布页</a>手动下载最新版本。</p>
+      </section>
+
+      <section>
+        <h2>提交可复现的问题</h2>
+        <p>在 Lumen 中选择“帮助 → 复制诊断信息”，然后创建<a href="https://github.com/ihopefulChina/Lumen/issues/new/choose" rel="noopener">结构化 Issue</a>。附上最小复现步骤、实际结果与期望结果。</p>
+        <p>截图和录屏请使用虚拟数据，或遮盖账号、Bucket、对象名、路径与 URL。不要提交 AccessKey、Secret、Token 或签名 URL。安全漏洞应使用<a href="https://github.com/ihopefulChina/Lumen/security/advisories/new" rel="noopener">私密报告</a>。</p>
+      </section>
+    </article>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-inner">
+      <div class="footer-brand"><img src="assets/lumen-favicon.png" width="64" height="64" alt=""><span>Lumen</span></div>
+      <p>为 Mac 打造的阿里云 OSS 客户端。</p>
+      <nav aria-label="页脚导航">
+        <a href="index.html">首页</a>
+        <a href="support.html" aria-current="page">支持</a>
+        <a href="privacy.html">隐私</a>
+        <a href="https://github.com/ihopefulChina/Lumen" rel="noopener">GitHub</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

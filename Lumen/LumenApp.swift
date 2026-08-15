@@ -21,6 +21,11 @@ struct LumenApp: App {
                 .frame(width: 520, height: 560)
         }
 
+        Window("Lumen 帮助", id: "help") {
+            HelpView()
+        }
+        .defaultSize(width: 860, height: 640)
+
         MenuBarExtra(isInserted: menuBarBinding) {
             TransferMenu()
                 .environment(AppServices.shared.focused ?? AppModel.settingsSession)
@@ -123,6 +128,7 @@ private enum AppRuntime {
 
 struct LumenCommands: Commands {
     @FocusedValue(\.lumenActions) private var actions
+    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         CommandGroup(replacing: .undoRedo) {
@@ -161,7 +167,16 @@ struct LumenCommands: Commands {
         }
         CommandGroup(replacing: .help) {
             Button("Lumen 帮助") {
-                NSWorkspace.shared.open(AppLinks.github)
+                openWindow(id: "help")
+            }
+            .keyboardShortcut("?", modifiers: [.command])
+            Button("复制诊断信息") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(DiagnosticsReport.make(), forType: .string)
+            }
+            Divider()
+            Button("Lumen 官网") {
+                NSWorkspace.shared.open(AppLinks.website)
             }
             Button("在 GitHub 打开仓库") {
                 NSWorkspace.shared.open(AppLinks.github)

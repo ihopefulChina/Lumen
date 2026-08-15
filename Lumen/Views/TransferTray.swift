@@ -53,9 +53,11 @@ struct TransferTray: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityLabel(expanded ? "收起传输列表" : "展开传输列表")
+            .help(expanded ? "收起传输列表" : "展开传输列表")
             Spacer()
             if jobs.contains(where: { !$0.isActive }) {
-                Button("清除已完成") {
+                Button("清除已结束") {
                     model.transfers.clearFinished()
                 }
                 .controlSize(.small)
@@ -86,6 +88,7 @@ private struct TransferRow: View {
             Image(systemName: icon)
                 .foregroundStyle(color)
                 .frame(width: 16)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 4) {
                 Text(job.title)
                     .font(.callout.weight(.medium))
@@ -119,21 +122,29 @@ private struct TransferRow: View {
                         .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("取消")
+                .accessibilityLabel("取消 \(job.title)")
+                .help("取消 \(job.title)")
             } else if job.status == .failed, model.transfers.canRetry(job.id) {
                 Button("重试") {
                     model.transfers.retry(job.id)
                 }
                 .controlSize(.small)
-            } else if job.status == .completed, job.kind == .upload {
+            } else if job.status == .failed,
+                      let reason = model.transfers.unavailableRetryReason(job.id) {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.secondary)
+                    .accessibilityLabel(reason)
+                    .help(reason)
+            } else if job.status == .completed,
+                      job.kind == .upload,
+                      let url = job.publicURL {
                 Button("复制") {
-                    if let url = job.publicURL {
-                        NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(url.absoluteString, forType: .string)
-                        Haptics.alignment()
-                    }
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                    Haptics.alignment()
                 }
                 .controlSize(.small)
+                .help("复制上传链接")
             }
         }
     }

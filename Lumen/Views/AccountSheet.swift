@@ -9,6 +9,8 @@ struct AccountSheet: View {
     @State private var errorText: String?
     @State private var showAdvanced = false
     @State private var showSecret = false
+    @State private var pendingACL: ObjectACL?
+    @State private var showACLConfirmation = false
 
     var body: some View {
         NavigationStack {
@@ -43,8 +45,8 @@ struct AccountSheet: View {
                         }
                     }
                     Toggle("传输加速", isOn: $draft.useTransferAccelerate)
-                    Picker("默认权限", selection: $draft.defaultACL) {
-                        ForEach(ObjectACL.allCases) { acl in
+                    Picker("默认权限", selection: aclSelection) {
+                        ForEach(commonACLs) { acl in
                             Text(acl.title).tag(acl)
                         }
                     }
@@ -72,6 +74,10 @@ struct AccountSheet: View {
                         TextField("STS Token", text: $draft.token)
                         TextField("自定义 Endpoint", text: $draft.endpointOverride, prompt: Text("oss-cn-hangzhou.aliyuncs.com"))
                         TextField("CDN 域名", text: $draft.cdnDomain, prompt: Text("cdn.example.com"))
+                        Button("使用公共读写权限…", role: .destructive) {
+                            proposeACL(.publicReadWrite)
+                        }
+                        .disabled(draft.defaultACL == .publicReadWrite)
                     }
                 }
 
@@ -99,6 +105,25 @@ struct AccountSheet: View {
             }
         }
         .frame(minWidth: 460, minHeight: 560)
+        .confirmationDialog(
+            pendingACL?.title ?? "确认公开权限",
+            isPresented: $showACLConfirmation,
+            titleVisibility: .visible
+        ) {
+            Button("确认使用\(pendingACL?.title ?? "公开权限")") {
+                if let pendingACL {
+                    draft.defaultACL = pendingACL
+                }
+                self.pendingACL = nil
+            }
+            Button("取消", role: .cancel) {
+                pendingACL = nil
+            }
+        } message: {
+            if let pendingACL {
+                Text(AccountACLConfirmation.message(for: pendingACL))
+            }
+        }
         .task {
             if let account = model.editingAccount {
                 let secret = SecretStore.get(account: AccountStore.secretAccount(account.id)) ?? ""
@@ -111,6 +136,30 @@ struct AccountSheet: View {
     private var canSave: Bool {
         !draft.accessKeyId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             && !draft.secret.isEmpty
+    }
+
+    private var commonACLs: [ObjectACL] {
+        var values: [ObjectACL] = [.default, .private, .publicRead]
+        if draft.defaultACL == .publicReadWrite {
+            values.append(.publicReadWrite)
+        }
+        return values
+    }
+
+    private var aclSelection: Binding<ObjectACL> {
+        Binding(
+            get: { draft.defaultACL },
+            set: { proposeACL($0) }
+        )
+    }
+
+    private func proposeACL(_ acl: ObjectACL) {
+        guard AccountACLConfirmation.requiresConfirmation(from: draft.defaultACL, to: acl) else {
+            draft.defaultACL = acl
+            return
+        }
+        pendingACL = acl
+        showACLConfirmation = true
     }
 
     private func save() async {

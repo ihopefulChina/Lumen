@@ -187,7 +187,7 @@ enum OSSEndpoint {
     }
 }
 
-struct OSSBucket: Identifiable, Hashable, Sendable {
+struct OSSBucket: Identifiable, Hashable, Codable, Sendable {
     var name: String
     var regionID: String
     var location: String
@@ -201,7 +201,7 @@ struct OSSBucket: Identifiable, Hashable, Sendable {
     }
 }
 
-struct OSSObject: Identifiable, Hashable, Sendable {
+struct OSSObject: Identifiable, Hashable, Codable, Sendable {
     var key: String
     var size: Int64
     var etag: String
@@ -236,6 +236,17 @@ struct ObjectHead: Sendable {
     var etag: String?
     var acl: String?
     var storageClass: String?
+}
+
+struct OSSDeleteReceipt: Equatable, Sendable {
+    var key: String
+    var isDeleteMarker: Bool
+    var versionID: String?
+
+    var undoMarker: OSSDeleteMarker? {
+        guard isDeleteMarker, let versionID, !versionID.isEmpty else { return nil }
+        return OSSDeleteMarker(key: key, versionID: versionID)
+    }
 }
 
 struct OSSServiceError: LocalizedError, Sendable {

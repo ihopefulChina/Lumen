@@ -57,48 +57,53 @@ final class ThumbnailCache {
     static let shared = ThumbnailCache()
 
     private var memory: [String: NSImage] = [:]
-    private var inflight: [String: Task<NSImage?, Never>] = [:]
+    private var inflight: Set<String> = []
     private var running = 0
     private let limit = 6
 
     func load(object: OSSObject, style: OSSImageProcess, client: OSSClient) async -> NSImage? {
         let token = style.cacheKey + object.key + object.etag
         if let cached = memory[token] { return cached }
-        if let existing = inflight[token] {
-            return await existing.value
+        if inflight.contains(token) {
+            while inflight.contains(token) {
+                try? await Task.sleep(for: .milliseconds(40))
+            }
+            return memory[token]
         }
+        inflight.insert(token)
+        defer { inflight.remove(token) }
+
         let key = object.key
         let queries = style.queries(for: key)
         let maxPixel = style.maxPixel
         let size = object.size
         let allowOriginal = size < 256_000 && ImageKind.imgProcessable(key: key)
-        let task = Task { () -> NSImage? in
-            await ThumbnailCache.shared.waitForSlot()
-            defer { ThumbnailCache.shared.finishSlot() }
-            for process in queries {
-                if let data = try? await client.objectData(key: key, process: process),
-                   data.count < 1_500_000,
-                   let image = ThumbnailCache.decode(data, maxPixel: maxPixel) {
-                    return image
-                }
+        await waitForSlot()
+        defer { finishSlot() }
+
+        var loadedImage: NSImage?
+        for process in queries {
+            if let data = try? await client.objectData(key: key, process: process),
+               data.count < 1_500_000,
+               let image = Self.decode(data, maxPixel: maxPixel) {
+                loadedImage = image
+                break
             }
-            if allowOriginal,
-               let data = try? await client.objectData(key: key),
-               data.count < 1_500_000 {
-                return ThumbnailCache.decode(data, maxPixel: maxPixel)
-            }
-            return nil
         }
-        inflight[token] = task
-        let image = await task.value
-        inflight[token] = nil
-        if let image {
+        if loadedImage == nil,
+           allowOriginal,
+           let data = try? await client.objectData(key: key),
+           data.count < 1_500_000 {
+            loadedImage = Self.decode(data, maxPixel: maxPixel)
+        }
+
+        if let loadedImage {
             if memory.count > 280 {
                 memory.removeAll(keepingCapacity: true)
             }
-            memory[token] = image
+            memory[token] = loadedImage
         }
-        return image
+        return loadedImage
     }
 
     private static func decode(_ data: Data, maxPixel: CGFloat) -> NSImage? {

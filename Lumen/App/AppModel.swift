@@ -71,6 +71,7 @@ final class AppModel {
     var wantsNewFolder = false
     var isOrganizingCloud = false
     private(set) var lastCloudUndoOperation: CloudUndoOperation?
+    private(set) var lastDeleteUndoOperation: CloudDeleteUndoOperation?
     var cloudClipboard: CloudDragPayload?
     var pendingOpenURLs: [URL] = []
     private var pendingOwnedTemporaryURLs: Set<URL> = []
@@ -108,11 +109,18 @@ final class AppModel {
     }
 
     var canUndoCloudOperation: Bool {
+        if let deletion = lastDeleteUndoOperation {
+            return !isOrganizingCloud && isCurrentScope(for: deletion)
+        }
         guard let operation = lastCloudUndoOperation else { return false }
         return !isOrganizingCloud && isCurrentScope(for: operation)
     }
 
     var undoCloudOperationTitle: String {
+        if let deletion = lastDeleteUndoOperation,
+           isCurrentScope(for: deletion) {
+            return deletion.title
+        }
         guard let operation = lastCloudUndoOperation,
               isCurrentScope(for: operation)
         else { return "撤销" }
@@ -686,10 +694,11 @@ final class AppModel {
             text += "\n以及另外 \(extra) 项"
         }
         if !folders.isEmpty {
-            text += (text.isEmpty ? "" : "\n") + "文件夹里的对象会一并从 OSS 删除，无法恢复。"
+            text += (text.isEmpty ? "" : "\n") + "文件夹里的对象会一并从 OSS 删除。"
         } else if !text.isEmpty {
-            text += "\n删除后无法恢复。"
+            text += "\n将从 OSS 删除。"
         }
+        text += "\n若 Bucket 已开启版本控制，可立即撤销；否则删除是永久的。"
         return text
     }
 
@@ -721,36 +730,74 @@ final class AppModel {
     }
 
     func deleteSelection() async {
-        guard let client = makeClient() else { return }
-        let keys = Array(browser.actionableSelectionKeys)
+        guard let client = makeClient(),
+              let accountID = selectedAccountID,
+              let bucketName = selectedBucketName
+        else { return }
+        let selectedKeys = browser.actionableSelectionKeys
+        let keys = browser.orderedVisibleKeys.filter(selectedKeys.contains)
         guard !keys.isEmpty else { return }
+        lastCloudUndoOperation = nil
+        lastDeleteUndoOperation = nil
+        var receipts: [OSSDeleteReceipt] = []
         do {
             for key in keys {
                 if key.hasSuffix("/") {
-                    try await deletePrefix(key, client: client)
+                    try await deletePrefix(key, client: client) { receipt in
+                        receipts.append(receipt)
+                    }
                 } else {
-                    try await client.deleteObject(key: key)
+                    receipts.append(try await client.deleteObject(key: key))
                 }
             }
+            recordDeleteUndo(
+                receipts: receipts,
+                sourceSelection: Set(keys),
+                accountID: accountID,
+                bucketName: bucketName
+            )
             browser.clearSelection()
             await refreshListing()
             Haptics.alignment()
+            present(
+                keys.count == 1 ? "已删除 1 项" : "已删除 \(keys.count) 项",
+                action: lastDeleteUndoOperation == nil ? nil : .undoCloudOperation
+            )
         } catch {
-            present(error.localizedDescription, error: true)
+            guard !receipts.isEmpty else {
+                present(error.localizedDescription, error: true)
+                return
+            }
+            recordDeleteUndo(
+                receipts: receipts,
+                sourceSelection: Set(receipts.map(\.key)),
+                accountID: accountID,
+                bucketName: bucketName
+            )
+            await refreshListing()
+            present(
+                "已删除 \(receipts.count) 个对象，之后失败：\(error.localizedDescription)",
+                error: true,
+                action: lastDeleteUndoOperation == nil ? nil : .undoCloudOperation
+            )
         }
     }
 
     func deleteFolder(_ folder: OSSFolder) async {
         guard let client = makeClient() else { return }
         do {
-            try await deletePrefix(folder.prefix, client: client)
+            try await deletePrefix(folder.prefix, client: client) { _ in }
             await refreshListing()
         } catch {
             present(error.localizedDescription, error: true)
         }
     }
 
-    private func deletePrefix(_ prefix: String, client: OSSClient) async throws {
+    private func deletePrefix(
+        _ prefix: String,
+        client: OSSClient,
+        onDeleted: (OSSDeleteReceipt) -> Void
+    ) async throws {
         let listing = try await client.listAllObjects(prefix: prefix, includePlaceholders: true)
         if listing.truncated {
             throw OSSServiceError(
@@ -761,9 +808,28 @@ final class AppModel {
             )
         }
         for object in listing.objects.sorted(by: { $0.key.count > $1.key.count }) {
-            try await client.deleteObject(key: object.key)
+            onDeleted(try await client.deleteObject(key: object.key))
         }
-        try? await client.deleteObject(key: prefix)
+    }
+
+    private func recordDeleteUndo(
+        receipts: [OSSDeleteReceipt],
+        sourceSelection: Set<String>,
+        accountID: UUID,
+        bucketName: String
+    ) {
+        let markers = receipts.compactMap(\.undoMarker)
+        guard !markers.isEmpty, markers.count == receipts.count else {
+            lastDeleteUndoOperation = nil
+            return
+        }
+        lastDeleteUndoOperation = CloudDeleteUndoOperation(
+            accountID: accountID,
+            bucketName: bucketName,
+            title: "撤销删除",
+            markers: markers,
+            sourceSelection: sourceSelection
+        )
     }
 
     @discardableResult
@@ -791,6 +857,7 @@ final class AppModel {
             try await client.renameObject(from: object.key, to: dest, overwrite: false)
             await refreshListing()
             browser.select(key: dest, modifiers: [])
+            lastDeleteUndoOperation = nil
             lastCloudUndoOperation = CloudUndoOperation(
                 accountID: accountID,
                 bucketName: bucketName,
@@ -849,6 +916,7 @@ final class AppModel {
             )
             await refreshListing()
             browser.select(key: destination, modifiers: [])
+            lastDeleteUndoOperation = nil
             lastCloudUndoOperation = CloudUndoOperation(
                 accountID: accountID,
                 bucketName: bucketName,
@@ -969,6 +1037,7 @@ final class AppModel {
             browser.replaceSelection(selection)
             let count = payload.objectKeys.count + payload.folderPrefixes.count
             if mode == .move {
+                lastDeleteUndoOperation = nil
                 lastCloudUndoOperation = CloudUndoOperation(
                     accountID: accountID,
                     bucketName: bucketName,
@@ -994,10 +1063,32 @@ final class AppModel {
     }
 
     func undoLastCloudOperation() async {
-        guard !isOrganizingCloud,
-              let operation = lastCloudUndoOperation,
-              isCurrentScope(for: operation),
-              let client = makeClient()
+        guard !isOrganizingCloud, let client = makeClient() else { return }
+
+        if let deletion = lastDeleteUndoOperation,
+           isCurrentScope(for: deletion) {
+            isOrganizingCloud = true
+            defer { isOrganizingCloud = false }
+            do {
+                for marker in deletion.markers.reversed() {
+                    try await client.deleteObject(
+                        key: marker.key,
+                        versionID: marker.versionID
+                    )
+                }
+                lastDeleteUndoOperation = nil
+                browser.clearSelection()
+                await refreshListing()
+                browser.replaceSelection(deletion.sourceSelection)
+                present("已恢复删除的项目")
+            } catch {
+                present(error.localizedDescription, error: true)
+            }
+            return
+        }
+
+        guard let operation = lastCloudUndoOperation,
+              isCurrentScope(for: operation)
         else { return }
 
         isOrganizingCloud = true
@@ -1026,6 +1117,11 @@ final class AppModel {
     }
 
     private func isCurrentScope(for operation: CloudUndoOperation) -> Bool {
+        selectedAccountID == operation.accountID
+            && selectedBucketName == operation.bucketName
+    }
+
+    private func isCurrentScope(for operation: CloudDeleteUndoOperation) -> Bool {
         selectedAccountID == operation.accountID
             && selectedBucketName == operation.bucketName
     }
@@ -1068,7 +1164,9 @@ final class AppModel {
         to dest: URL,
         extraPrefix: (prefix: String, folderName: String)? = nil
     ) async {
-        guard let client = makeClient() else { return }
+        guard let account = selectedAccount,
+              let bucket = selectedBucket,
+              let client = makeClient() else { return }
         var items: [(object: OSSObject, destination: URL)] = []
         var skippedLocal = 0
         var skippedUnsafe = 0
@@ -1133,7 +1231,13 @@ final class AppModel {
             }
             return
         }
-        transfers.enqueueDownloadJobs(items: items, client: client, scopedRoot: dest)
+        transfers.enqueueDownloadJobs(
+            items: items,
+            client: client,
+            account: account,
+            bucket: bucket,
+            scopedRoot: dest
+        )
         if truncated {
             present("已加入 \(items.count) 个下载，部分目录未列完")
         } else if skippedLocal + skippedUnsafe > 0 {
@@ -1391,7 +1495,7 @@ struct AccountDraft: Identifiable {
             regionID: "cn-hangzhou",
             endpointOverride: "",
             cdnDomain: "",
-            defaultACL: .publicRead,
+            defaultACL: .private,
             prefixTemplate: "",
             useTransferAccelerate: false,
             createdAt: .now

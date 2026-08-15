@@ -1,11 +1,11 @@
 import Foundation
 
-enum TransferKind: String, Sendable {
+enum TransferKind: String, Codable, Sendable {
     case upload
     case download
 }
 
-enum TransferStatus: String, Sendable {
+enum TransferStatus: String, Codable, Sendable {
     case queued
     case running
     case completed
@@ -13,7 +13,7 @@ enum TransferStatus: String, Sendable {
     case cancelled
 }
 
-struct TransferJob: Identifiable, Equatable, Sendable {
+struct TransferJob: Identifiable, Equatable, Codable, Sendable {
     var id: UUID
     var kind: TransferKind
     var status: TransferStatus

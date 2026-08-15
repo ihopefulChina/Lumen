@@ -3,6 +3,38 @@
     <channel>
         <title>Lumen</title>
         <item>
+            <title>0.0.7</title>
+            <pubDate>Sat, 15 Aug 2026 08:08:34 +0800</pubDate>
+            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.7</link>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>0.0.7</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Lumen 0.0.7
+
+这次更新把重点放在可靠性、安全边界和日常使用的连贯性上。
+
+## 新变化
+
+- 新建连接默认保持私有；切换为公共读写前会明确确认风险。
+- 账户配置采用原子写入并保留可恢复备份，损坏的数据会隔离保存，不再静默覆盖。
+- OSS 临时网络错误会自动进行有限次数重试，每次请求都会重新签名。
+- 传输队列会保存可恢复的历史；应用意外退出后，可重新选择本地文件并重试中断任务。
+- 开启版本控制的 Bucket 删除对象后，可通过精确移除本次 Delete Marker 撤销删除。
+- 新增原生帮助窗口和隐私安全的诊断报告，诊断内容不会包含密钥、本地路径或对象地址。
+- 完善无障碍标签、失败原因提示、隐私说明、支持页面与安全问题反馈流程。
+- 自动更新继续由 Sparkle 提供，检查到新版本后可在应用内安装并重新启动。
+
+## 系统要求
+
+- macOS 15 或更高版本
+- Apple 芯片 Mac
+
+完整使用说明与问题反馈入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
+]]></description>
+            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.7/Lumen-0.0.7.dmg" length="3991843" type="application/octet-stream" sparkle:edSignature="8+JLTN+ocFBGpJRAOai3+ky9q2WgGGMGeIogWUGw1vM4qk2V+4ETnhp1KiMFVkzKyLbj3qWeXdUsGE947sDdCg=="/>
+        </item>
+        <item>
             <title>0.0.6</title>
             <pubDate>Sat, 15 Aug 2026 05:54:14 +0800</pubDate>
             <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.6</link>
@@ -75,46 +107,6 @@
 > 0.0.3 及更早版本需要手动安装当前版本；从 0.0.4 开始可以在 Lumen 内完成升级。
 ]]></description>
             <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.5/Lumen-0.0.5.dmg" length="3850924" type="application/octet-stream" sparkle:edSignature="dN3tUo3Q+rhnzIobSXIA+bDAvgcPUxdG9DhbYjelQ66r0YCSuVt3/djZ9R8qU6fQ8+4kO5HLX2WR/l5za5lUDw=="/>
-        </item>
-        <item>
-            <title>0.0.4</title>
-            <pubDate>Fri, 14 Aug 2026 23:03:45 +0800</pubDate>
-            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.4</link>
-            <sparkle:version>4</sparkle:version>
-            <sparkle:shortVersionString>0.0.4</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[## Lumen 0.0.4
-
-这一版让 Lumen 从“能用的 OSS 浏览器”更进一步，成为更像访达、更适合长期使用的 Mac 工具。
-
-### 新功能
-
-- 按名称、修改日期、大小或类型排序，文件夹始终排在文件前。
-- 把常用 OSS 路径加入侧边栏收藏，一次点击直接返回。
-- 在同一个 Bucket 内复制、移动、拖放和重命名文件夹；目录结构会完整保留。
-- 使用 Sparkle 检查、下载并安装更新，完成后自动重新启动 Lumen。
-
-### 安全与可靠性
-
-- AccessKey Secret 与 STS Token 改存 macOS 钥匙串；旧版本的本地凭证会在启动时安全迁移。
-- 上传和下载会核对阿里云 OSS 返回的 CRC64；下载通过校验后才移动到最终位置。
-- 云端移动先检查全部目标并完成复制，随后才删除源对象；遇到冲突或失败不会静默覆盖。
-- 更新包使用 Ed25519 签名验证，并在解压前完成校验。
-
-### 交互改进
-
-- 网格与列表的选择、高亮、双击打开、拖放和快捷菜单更接近 macOS 访达。
-- 完整性校验成功的传输会显示“已校验”，失败信息更明确。
-- 排序方式、收藏夹和自动检查更新偏好会保留到下次启动。
-
-系统要求：Apple Silicon，macOS 15 或更高版本。
-
-> 已安装 0.0.3 或更早版本的用户需要手动安装 0.0.4 一次；从 0.0.4 开始即可在软件内完成后续更新。
-
-DMG SHA-256：`26f4b5d13ce75e3bc0864d2a7bd1969ffa510de496a495acae03315c887c18bc`
-]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.4/Lumen-0.0.4.dmg" length="3826935" type="application/octet-stream" sparkle:edSignature="Kk4CTeCJUvZZLppFd4eKtAecyMSS3rWdoiGqFQ3/2Y+4Ld6anHLRu8EgRTlBYGTJnjcL7lP50vM7frHpUIIxBQ=="/>
         </item>
     </channel>
 </rss>

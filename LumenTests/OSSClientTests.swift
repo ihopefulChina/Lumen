@@ -3,6 +3,88 @@ import Testing
 @testable import Lumen
 
 struct OSSClientTests {
+    @Test func retryPolicyRetriesOnlyTransientFailures() {
+        let policy = OSSRetryPolicy(maxAttempts: 4, jitter: { 0 })
+
+        #expect(policy.delay(afterAttempt: 1, outcome: .httpStatus(503)) == .milliseconds(500))
+        #expect(policy.delay(afterAttempt: 2, outcome: .httpStatus(429)) == .seconds(1))
+        #expect(policy.delay(afterAttempt: 3, outcome: .urlError(.timedOut)) == .seconds(2))
+        #expect(policy.delay(afterAttempt: 1, outcome: .httpStatus(403)) == nil)
+        #expect(policy.delay(afterAttempt: 4, outcome: .httpStatus(503)) == nil)
+    }
+
+    @Test func transientFailureRetriesAndRebuildsTheRequest() async throws {
+        let transport = StubOSSTransport(steps: [
+            .response(status: 503, headers: [:], data: Self.errorXML(code: "ServiceUnavailable", message: "retry", requestID: "one")),
+            .response(
+                status: 200,
+                headers: [:],
+                data: Data("<ListAllMyBucketsResult><Buckets></Buckets></ListAllMyBucketsResult>".utf8)
+            )
+        ])
+        let sleeper = RecordingRetrySleeper()
+        let client = Self.client(
+            transport: transport,
+            retryPolicy: OSSRetryPolicy(maxAttempts: 4, jitter: { 0 }),
+            retrySleeper: sleeper
+        )
+
+        let buckets = try await client.listBuckets()
+
+        #expect(buckets.isEmpty)
+        let requests = await transport.recordedRequests()
+        #expect(requests.count == 2)
+        #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "Authorization")?.isEmpty == false })
+        #expect(await sleeper.recordedDelays() == [.milliseconds(500)])
+    }
+
+    @Test func authenticationFailureIsNeverRetried() async {
+        let transport = StubOSSTransport(steps: [
+            .response(status: 403, headers: [:], data: Self.errorXML(code: "AccessDenied", message: "denied", requestID: "one"))
+        ])
+        let sleeper = RecordingRetrySleeper()
+        let client = Self.client(
+            transport: transport,
+            retryPolicy: OSSRetryPolicy(maxAttempts: 4, jitter: { 0 }),
+            retrySleeper: sleeper
+        )
+
+        await #expect(throws: OSSServiceError.self) {
+            _ = try await client.listBuckets()
+        }
+
+        #expect(await transport.recordedRequests().count == 1)
+        #expect(await sleeper.recordedDelays().isEmpty)
+    }
+
+    @Test func versionedDeleteReturnsAnUndoMarkerAndCanDeleteThatExactVersion() async throws {
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 204,
+                headers: [
+                    "X-Oss-Delete-Marker": "true",
+                    "x-oss-version-id": "CAEQExiBgMCf3Z2X2BciIGQ4YjU"
+                ],
+                data: Data()
+            ),
+            .response(status: 204, headers: [:], data: Data())
+        ])
+        let client = Self.client(transport: transport)
+
+        let receipt = try await client.deleteObject(key: "folder/file name.txt")
+        _ = try await client.deleteObject(
+            key: receipt.key,
+            versionID: receipt.versionID
+        )
+
+        #expect(receipt.isDeleteMarker)
+        #expect(receipt.versionID == "CAEQExiBgMCf3Z2X2BciIGQ4YjU")
+        let requests = await transport.recordedRequests()
+        #expect(requests.count == 2)
+        #expect(requests[0].url?.query == nil)
+        #expect(requests[1].url?.query?.contains("versionId=CAEQExiBgMCf3Z2X2BciIGQ4YjU") == true)
+    }
+
     @Test func downloadPreservesServiceErrorBody() async throws {
         let transport = StubOSSTransport(steps: [
             .response(
@@ -268,7 +350,11 @@ struct OSSClientTests {
         #expect(!deletedPaths.contains(where: { $0.hasPrefix("/old/") }))
     }
 
-    private static func client(transport: any OSSHTTPTransport) -> OSSClient {
+    private static func client(
+        transport: any OSSHTTPTransport,
+        retryPolicy: OSSRetryPolicy = OSSRetryPolicy(maxAttempts: 1, jitter: { 0 }),
+        retrySleeper: any OSSRetrySleeping = RecordingRetrySleeper()
+    ) -> OSSClient {
         OSSClient(
             credentials: OSSCredentials(
                 accessKeyId: "test-id",
@@ -278,7 +364,9 @@ struct OSSClientTests {
             region: "cn-hangzhou",
             endpointHost: "oss-cn-hangzhou.aliyuncs.com",
             bucket: "bucket",
-            transport: transport
+            transport: transport,
+            retryPolicy: retryPolicy,
+            retrySleeper: retrySleeper
         )
     }
 
@@ -292,6 +380,7 @@ private actor StubOSSTransport: OSSHTTPTransport {
         case response(status: Int, headers: [String: String], data: Data)
         case download(URL, headers: [String: String])
         case cancel
+        case failure(URLError.Code)
     }
 
     private var steps: [Step]
@@ -318,10 +407,24 @@ private actor StubOSSTransport: OSSHTTPTransport {
             return OSSHTTPResult(status: 200, headers: headers, data: Data(), temporaryDownloadURL: url)
         case .cancel:
             throw CancellationError()
+        case .failure(let code):
+            throw URLError(code)
         }
     }
 
     func recordedRequests() -> [URLRequest] {
         requests
+    }
+}
+
+private actor RecordingRetrySleeper: OSSRetrySleeping {
+    private var delays: [Duration] = []
+
+    func sleep(for delay: Duration) async throws {
+        delays.append(delay)
+    }
+
+    func recordedDelays() -> [Duration] {
+        delays
     }
 }

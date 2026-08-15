@@ -17,7 +17,7 @@ struct RealOSSSmokeTests {
     ))
     func uploadListDownloadRenameAndCleanUp() async throws {
         try SecretStore.migrateLegacySecrets()
-        let accounts = AccountStore.load()
+        let accounts = AccountStore.load().accounts
         guard let account = accounts.first else { throw SmokeFailure.noSavedAccount }
         let credentials = try AccountStore.credentials(for: account)
         let service = OSSClient(
@@ -126,7 +126,7 @@ struct RealOSSSmokeTests {
 
     private func clean(client: OSSClient, keys: [String]) async {
         for key in keys where key.hasPrefix(prefix) && key != prefix {
-            try? await client.deleteObject(key: key)
+            _ = try? await client.deleteObject(key: key)
         }
     }
 }
