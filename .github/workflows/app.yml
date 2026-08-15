@@ -22,7 +22,7 @@ jobs:
       REAL_OSS_SMOKE: "0"
     steps:
       - name: Check out source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
 
       - name: Confirm Xcode toolchain
         run: xcodebuild -version
