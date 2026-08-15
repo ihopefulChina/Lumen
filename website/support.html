@@ -23,7 +23,7 @@
         <a href="support.html" aria-current="page">支持</a>
         <a href="privacy.html">隐私</a>
       </nav>
-      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.8.dmg">下载 0.0.8</a>
+      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-0.0.9.dmg">下载 0.0.9</a>
     </div>
   </header>
 
@@ -45,13 +45,18 @@
 
       <section>
         <h2>上传或下载失败</h2>
-        <p>短暂断网、限流和 OSS 服务端故障会自动重试。应用退出时未完成的任务会在下次打开后标记为中断，可从传输列表重新开始；Lumen 不会把它描述成字节级续传。</p>
-        <p>下载不会覆盖本地同名文件。若重试按钮不可用，将指针停在信息图标上查看原因；常见情况是原文件已移动，或 macOS 不再允许访问之前选择的目录。</p>
+        <p>短暂断网、限流和 OSS 服务端故障会自动重试。大文件上传与下载会保存检查点；在传输中心暂停后，可从已经完成的分片或字节范围继续。</p>
+        <p>下载不会覆盖本地同名文件。若继续或重试不可用，请查看任务说明；常见情况是原文件已移动、云端对象已变化，或 macOS 不再允许访问之前选择的目录。</p>
       </section>
 
       <section>
         <h2>删除后能否恢复</h2>
-        <p>只有 Bucket 开启版本控制，并且 OSS 返回精确 delete marker 版本时，Lumen 才会显示“撤销”。此时可立即按 Command–Z。未开启版本控制时，删除是永久的。</p>
+        <p>Bucket 开启版本控制时，可从侧边栏“已删除”恢复精确 delete marker，也可从对象菜单打开“版本历史”恢复旧版本。未开启版本控制时，删除是永久的。</p>
+      </section>
+
+      <section>
+        <h2>跨 Bucket 操作为什么会经过这台 Mac</h2>
+        <p>同一账号、同一地域的 Bucket 使用 OSS 云端复制。跨地域或跨账号时，Lumen 会在确认页明确显示“通过这台 Mac 中转”，先下载到受控临时目录并校验，再上传到目标。移动仅在全部目标复制完成后删除来源。</p>
       </section>
 
       <section>

@@ -26,6 +26,12 @@ struct LumenApp: App {
         }
         .defaultSize(width: 860, height: 640)
 
+        Window("传输", id: "transfers") {
+            TransferWindow()
+                .environment(AppModel.settingsSession)
+        }
+        .defaultSize(width: 920, height: 560)
+
         MenuBarExtra(isInserted: menuBarBinding) {
             TransferMenu()
                 .environment(AppServices.shared.focused ?? AppModel.settingsSession)
@@ -88,10 +94,6 @@ private struct ScreenshotActiveState: ViewModifier {
 }
 
 final class LumenAppDelegate: NSObject, NSApplicationDelegate {
-    func applicationWillFinishLaunching(_ notification: Notification) {
-        NSWindow.allowsAutomaticWindowTabbing = false
-    }
-
     func application(_ application: NSApplication, open urls: [URL]) {
         Task { @MainActor in
             AppServices.shared.routeIncoming(urls)
@@ -115,7 +117,11 @@ final class LumenAppDelegate: NSObject, NSApplicationDelegate {
             alert.informativeText = "现在退出会中断未完成的上传或下载。"
             alert.addButton(withTitle: "退出")
             alert.addButton(withTitle: "继续传输")
-            return alert.runModal() == .alertFirstButtonReturn ? .terminateNow : .terminateCancel
+            if alert.runModal() == .alertFirstButtonReturn {
+                AppServices.shared.transfers.pauseAll()
+                return .terminateNow
+            }
+            return .terminateCancel
         }
     }
 }
@@ -139,12 +145,15 @@ struct LumenCommands: Commands {
             .disabled(actions?.canUndo != true)
         }
         CommandGroup(replacing: .newItem) {
+            Button("新建窗口") { openWindow(id: "main") }
+                .keyboardShortcut("n", modifiers: [.command])
+            Divider()
             Button("上传图片…") { actions?.upload() }
                 .keyboardShortcut("o", modifiers: [.command])
             Button("从剪贴板上传") { actions?.paste() }
                 .keyboardShortcut("v", modifiers: [.command, .shift])
             Button("添加账号…") { actions?.addAccount() }
-                .keyboardShortcut("n", modifiers: [.command])
+                .keyboardShortcut("a", modifiers: [.command, .shift])
             Divider()
             Button("新建文件夹…") { actions?.newFolder() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
@@ -164,6 +173,21 @@ struct LumenCommands: Commands {
             Button("检查更新…") {
                 AppServices.shared.updates.checkForUpdates()
             }
+        }
+        CommandMenu("传输") {
+            Button("打开传输中心") {
+                openWindow(id: "transfers")
+            }
+            .keyboardShortcut("l", modifiers: [.command, .option])
+            Divider()
+            Button("全部暂停") {
+                AppServices.shared.transfers.pauseAll()
+            }
+            .disabled(!AppServices.shared.transfers.jobs.contains(where: { $0.status == .running }))
+            Button("全部继续") {
+                AppServices.shared.transfers.resumeAll()
+            }
+            .disabled(!AppServices.shared.transfers.jobs.contains(where: { $0.status == .paused }))
         }
         CommandGroup(replacing: .help) {
             Button("Lumen 帮助") {
@@ -201,6 +225,10 @@ struct LumenCommands: Commands {
             Button("显示信息") { actions?.showInformation() }
                 .keyboardShortcut("i", modifiers: [.command])
                 .disabled(actions?.canShowInformation != true)
+            Button("版本历史…") { actions?.showVersionHistory() }
+                .disabled(actions?.canActOnObject != true)
+            Button("对象属性…") { actions?.showObjectProperties() }
+                .disabled(actions?.canActOnObject != true)
             Divider()
             Button("网格") { actions?.grid() }
                 .keyboardShortcut("1", modifiers: [.command])
@@ -227,6 +255,9 @@ struct LumenActions {
     var quickLook: () -> Void
     var canShowInformation: Bool
     var showInformation: () -> Void
+    var canActOnObject: Bool
+    var showVersionHistory: () -> Void
+    var showObjectProperties: () -> Void
     var grid: () -> Void
     var list: () -> Void
     var goBack: () -> Void
@@ -261,8 +292,7 @@ enum WindowActions {
 
     static func prepare(_ window: NSWindow) {
         window.identifier = workspaceID
-        window.tabbingMode = .disallowed
-        NSWindow.allowsAutomaticWindowTabbing = false
+        window.tabbingMode = .automatic
     }
 
     static func notify(_ message: String, title: String = "Lumen") {

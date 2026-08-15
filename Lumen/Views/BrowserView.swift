@@ -13,7 +13,12 @@ struct BrowserView: View {
         content
             .navigationTitle(title)
             .navigationSubtitle(subtitle)
-            .searchable(text: $model.browser.searchText, placement: .toolbar, prompt: "搜索当前文件夹")
+            .searchable(text: $model.browser.searchText, placement: .toolbar, prompt: searchPrompt)
+            .searchScopes($model.searchScope) {
+                ForEach(BucketSearchScope.allCases) { scope in
+                    Text(scope.title).tag(scope)
+                }
+            }
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
                     Button {
@@ -62,6 +67,22 @@ struct BrowserView: View {
             .onChange(of: photos) { _, items in
                 Task { await importPhotos(items) }
             }
+            .task(id: searchRequest) {
+                #if DEBUG
+                if ScreenshotDemo.currentMode == .browser { return }
+                #endif
+                guard isBucketSearchPresented else {
+                    model.searchController.clear()
+                    return
+                }
+                do {
+                    try await Task.sleep(for: .milliseconds(250))
+                    try Task.checkCancellation()
+                    await model.runBucketSearch()
+                } catch {
+                    model.cancelBucketSearch()
+                }
+            }
             .overlay(alignment: .top) {
                 if model.isOrganizingCloud {
                     HStack(spacing: 8) {
@@ -81,6 +102,8 @@ struct BrowserView: View {
     private var content: some View {
         if model.selectedBucket == nil {
             ContentUnavailableView("选择一个存储空间", systemImage: "externaldrive", description: Text("从左侧打开 Bucket，就可以浏览和上传素材。"))
+        } else if isBucketSearchPresented {
+            BucketSearchView()
         } else if model.browser.isLoading && model.browser.objects.isEmpty && model.browser.folders.isEmpty {
             ProgressView("正在读取对象…")
                 .controlSize(.small)
@@ -103,6 +126,9 @@ struct BrowserView: View {
     }
 
     private var title: String {
+        if isBucketSearchPresented {
+            return model.selectedBucket?.name ?? "搜索"
+        }
         if model.browser.prefix.isEmpty {
             return model.selectedBucket?.name ?? "素材"
         }
@@ -110,12 +136,38 @@ struct BrowserView: View {
     }
 
     private var subtitle: String {
+        if isBucketSearchPresented {
+            let progress = model.searchController.progress
+            return model.searchController.isSearching
+                ? "正在搜索当前 Bucket"
+                : "找到 \(progress.matched) 项"
+        }
         let folders = model.browser.visibleFolders.count
         let files = model.browser.visibleObjects.count
         var parts: [String] = []
         if folders > 0 { parts.append("\(folders) 个文件夹") }
         if files > 0 { parts.append("\(files) 项") }
         return parts.joined(separator: " · ")
+    }
+
+    private var searchPrompt: String {
+        model.searchScope == .folder ? "搜索当前文件夹" : "搜索当前 Bucket"
+    }
+
+    private var isBucketSearchPresented: Bool {
+        guard model.searchScope == .bucket else { return false }
+        let text = model.browser.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return !text.isEmpty || model.searchFilter != .all
+    }
+
+    private var searchRequest: BucketSearchRequest {
+        BucketSearchRequest(
+            accountID: model.selectedAccountID,
+            bucketName: model.selectedBucketName,
+            text: model.browser.searchText,
+            scope: model.searchScope,
+            filter: model.searchFilter
+        )
     }
 
     private var emptyState: some View {
@@ -185,7 +237,9 @@ struct BrowserView: View {
                         } isTargeted: { targeted in
                             model.browser.setDropTarget(folder.prefix, active: targeted)
                         }
-                        .draggable(model.cloudDragPayload(clickedKey: folder.prefix)) {
+                        .onDrag {
+                            model.finderItemProvider(clickedKey: folder.prefix)
+                        } preview: {
                             dragPreview(name: folder.name, symbol: "folder.fill")
                         }
                     }
@@ -210,7 +264,9 @@ struct BrowserView: View {
                             .onAppear { selectForMenu(object.key) }
                             objectMenu(object)
                         }
-                        .draggable(model.cloudDragPayload(clickedKey: object.key)) {
+                        .onDrag {
+                            model.finderItemProvider(clickedKey: object.key)
+                        } preview: {
                             dragPreview(name: object.name, symbol: object.isImage ? "photo" : "doc")
                         }
                     }
@@ -269,7 +325,9 @@ struct BrowserView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
-                .draggable(model.cloudDragPayload(clickedKey: row.id)) {
+                .onDrag {
+                    model.finderItemProvider(clickedKey: row.id)
+                } preview: {
                     dragPreview(name: row.name, symbol: row.symbol)
                 }
                 .onTapGesture(count: 2) {
@@ -427,6 +485,14 @@ struct BrowserView: View {
             beginRenaming(key: object.key)
         }
         .disabled(model.isOrganizingCloud)
+        Button("版本历史…") {
+            selectForMenu(object.key)
+            model.presentVersionHistory(for: object)
+        }
+        Button("对象属性…") {
+            selectForMenu(object.key)
+            model.presentObjectProperties(for: object)
+        }
         Divider()
         Button(deleteTitle(clickedKey: object.key), role: .destructive) {
             selectForMenu(object.key)
@@ -560,6 +626,14 @@ struct BrowserView: View {
     }
 }
 
+private struct BucketSearchRequest: Hashable {
+    var accountID: UUID?
+    var bucketName: String?
+    var text: String
+    var scope: BucketSearchScope
+    var filter: BucketSearchFilter
+}
+
 private struct PathBar: View {
     @Environment(AppModel.self) private var model
     @Binding var showFileImporter: Bool
@@ -649,6 +723,13 @@ private struct PathBar: View {
     }
 
     private var statusText: String {
+        if model.searchScope == .bucket,
+           (!model.browser.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || model.searchFilter != .all) {
+            let progress = model.searchController.progress
+            return model.searchController.isSearching
+                ? "已扫描 \(progress.scanned) 项"
+                : "找到 \(progress.matched) 项"
+        }
         let selected = model.browser.selectedKeys.count
         if selected > 0 { return "已选 \(selected) 项" }
         let visible = model.browser.visibleFolders.count + model.browser.visibleObjects.count

@@ -11,6 +11,7 @@ struct OSSClient: Sendable {
 
     static let multipartThreshold: Int64 = 8 * 1024 * 1024
     static let partSize: Int64 = 8 * 1024 * 1024
+    static let downloadChunkSize: Int64 = 8 * 1024 * 1024
     static let maxListPages = 30
 
     init(
@@ -92,9 +93,22 @@ struct OSSClient: Sendable {
         return ObjectListing(folders: folders, objects: objects, isTruncated: incomplete, nextToken: token)
     }
 
+    /// One recursive page of objects under `prefix`. Unlike `listFolder`, this
+    /// request intentionally omits a delimiter so nested keys are returned.
+    func listObjectPage(prefix: String, token: String? = nil) async throws -> ObjectListing {
+        guard let bucket else { throw Self.missingBucket }
+        var query: [(String, String)] = [
+            ("list-type", "2"),
+            ("max-keys", "1000")
+        ]
+        if !prefix.isEmpty { query.append(("prefix", prefix)) }
+        if let token, !token.isEmpty { query.append(("continuation-token", token)) }
+        let response = try await perform(method: "GET", bucket: bucket, key: nil, query: query)
+        return try OSSXML.listing(from: response.data)
+    }
+
     /// All objects under `prefix`, including nested keys. No delimiter.
     func listAllObjects(prefix: String, includePlaceholders: Bool = false) async throws -> (objects: [OSSObject], truncated: Bool) {
-        guard let bucket else { throw Self.missingBucket }
         var objects: [OSSObject] = []
         var token: String?
         var pages = 0
@@ -102,14 +116,7 @@ struct OSSClient: Sendable {
         var incomplete = false
         repeat {
             pages += 1
-            var query: [(String, String)] = [
-                ("list-type", "2"),
-                ("max-keys", "1000")
-            ]
-            if !prefix.isEmpty { query.append(("prefix", prefix)) }
-            if let token, !token.isEmpty { query.append(("continuation-token", token)) }
-            let response = try await perform(method: "GET", bucket: bucket, key: nil, query: query)
-            let listing = try OSSXML.listing(from: response.data)
+            let listing = try await listObjectPage(prefix: prefix, token: token)
             objects.append(contentsOf: listing.objects.filter { object in
                 if object.key == prefix {
                     return includePlaceholders && object.isFolderPlaceholder
@@ -141,17 +148,133 @@ struct OSSClient: Sendable {
         }
     }
 
+    func listObjectVersions(
+        prefix: String,
+        keyMarker: String? = nil,
+        versionIDMarker: String? = nil
+    ) async throws -> OSSVersionPage {
+        guard let bucket else { throw Self.missingBucket }
+        var query = [("versions", ""), ("max-keys", "1000")]
+        if !prefix.isEmpty { query.append(("prefix", prefix)) }
+        if let keyMarker, let versionIDMarker {
+            query.append(("key-marker", keyMarker))
+            query.append(("version-id-marker", versionIDMarker))
+        }
+        let response = try await perform(method: "GET", bucket: bucket, key: nil, query: query)
+        return try OSSXML.versionPage(from: response.data)
+    }
+
+    func listAllVersions(prefix: String) async throws -> OSSVersionListing {
+        var versions: [OSSObjectVersion] = []
+        var markers: [OSSDeleteMarkerVersion] = []
+        var keyMarker: String?
+        var versionMarker: String?
+        var incomplete = false
+        var pages = 0
+        repeat {
+            let page = try await listObjectVersions(
+                prefix: prefix,
+                keyMarker: keyMarker,
+                versionIDMarker: versionMarker
+            )
+            pages += 1
+            versions.append(contentsOf: page.versions)
+            markers.append(contentsOf: page.deleteMarkers)
+            guard page.isTruncated else { break }
+            guard let nextKey = page.nextKeyMarker,
+                  let nextVersion = page.nextVersionIDMarker,
+                  nextKey != keyMarker || nextVersion != versionMarker,
+                  pages < Self.maxListPages
+            else {
+                incomplete = true
+                break
+            }
+            keyMarker = nextKey
+            versionMarker = nextVersion
+        } while true
+        return OSSVersionListing(versions: versions, deleteMarkers: markers, incomplete: incomplete)
+    }
+
+    func restoreVersion(key: String, versionID: String) async throws {
+        guard let bucket else { throw Self.missingBucket }
+        try await copyObject(
+            fromBucket: bucket,
+            sourceKey: key,
+            sourceVersionID: versionID,
+            to: key,
+            overwrite: true
+        )
+    }
+
     func head(key: String) async throws -> ObjectHead {
         guard let bucket else { throw Self.missingBucket }
         let response = try await perform(method: "HEAD", bucket: bucket, key: key)
         let headers = response.headers
+        let metadata = Dictionary(uniqueKeysWithValues: headers.compactMap { header -> (String, String)? in
+            let lower = header.key.lowercased()
+            guard lower.hasPrefix("x-oss-meta-") else { return nil }
+            return (String(lower.dropFirst("x-oss-meta-".count)), header.value)
+        })
         return ObjectHead(
             contentType: headers.value("Content-Type"),
             contentLength: headers.value("Content-Length").flatMap(Int64.init),
             lastModified: headers.value("Last-Modified").flatMap(OSSSigner.rfc822Date(from:)),
             etag: headers.value("ETag")?.trimmingCharacters(in: CharacterSet(charactersIn: "\"")),
             acl: headers.value("x-oss-object-acl"),
-            storageClass: headers.value("x-oss-storage-class")
+            storageClass: headers.value("x-oss-storage-class"),
+            crc64: headers.value("x-oss-hash-crc64ecma").flatMap(UInt64.init),
+            cacheControl: headers.value("Cache-Control"),
+            contentDisposition: headers.value("Content-Disposition"),
+            userMetadata: metadata
+        )
+    }
+
+    func getObjectTags(key: String) async throws -> [OSSObjectTag] {
+        guard let bucket else { throw Self.missingBucket }
+        let response = try await perform(
+            method: "GET",
+            bucket: bucket,
+            key: key,
+            query: [("tagging", "")]
+        )
+        return try OSSXML.tags(from: response.data)
+    }
+
+    func putObjectTags(key: String, tags: [OSSObjectTag]) async throws {
+        guard let bucket else { throw Self.missingBucket }
+        guard tags.count <= 10,
+              tags.allSatisfy({ !$0.key.isEmpty && !$0.key.contains("\r") && !$0.key.contains("\n") }),
+              Set(tags.map { $0.key.lowercased() }).count == tags.count
+        else {
+            throw OSSServiceError(statusCode: 0, code: "InvalidTags", message: "对象标签格式无效", requestId: "")
+        }
+        _ = try await perform(
+            method: "PUT",
+            bucket: bucket,
+            key: key,
+            query: [("tagging", "")],
+            headers: ["Content-Type": "application/xml"],
+            body: OSSXML.taggingData(tags)
+        )
+    }
+
+    func replaceMetadata(key: String, properties: OSSObjectProperties) async throws {
+        guard let bucket else { throw Self.missingBucket }
+        var headers: [String: String] = [:]
+        if !properties.contentType.isEmpty { headers["Content-Type"] = properties.contentType }
+        if !properties.cacheControl.isEmpty { headers["Cache-Control"] = properties.cacheControl }
+        if !properties.contentDisposition.isEmpty { headers["Content-Disposition"] = properties.contentDisposition }
+        for (key, value) in properties.userMetadata {
+            let normalized = key.lowercased().hasPrefix("x-oss-meta-")
+                ? key.lowercased()
+                : "x-oss-meta-\(key.lowercased())"
+            headers[normalized] = value
+        }
+        try await copyObject(
+            fromBucket: bucket,
+            sourceKey: key,
+            to: key,
+            replacingMetadata: headers
         )
     }
 
@@ -161,6 +284,9 @@ struct OSSClient: Sendable {
         fileURL: URL,
         contentType: String,
         acl: ObjectACL,
+        speedLimit: TransferSpeedLimit = .unlimited,
+        checkpoint: MultipartUploadCheckpoint? = nil,
+        onCheckpoint: (@Sendable (MultipartUploadCheckpoint?) -> Void)? = nil,
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil
     ) async throws -> Bool {
         guard let bucket else { throw Self.missingBucket }
@@ -174,6 +300,9 @@ struct OSSClient: Sendable {
                 contentType: contentType,
                 acl: acl,
                 localCRC64: localCRC64,
+                speedLimit: speedLimit,
+                checkpoint: checkpoint,
+                onCheckpoint: onCheckpoint,
                 onProgress: onProgress
             )
         }
@@ -183,6 +312,7 @@ struct OSSClient: Sendable {
         if acl != .default {
             headers["x-oss-object-acl"] = acl.rawValue
         }
+        let startedAt = Date()
         let response = try await perform(
             method: "PUT",
             bucket: bucket,
@@ -191,6 +321,7 @@ struct OSSClient: Sendable {
             fileURL: fileURL,
             onProgress: onProgress
         )
+        try await TransferThrottle.wait(bytes: size, startedAt: startedAt, limit: speedLimit)
         return try Self.verifyCRC64(local: localCRC64, headers: response.headers)
     }
 
@@ -224,10 +355,36 @@ struct OSSClient: Sendable {
 
     func copyObject(from sourceKey: String, to destKey: String, overwrite: Bool = true) async throws {
         guard let bucket else { throw Self.missingBucket }
-        let source = "/" + bucket + "/" + OSSSigner.uriEncode(sourceKey, encodeSlash: false)
+        try await copyObject(
+            fromBucket: bucket,
+            sourceKey: sourceKey,
+            sourceVersionID: nil,
+            to: destKey,
+            overwrite: overwrite
+        )
+    }
+
+    func copyObject(
+        fromBucket sourceBucket: String,
+        sourceKey: String,
+        sourceVersionID: String? = nil,
+        to destKey: String,
+        overwrite: Bool = true,
+        replacingMetadata headersToReplace: [String: String]? = nil
+    ) async throws {
+        guard let bucket else { throw Self.missingBucket }
+        var source = "/" + OSSSigner.uriEncode(sourceBucket, encodeSlash: true)
+            + "/" + OSSSigner.uriEncode(sourceKey, encodeSlash: false)
+        if let sourceVersionID {
+            source += "?versionId=" + OSSSigner.uriEncode(sourceVersionID, encodeSlash: true)
+        }
         var headers = ["x-oss-copy-source": source]
         if !overwrite {
             headers["x-oss-forbid-overwrite"] = "true"
+        }
+        if let headersToReplace {
+            headers["x-oss-metadata-directive"] = "REPLACE"
+            headers.merge(headersToReplace) { _, replacement in replacement }
         }
         _ = try await perform(
             method: "PUT",
@@ -345,6 +502,144 @@ struct OSSClient: Sendable {
         return response.headers.value("x-oss-hash-crc64ecma") != nil
     }
 
+    @discardableResult
+    func downloadResumable(
+        key: String,
+        to destination: URL,
+        within root: URL,
+        expectedSize: Int64,
+        speedLimit: TransferSpeedLimit = .unlimited,
+        checkpoint suppliedCheckpoint: RangeDownloadCheckpoint? = nil,
+        onCheckpoint: (@Sendable (RangeDownloadCheckpoint?) -> Void)? = nil,
+        onProgress: (@Sendable (Int64, Int64) -> Void)? = nil
+    ) async throws -> Bool {
+        guard let bucket else { throw Self.missingBucket }
+        try FileSafety.validate(destination: destination, root: root)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw OSSServiceError(
+                statusCode: 0,
+                code: "LocalFileExists",
+                message: "本地已有同名文件，未覆盖",
+                requestId: ""
+            )
+        }
+        let remote = try await head(key: key)
+        let total = remote.contentLength ?? expectedSize
+        guard total >= 0, expectedSize <= 0 || total == expectedSize else {
+            throw OSSServiceError(
+                statusCode: 0,
+                code: "RemoteObjectChanged",
+                message: "云端文件已发生变化，请重新开始下载",
+                requestId: ""
+            )
+        }
+        try FileManager.default.createDirectory(
+            at: destination.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
+        let partialDirectory = destination.deletingLastPathComponent()
+        let suppliedName = suppliedCheckpoint?.partialFileName ?? ""
+        let suppliedURL = partialDirectory.appending(path: suppliedName)
+        let suppliedSize = (try? suppliedURL.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+        var state: RangeDownloadCheckpoint
+        if let suppliedCheckpoint,
+           suppliedCheckpoint.bucketName == bucket,
+           suppliedCheckpoint.objectKey == key,
+           suppliedCheckpoint.expectedSize == total,
+           suppliedCheckpoint.etag == remote.etag,
+           suppliedCheckpoint.chunkSize == Self.downloadChunkSize,
+           suppliedCheckpoint.completedBytes >= 0,
+           suppliedCheckpoint.completedBytes <= total,
+           suppliedCheckpoint.completedBytes == total || suppliedCheckpoint.completedBytes % Self.downloadChunkSize == 0,
+           Self.isOwnedPartialFileName(suppliedCheckpoint.partialFileName),
+           suppliedSize == suppliedCheckpoint.completedBytes {
+            state = suppliedCheckpoint
+        } else {
+            state = RangeDownloadCheckpoint(
+                bucketName: bucket,
+                objectKey: key,
+                expectedSize: total,
+                etag: remote.etag,
+                chunkSize: Self.downloadChunkSize,
+                completedBytes: 0,
+                partialFileName: ".lumen-\(UUID().uuidString).partial"
+            )
+            let partial = partialDirectory.appending(path: state.partialFileName)
+            guard FileManager.default.createFile(atPath: partial.path, contents: Data()) else {
+                throw OSSServiceError(statusCode: 0, code: "PartialFile", message: "无法创建下载临时文件", requestId: "")
+            }
+        }
+
+        let partial = partialDirectory.appending(path: state.partialFileName)
+        onCheckpoint?(state)
+        onProgress?(state.completedBytes, total)
+        let handle = try FileHandle(forWritingTo: partial)
+        defer { try? handle.close() }
+        try handle.seekToEnd()
+        while state.completedBytes < total {
+            try Task.checkCancellation()
+            let start = state.completedBytes
+            let end = min(total - 1, start + Self.downloadChunkSize - 1)
+            let startedAt = Date()
+            let response = try await perform(
+                method: "GET",
+                bucket: bucket,
+                key: key,
+                headers: ["Range": "bytes=\(start)-\(end)"]
+            )
+            let expectedCount = Int(end - start + 1)
+            guard response.status == 206, response.data.count == expectedCount else {
+                throw OSSServiceError(
+                    statusCode: response.status,
+                    code: "InvalidRangeResponse",
+                    message: "下载分片不完整，请稍后重试",
+                    requestId: response.headers.value("x-oss-request-id") ?? ""
+                )
+            }
+            try handle.write(contentsOf: response.data)
+            try handle.synchronize()
+            try await TransferThrottle.wait(
+                bytes: Int64(response.data.count),
+                startedAt: startedAt,
+                limit: speedLimit
+            )
+            state.completedBytes = end + 1
+            onCheckpoint?(state)
+            onProgress?(state.completedBytes, total)
+        }
+        try handle.close()
+
+        var verified = false
+        if let crc64 = remote.crc64 {
+            let local = try CRC64XZ.checksum(fileURL: partial)
+            guard local == crc64 else {
+                throw OSSIntegrityError(localCRC64: local, serverValue: String(crc64))
+            }
+            verified = true
+        }
+        try FileSafety.validate(destination: destination, root: root)
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw OSSServiceError(statusCode: 0, code: "LocalFileExists", message: "本地已有同名文件，未覆盖", requestId: "")
+        }
+        try FileManager.default.moveItem(at: partial, to: destination)
+        onCheckpoint?(nil)
+        return verified
+    }
+
+    func removePartialDownload(
+        checkpoint: RangeDownloadCheckpoint,
+        destination: URL,
+        within root: URL
+    ) throws {
+        try FileSafety.validate(destination: destination, root: root)
+        guard Self.isOwnedPartialFileName(checkpoint.partialFileName) else { return }
+        let partial = destination.deletingLastPathComponent().appending(path: checkpoint.partialFileName)
+        if FileManager.default.fileExists(atPath: partial.path) {
+            try FileManager.default.removeItem(at: partial)
+        }
+    }
+
     func objectData(key: String, process: String? = nil) async throws -> Data {
         guard let bucket else { throw Self.missingBucket }
         var query: [(String, String)] = []
@@ -394,80 +689,121 @@ struct OSSClient: Sendable {
         contentType: String,
         acl: ObjectACL,
         localCRC64: UInt64,
+        speedLimit: TransferSpeedLimit,
+        checkpoint suppliedCheckpoint: MultipartUploadCheckpoint?,
+        onCheckpoint: (@Sendable (MultipartUploadCheckpoint?) -> Void)?,
         onProgress: (@Sendable (Int64, Int64) -> Void)?
     ) async throws -> Bool {
         guard let bucket else { throw Self.missingBucket }
-        var initiateHeaders = ["Content-Type": contentType]
-        if acl != .default {
-            initiateHeaders["x-oss-object-acl"] = acl.rawValue
-        }
-        let initiated = try await perform(
-            method: "POST",
-            bucket: bucket,
-            key: key,
-            query: [("uploads", "")],
-            headers: initiateHeaders
-        )
-        let uploadId = try OSSXML.uploadId(from: initiated.data)
-        do {
-            var parts: [(Int, String)] = []
-            var offset: Int64 = 0
-            var partNumber = 1
-            let handle = try FileHandle(forReadingFrom: fileURL)
-            defer { try? handle.close() }
-            while offset < size {
-                try Task.checkCancellation()
-                let thisSize = min(Self.partSize, size - offset)
-                try handle.seek(toOffset: UInt64(offset))
-                let chunk = try handle.read(upToCount: Int(thisSize)) ?? Data()
-                let partResponse = try await perform(
-                    method: "PUT",
-                    bucket: bucket,
-                    key: key,
-                    query: [("partNumber", String(partNumber)), ("uploadId", uploadId)],
-                    headers: ["Content-Type": contentType],
-                    body: chunk
-                )
-                let etag = (partResponse.headers.value("ETag") ?? "")
-                    .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
-                guard !etag.isEmpty else {
-                    throw OSSServiceError(statusCode: partResponse.status, code: "MissingETag", message: "分片未返回 ETag", requestId: "")
-                }
-                parts.append((partNumber, etag))
-                offset += thisSize
-                partNumber += 1
-                onProgress?(offset, size)
-            }
+        let values = try fileURL.resourceValues(forKeys: [.contentModificationDateKey])
+        let modifiedAt = values.contentModificationDate ?? .distantPast
+        let totalParts = Int((size + Self.partSize - 1) / Self.partSize)
 
-            let completeBody = completeXML(parts: parts)
-            let completed = try await perform(
+        var state: MultipartUploadCheckpoint
+        if let suppliedCheckpoint,
+           suppliedCheckpoint.bucketName == bucket,
+           suppliedCheckpoint.objectKey == key,
+           suppliedCheckpoint.sourceSize == size,
+           abs(suppliedCheckpoint.sourceModifiedAt.timeIntervalSince(modifiedAt)) < 0.001,
+           suppliedCheckpoint.partSize == Self.partSize,
+           !suppliedCheckpoint.uploadID.isEmpty,
+           Set(suppliedCheckpoint.completedParts.map(\.number)).count == suppliedCheckpoint.completedParts.count,
+           suppliedCheckpoint.completedParts.allSatisfy({ (1...totalParts).contains($0.number) && !$0.etag.isEmpty }) {
+            state = suppliedCheckpoint
+        } else {
+            var initiateHeaders = ["Content-Type": contentType]
+            if acl != .default {
+                initiateHeaders["x-oss-object-acl"] = acl.rawValue
+            }
+            let initiated = try await perform(
                 method: "POST",
                 bucket: bucket,
                 key: key,
-                query: [("uploadId", uploadId)],
-                headers: ["Content-Type": "application/xml"],
-                body: completeBody
+                query: [("uploads", "")],
+                headers: initiateHeaders
             )
-            return try Self.verifyCRC64(local: localCRC64, headers: completed.headers)
-        } catch {
-            let client = self
-            await Task.detached {
-                _ = try? await client.perform(
-                    method: "DELETE",
-                    bucket: bucket,
-                    key: key,
-                    query: [("uploadId", uploadId)],
-                    checksCancellation: false
-                )
-            }.value
-            throw error
+            state = MultipartUploadCheckpoint(
+                bucketName: bucket,
+                objectKey: key,
+                sourceSize: size,
+                sourceModifiedAt: modifiedAt,
+                partSize: Self.partSize,
+                uploadID: try OSSXML.uploadId(from: initiated.data),
+                completedParts: []
+            )
         }
+        onCheckpoint?(state)
+
+        var parts = Dictionary(uniqueKeysWithValues: state.completedParts.map { ($0.number, $0) })
+        var transferred = parts.keys.reduce(Int64(0)) { result, number in
+            let offset = Int64(number - 1) * Self.partSize
+            return result + min(Self.partSize, max(0, size - offset))
+        }
+        onProgress?(transferred, size)
+        let handle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? handle.close() }
+        for partNumber in 1...totalParts where parts[partNumber] == nil {
+            try Task.checkCancellation()
+            let offset = Int64(partNumber - 1) * Self.partSize
+            let thisSize = min(Self.partSize, size - offset)
+            try handle.seek(toOffset: UInt64(offset))
+            let chunk = try handle.read(upToCount: Int(thisSize)) ?? Data()
+            guard chunk.count == Int(thisSize) else {
+                throw OSSServiceError(statusCode: 0, code: "ShortRead", message: "读取上传分片失败", requestId: "")
+            }
+            let startedAt = Date()
+            let response = try await perform(
+                method: "PUT",
+                bucket: bucket,
+                key: key,
+                query: [("partNumber", String(partNumber)), ("uploadId", state.uploadID)],
+                headers: ["Content-Type": contentType],
+                body: chunk
+            )
+            try await TransferThrottle.wait(bytes: thisSize, startedAt: startedAt, limit: speedLimit)
+            let etag = (response.headers.value("ETag") ?? "")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+            guard !etag.isEmpty else {
+                throw OSSServiceError(statusCode: response.status, code: "MissingETag", message: "分片未返回 ETag", requestId: "")
+            }
+            parts[partNumber] = MultipartCompletedPart(number: partNumber, etag: etag)
+            state.completedParts = parts.values.sorted { $0.number < $1.number }
+            onCheckpoint?(state)
+            transferred += thisSize
+            onProgress?(transferred, size)
+        }
+
+        let completed = try await perform(
+            method: "POST",
+            bucket: bucket,
+            key: key,
+            query: [("uploadId", state.uploadID)],
+            headers: ["Content-Type": "application/xml"],
+            body: completeXML(parts: state.completedParts)
+        )
+        let verified = try Self.verifyCRC64(local: localCRC64, headers: completed.headers)
+        onCheckpoint?(nil)
+        return verified
     }
 
-    private func completeXML(parts: [(Int, String)]) -> Data {
+    func abortMultipartUpload(_ checkpoint: MultipartUploadCheckpoint) async throws {
+        guard let bucket else { throw Self.missingBucket }
+        guard checkpoint.bucketName == bucket else {
+            throw OSSServiceError(statusCode: 0, code: "CheckpointBucketMismatch", message: "上传检查点不属于当前存储空间", requestId: "")
+        }
+        _ = try await perform(
+            method: "DELETE",
+            bucket: bucket,
+            key: checkpoint.objectKey,
+            query: [("uploadId", checkpoint.uploadID)],
+            checksCancellation: false
+        )
+    }
+
+    private func completeXML(parts: [MultipartCompletedPart]) -> Data {
         var xml = "<CompleteMultipartUpload>"
-        for (number, etag) in parts {
-            xml += "<Part><PartNumber>\(number)</PartNumber><ETag>\"\(etag)\"</ETag></Part>"
+        for part in parts.sorted(by: { $0.number < $1.number }) {
+            xml += "<Part><PartNumber>\(part.number)</PartNumber><ETag>\"\(part.etag)\"</ETag></Part>"
         }
         xml += "</CompleteMultipartUpload>"
         return Data(xml.utf8)
@@ -652,6 +988,13 @@ struct OSSClient: Sendable {
     private func fileSize(_ url: URL) throws -> Int64 {
         let values = try url.resourceValues(forKeys: [.fileSizeKey])
         return Int64(values.fileSize ?? 0)
+    }
+
+    private static func isOwnedPartialFileName(_ name: String) -> Bool {
+        name.hasPrefix(".lumen-")
+            && name.hasSuffix(".partial")
+            && !name.contains("/")
+            && !name.contains("\\")
     }
 }
 

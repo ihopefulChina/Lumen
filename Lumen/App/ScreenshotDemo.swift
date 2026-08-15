@@ -75,6 +75,52 @@ enum ScreenshotDemo {
             prefix: "campaigns/2026-autumn/发布素材/",
             name: "待发布"
         ))
+        if mode == .browser {
+            model.searchScope = .bucket
+            model.searchFilter = .recentObjects(days: 30)
+            let query = BucketSearchQuery(
+                accountID: accountID,
+                bucketName: "lumen-studio-assets",
+                text: "",
+                filter: model.searchFilter
+            )
+            model.searchController.seedForScreenshot(
+                BucketSearchSnapshot(
+                    query: query,
+                    objects: objects,
+                    progress: BucketSearchProgress(scanned: 2_418, matched: objects.count, pages: 3),
+                    isIncomplete: false
+                )
+            )
+            model.transfers.jobs = [
+                TransferJob(
+                    id: UUID(),
+                    kind: .download,
+                    status: .running,
+                    title: "交付清单.pdf",
+                    objectKey: "campaigns/2026-autumn/交付清单.pdf",
+                    localURL: nil,
+                    transferred: 589_660,
+                    total: 842_371,
+                    errorMessage: nil,
+                    publicURL: nil,
+                    finishedAt: nil
+                ),
+                TransferJob(
+                    id: UUID(),
+                    kind: .upload,
+                    status: .paused,
+                    title: "片头动画.mov",
+                    objectKey: "campaigns/2026-autumn/片头动画.mov",
+                    localURL: nil,
+                    transferred: 94_371_840,
+                    total: 186_422_901,
+                    errorMessage: nil,
+                    publicURL: nil,
+                    finishedAt: nil
+                )
+            ]
+        }
         model.showAccountSheet = mode == .account
         return model
     }

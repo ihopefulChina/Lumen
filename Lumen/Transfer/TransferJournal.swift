@@ -52,6 +52,7 @@ struct FileTransferJournal: TransferJournaling {
 struct PersistedTransfer: Codable, Equatable, Sendable {
     var job: TransferJob
     var retry: PersistedTransferRetry?
+    var checkpoint: TransferCheckpoint? = nil
 }
 
 enum PersistedTransferRetry: Codable, Equatable, Sendable {

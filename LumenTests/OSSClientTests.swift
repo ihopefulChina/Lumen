@@ -133,15 +133,14 @@ struct OSSClientTests {
         #expect(try Data(contentsOf: destination) == Data("original".utf8))
     }
 
-    @Test func multipartFailureAbortsUploadExactlyOnce() async throws {
+    @Test func multipartCancellationPreservesCheckpointWithoutAborting() async throws {
         let transport = StubOSSTransport(steps: [
             .response(
                 status: 200,
                 headers: [:],
                 data: Data("<InitiateMultipartUploadResult><UploadId>u-1</UploadId></InitiateMultipartUploadResult>".utf8)
             ),
-            .cancel,
-            .response(status: 204, headers: [:], data: Data())
+            .cancel
         ])
         let file = FileManager.default.temporaryDirectory
             .appending(path: "lumen-multipart-\(UUID().uuidString).bin")
@@ -151,19 +150,104 @@ struct OSSClientTests {
         try handle.close()
         defer { try? FileManager.default.removeItem(at: file) }
 
+        let checkpoints = CheckpointRecorder()
         await #expect(throws: CancellationError.self) {
             try await Self.client(transport: transport).putObject(
                 key: "large.bin",
                 fileURL: file,
                 contentType: "application/octet-stream",
-                acl: .private
+                acl: .private,
+                onCheckpoint: { checkpoint in
+                    checkpoints.append(checkpoint)
+                }
             )
         }
 
         let requests = await transport.recordedRequests()
-        #expect(requests.count == 3)
-        #expect(requests[2].httpMethod == "DELETE")
-        #expect(requests[2].url?.query == "uploadId=u-1")
+        #expect(requests.count == 2)
+        #expect(requests.allSatisfy { $0.httpMethod != "DELETE" })
+        #expect(checkpoints.values.last??.uploadID == "u-1")
+    }
+
+    @Test func multipartUploadEmitsAReusableCheckpointAfterEveryPart() async throws {
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 200,
+                headers: [:],
+                data: Data("<InitiateMultipartUploadResult><UploadId>u-1</UploadId></InitiateMultipartUploadResult>".utf8)
+            ),
+            .response(status: 200, headers: ["ETag": "\"etag-1\""], data: Data()),
+            .response(status: 200, headers: ["ETag": "\"etag-2\""], data: Data()),
+            .response(status: 200, headers: [:], data: Data())
+        ])
+        let file = try Self.multipartFile(parts: 2)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let checkpoints = CheckpointRecorder()
+
+        _ = try await Self.client(transport: transport).putObject(
+            key: "large.bin",
+            fileURL: file,
+            contentType: "application/octet-stream",
+            acl: .private,
+            onCheckpoint: { checkpoints.append($0) }
+        )
+
+        #expect(checkpoints.values.compactMap { $0?.completedParts.count } == [0, 1, 2])
+        #expect(checkpoints.values.last! == nil)
+    }
+
+    @Test func multipartUploadSkipsPartsAlreadyInAValidCheckpoint() async throws {
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: ["ETag": "etag-2"], data: Data()),
+            .response(status: 200, headers: [:], data: Data())
+        ])
+        let file = try Self.multipartFile(parts: 2)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let values = try file.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+        let checkpoint = MultipartUploadCheckpoint(
+            bucketName: "bucket",
+            objectKey: "large.bin",
+            sourceSize: Int64(values.fileSize!),
+            sourceModifiedAt: values.contentModificationDate!,
+            partSize: OSSClient.partSize,
+            uploadID: "u-1",
+            completedParts: [MultipartCompletedPart(number: 1, etag: "etag-1")]
+        )
+
+        _ = try await Self.client(transport: transport).putObject(
+            key: "large.bin",
+            fileURL: file,
+            contentType: "application/octet-stream",
+            acl: .private,
+            checkpoint: checkpoint
+        )
+
+        let requests = await transport.recordedRequests()
+        #expect(requests.count == 2)
+        #expect(requests[0].url?.query?.contains("partNumber=2") == true)
+        #expect(requests[1].httpMethod == "POST")
+        #expect(requests[1].url?.query == "uploadId=u-1")
+    }
+
+    @Test func multipartAbortIsAnExplicitDelete() async throws {
+        let checkpoint = MultipartUploadCheckpoint(
+            bucketName: "bucket",
+            objectKey: "large.bin",
+            sourceSize: OSSClient.partSize,
+            sourceModifiedAt: .distantPast,
+            partSize: OSSClient.partSize,
+            uploadID: "u-1",
+            completedParts: []
+        )
+        let transport = StubOSSTransport(steps: [
+            .response(status: 204, headers: [:], data: Data())
+        ])
+
+        try await Self.client(transport: transport).abortMultipartUpload(checkpoint)
+
+        let request = try #require(await transport.recordedRequests().first)
+        #expect(request.httpMethod == "DELETE")
+        #expect(request.url?.query == "uploadId=u-1")
     }
 
     @Test func renameConflictNeverDeletesSource() async throws {
@@ -234,6 +318,61 @@ struct OSSClientTests {
         #expect(await transport.recordedRequests().count == 1)
     }
 
+    @Test func recursiveObjectPageUsesNoDelimiterAndForwardsTheExactToken() async throws {
+        let firstPage = Data("""
+        <ListBucketResult>
+          <IsTruncated>true</IsTruncated>
+          <NextContinuationToken>next/token + value</NextContinuationToken>
+          <Contents><Key>folder/a.txt</Key><Size>1</Size><ETag>a</ETag></Contents>
+        </ListBucketResult>
+        """.utf8)
+        let secondPage = Data("""
+        <ListBucketResult>
+          <IsTruncated>false</IsTruncated>
+          <Contents><Key>folder/nested/b.txt</Key><Size>2</Size><ETag>b</ETag></Contents>
+        </ListBucketResult>
+        """.utf8)
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: [:], data: firstPage),
+            .response(status: 200, headers: [:], data: secondPage)
+        ])
+        let client = Self.client(transport: transport)
+
+        let first = try await client.listObjectPage(prefix: "folder/")
+        let second = try await client.listObjectPage(prefix: "folder/", token: first.nextToken)
+
+        #expect(first.objects.map(\.key) == ["folder/a.txt"])
+        #expect(second.objects.map(\.key) == ["folder/nested/b.txt"])
+        let requests = await transport.recordedRequests()
+        let firstItems = URLComponents(url: requests[0].url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        let secondItems = URLComponents(url: requests[1].url!, resolvingAgainstBaseURL: false)?.queryItems ?? []
+        #expect(!firstItems.contains(where: { $0.name == "delimiter" }))
+        #expect(firstItems.contains(URLQueryItem(name: "list-type", value: "2")))
+        #expect(firstItems.contains(URLQueryItem(name: "max-keys", value: "1000")))
+        #expect(secondItems.contains(URLQueryItem(name: "continuation-token", value: "next/token + value")))
+    }
+
+    @Test func recursiveAggregateStopsWhenATruncatedPageOmitsItsToken() async throws {
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 200,
+                headers: [:],
+                data: Data("""
+                <ListBucketResult>
+                  <IsTruncated>true</IsTruncated>
+                  <Contents><Key>a.txt</Key><Size>1</Size><ETag>a</ETag></Contents>
+                </ListBucketResult>
+                """.utf8)
+            )
+        ])
+
+        let result = try await Self.client(transport: transport).listAllObjects(prefix: "")
+
+        #expect(result.objects.map(\.key) == ["a.txt"])
+        #expect(result.truncated)
+        #expect(await transport.recordedRequests().count == 1)
+    }
+
     @Test func crc64XZMatchesTheStandardCheckVector() {
         #expect(CRC64XZ.checksum(Data("123456789".utf8)) == 0x995D_C9BB_DF19_39FA)
     }
@@ -299,6 +438,112 @@ struct OSSClientTests {
         }
 
         #expect(!FileManager.default.fileExists(atPath: destination.path))
+    }
+
+    @Test func resumableDownloadUsesBoundedByteRangesAndPublishesAtomically() async throws {
+        let directory = try Self.temporaryDirectory(named: "range-download")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "large.bin")
+        let size = 20 * 1_024 * 1_024
+        let first = Data(repeating: 1, count: Int(OSSClient.downloadChunkSize))
+        let second = Data(repeating: 2, count: Int(OSSClient.downloadChunkSize))
+        let third = Data(repeating: 3, count: size - first.count - second.count)
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: ["Content-Length": "\(size)", "ETag": "v1"], data: Data()),
+            .response(status: 206, headers: [:], data: first),
+            .response(status: 206, headers: [:], data: second),
+            .response(status: 206, headers: [:], data: third)
+        ])
+        let recorder = DownloadCheckpointRecorder()
+
+        _ = try await Self.client(transport: transport).downloadResumable(
+            key: "large.bin",
+            to: destination,
+            within: directory,
+            expectedSize: Int64(size),
+            checkpoint: nil,
+            onCheckpoint: { recorder.append($0) }
+        )
+
+        #expect(FileManager.default.fileExists(atPath: destination.path))
+        #expect((try destination.resourceValues(forKeys: [.fileSizeKey])).fileSize == size)
+        let requests = await transport.recordedRequests()
+        #expect(requests.dropFirst().map { $0.value(forHTTPHeaderField: "Range") } == [
+            "bytes=0-8388607",
+            "bytes=8388608-16777215",
+            "bytes=16777216-20971519"
+        ])
+        #expect(recorder.values.compactMap { $0?.completedBytes } == [0, 8_388_608, 16_777_216, 20_971_520])
+        #expect(recorder.values.last! == nil)
+    }
+
+    @Test func resumableDownloadContinuesFromACompleteRange() async throws {
+        let directory = try Self.temporaryDirectory(named: "range-resume")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "large.bin")
+        let partialName = ".lumen-known.partial"
+        let partial = directory.appending(path: partialName)
+        try Data(repeating: 1, count: Int(OSSClient.downloadChunkSize)).write(to: partial)
+        let size = 20 * 1_024 * 1_024
+        let checkpoint = RangeDownloadCheckpoint(
+            bucketName: "bucket",
+            objectKey: "large.bin",
+            expectedSize: Int64(size),
+            etag: "v1",
+            chunkSize: OSSClient.downloadChunkSize,
+            completedBytes: OSSClient.downloadChunkSize,
+            partialFileName: partialName
+        )
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: ["Content-Length": "\(size)", "ETag": "v1"], data: Data()),
+            .response(status: 206, headers: [:], data: Data(repeating: 2, count: Int(OSSClient.downloadChunkSize))),
+            .response(status: 206, headers: [:], data: Data(repeating: 3, count: size - Int(OSSClient.downloadChunkSize * 2)))
+        ])
+
+        _ = try await Self.client(transport: transport).downloadResumable(
+            key: "large.bin",
+            to: destination,
+            within: directory,
+            expectedSize: Int64(size),
+            checkpoint: checkpoint
+        )
+
+        let requests = await transport.recordedRequests()
+        #expect(requests.dropFirst().map { $0.value(forHTTPHeaderField: "Range") } == [
+            "bytes=8388608-16777215",
+            "bytes=16777216-20971519"
+        ])
+    }
+
+    @Test func resumableDownloadKeepsPartialWhenIntegrityCheckFails() async throws {
+        let directory = try Self.temporaryDirectory(named: "range-crc")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "small.bin")
+        let bytes = Data("downloaded".utf8)
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 200,
+                headers: ["Content-Length": "\(bytes.count)", "ETag": "v1", "x-oss-hash-crc64ecma": "1"],
+                data: Data()
+            ),
+            .response(status: 206, headers: [:], data: bytes)
+        ])
+        let recorder = DownloadCheckpointRecorder()
+
+        await #expect(throws: OSSIntegrityError.self) {
+            try await Self.client(transport: transport).downloadResumable(
+                key: "small.bin",
+                to: destination,
+                within: directory,
+                expectedSize: Int64(bytes.count),
+                checkpoint: nil,
+                onCheckpoint: { recorder.append($0) }
+            )
+        }
+
+        let partialName = try #require(recorder.values.compactMap { $0 }.last?.partialFileName)
+        #expect(!FileManager.default.fileExists(atPath: destination.path))
+        #expect(FileManager.default.fileExists(atPath: directory.appending(path: partialName).path))
     }
 
     @Test func prefixPlanPreservesRelativePaths() throws {
@@ -372,6 +617,45 @@ struct OSSClientTests {
 
     private static func errorXML(code: String, message: String, requestID: String) -> Data {
         Data("<Error><Code>\(code)</Code><Message>\(message)</Message><RequestId>\(requestID)</RequestId></Error>".utf8)
+    }
+
+    private static func multipartFile(parts: Int) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-multipart-\(UUID().uuidString).bin")
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        let handle = try FileHandle(forWritingTo: url)
+        try handle.truncate(atOffset: UInt64(Int64(parts) * OSSClient.partSize))
+        try handle.close()
+        return url
+    }
+
+    private static func temporaryDirectory(named name: String) throws -> URL {
+        let url = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-\(name)-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+}
+
+private final class CheckpointRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [MultipartUploadCheckpoint?] = []
+
+    var values: [MultipartUploadCheckpoint?] { lock.withLock { storage } }
+
+    func append(_ checkpoint: MultipartUploadCheckpoint?) {
+        lock.withLock { storage.append(checkpoint) }
+    }
+}
+
+private final class DownloadCheckpointRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var storage: [RangeDownloadCheckpoint?] = []
+
+    var values: [RangeDownloadCheckpoint?] { lock.withLock { storage } }
+
+    func append(_ checkpoint: RangeDownloadCheckpoint?) {
+        lock.withLock { storage.append(checkpoint) }
     }
 }
 

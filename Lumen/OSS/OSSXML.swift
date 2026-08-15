@@ -83,12 +83,81 @@ enum OSSXML {
         )
     }
 
+    static func versionPage(from data: Data) throws -> OSSVersionPage {
+        let root = try parse(data)
+        let versions = root.children("Version").compactMap { node -> OSSObjectVersion? in
+            guard let key = node.child("Key")?.string,
+                  let versionID = node.child("VersionId")?.string,
+                  !key.isEmpty, !versionID.isEmpty
+            else { return nil }
+            return OSSObjectVersion(
+                key: key,
+                versionID: versionID,
+                isLatest: node.child("IsLatest")?.string.lowercased() == "true",
+                lastModified: ISO8601DateParser.date(node.child("LastModified")?.string),
+                etag: (node.child("ETag")?.string ?? "").trimmingCharacters(in: CharacterSet(charactersIn: "\"")),
+                size: Int64(node.child("Size")?.string ?? "0") ?? 0,
+                storageClass: node.child("StorageClass")?.string ?? ""
+            )
+        }
+        let markers = root.children("DeleteMarker").compactMap { node -> OSSDeleteMarkerVersion? in
+            guard let key = node.child("Key")?.string,
+                  let versionID = node.child("VersionId")?.string,
+                  !key.isEmpty, !versionID.isEmpty
+            else { return nil }
+            return OSSDeleteMarkerVersion(
+                key: key,
+                versionID: versionID,
+                isLatest: node.child("IsLatest")?.string.lowercased() == "true",
+                lastModified: ISO8601DateParser.date(node.child("LastModified")?.string)
+            )
+        }
+        return OSSVersionPage(
+            versions: versions,
+            deleteMarkers: markers,
+            isTruncated: root.child("IsTruncated")?.string.lowercased() == "true",
+            nextKeyMarker: root.child("NextKeyMarker")?.string,
+            nextVersionIDMarker: root.child("NextVersionIdMarker")?.string
+        )
+    }
+
     static func uploadId(from data: Data) throws -> String {
         let root = try parse(data)
         guard let id = root.child("UploadId")?.string, !id.isEmpty else {
             throw OSSServiceError(statusCode: 200, code: "MissingUploadId", message: "未返回分片上传 ID", requestId: "")
         }
         return id
+    }
+
+    static func tags(from data: Data) throws -> [OSSObjectTag] {
+        let root = try parse(data)
+        let set = root.child("TagSet") ?? root
+        let tags = set.children("Tag").compactMap { node -> OSSObjectTag? in
+            guard let key = node.child("Key")?.string, !key.isEmpty else { return nil }
+            return OSSObjectTag(key: key, value: node.child("Value")?.string ?? "")
+        }
+        guard tags.count <= 10, Set(tags.map { $0.key.lowercased() }).count == tags.count else {
+            throw OSSServiceError(statusCode: 0, code: "InvalidTags", message: "对象标签格式无效", requestId: "")
+        }
+        return tags
+    }
+
+    static func taggingData(_ tags: [OSSObjectTag]) -> Data {
+        var xml = "<Tagging><TagSet>"
+        for tag in tags {
+            xml += "<Tag><Key>\(escape(tag.key))</Key><Value>\(escape(tag.value))</Value></Tag>"
+        }
+        xml += "</TagSet></Tagging>"
+        return Data(xml.utf8)
+    }
+
+    private static func escape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
     }
 }
 

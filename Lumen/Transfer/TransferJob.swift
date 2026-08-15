@@ -8,6 +8,7 @@ enum TransferKind: String, Codable, Sendable {
 enum TransferStatus: String, Codable, Sendable {
     case queued
     case running
+    case paused
     case completed
     case failed
     case cancelled
@@ -34,5 +35,13 @@ struct TransferJob: Identifiable, Equatable, Codable, Sendable {
 
     var isActive: Bool {
         status == .queued || status == .running
+    }
+
+    var isResumable: Bool {
+        status == .paused || status == .failed
+    }
+
+    var isFinished: Bool {
+        status == .completed || status == .failed || status == .cancelled
     }
 }

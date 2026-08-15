@@ -63,6 +63,13 @@ struct RootView: View {
             quickLook: { Task { await model.quickLookSelection() } },
             canShowInformation: model.canShowInformation,
             showInformation: { model.showInspector = true },
+            canActOnObject: model.browser.primarySelection != nil && model.browser.selectedObjects.count == 1,
+            showVersionHistory: {
+                if let object = model.browser.primarySelection { model.presentVersionHistory(for: object) }
+            },
+            showObjectProperties: {
+                if let object = model.browser.primarySelection { model.presentObjectProperties(for: object) }
+            },
             grid: { Motion.run(reduceMotion) { model.setPreferredViewMode(.grid) } },
             list: { Motion.run(reduceMotion) { model.setPreferredViewMode(.list) } },
             goBack: { model.goBack() },
@@ -161,6 +168,24 @@ private struct RootPresentation: ViewModifier {
             }
             .sheet(isPresented: $model.showInspector) {
                 InspectorView()
+            }
+            .sheet(isPresented: $model.showVersionHistory) {
+                if let history = model.versionHistoryModel {
+                    VersionHistoryView(history: history)
+                }
+            }
+            .sheet(isPresented: $model.showObjectProperties) {
+                if let properties = model.objectPropertiesModel {
+                    ObjectPropertiesView(properties: properties)
+                }
+            }
+            .sheet(isPresented: $model.showCrossBucketPreflight) {
+                if let preflight = model.crossBucketPreflight {
+                    CrossBucketPreflightView(
+                        preflight: preflight,
+                        confirm: model.confirmCrossBucketOperation
+                    )
+                }
             }
             .fileImporter(
                 isPresented: $showFileImporter,

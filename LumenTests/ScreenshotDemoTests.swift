@@ -17,6 +17,9 @@ struct ScreenshotDemoTests {
         #expect(model.browser.objects.count == 7)
         #expect(model.browser.selectedKeys == ["campaigns/2026-autumn/发布素材/"])
         #expect(model.favorites.items.map(\.name) == ["品牌素材", "待发布"])
+        #expect(model.searchScope == .bucket)
+        #expect(model.searchController.results.count == 7)
+        #expect(model.transfers.jobs.count == 2)
         #expect(!model.showAccountSheet)
     }
 

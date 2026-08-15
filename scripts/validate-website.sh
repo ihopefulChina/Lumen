@@ -8,7 +8,7 @@ readme="$repo_root/README.md"
 index="$site_root/index.html"
 privacy="$site_root/privacy.html"
 support="$site_root/support.html"
-version="0.0.8"
+version="0.0.9"
 download_url="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-$version.dmg"
 
 required_files=(
@@ -83,7 +83,7 @@ for page_and_canonical in \
   done
 done
 
-if grep -RFn --include='*.html' -- '0.0.7' "$site_root"; then
+if grep -RFn --include='*.html' -- '0.0.8' "$site_root"; then
   echo "Website still contains the previous version." >&2
   exit 1
 fi

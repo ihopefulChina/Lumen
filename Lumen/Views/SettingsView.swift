@@ -1,9 +1,11 @@
 import SwiftUI
+import UserNotifications
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @State private var accountChecks: [OSSAccount.ID: AccountCheckState] = [:]
     @State private var accountToDelete: OSSAccount?
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         @Bindable var model = model
@@ -104,7 +106,53 @@ struct SettingsView: View {
                 Stepper(value: $model.settings.concurrentUploads, in: 1...6) {
                     Text("同时上传 \(model.settings.concurrentUploads) 个文件")
                 }
+                .onChange(of: model.settings.concurrentUploads) { _, value in
+                    model.transfers.concurrency = value
+                }
+                Picker("上传速度", selection: $model.settings.uploadSpeedLimit) {
+                    ForEach(Self.speedLimits, id: \.self) { limit in
+                        Text(limit.title).tag(limit)
+                    }
+                }
                 Toggle("将 HEIC 转为 JPEG", isOn: $model.settings.convertHEIC)
+            }
+
+            Section("下载") {
+                Stepper(value: $model.settings.concurrentDownloads, in: 1...6) {
+                    Text("同时下载 \(model.settings.concurrentDownloads) 个文件")
+                }
+                .onChange(of: model.settings.concurrentDownloads) { _, value in
+                    model.transfers.downloadConcurrency = value
+                }
+                Picker("下载速度", selection: $model.settings.downloadSpeedLimit) {
+                    ForEach(Self.speedLimits, id: \.self) { limit in
+                        Text(limit.title).tag(limit)
+                    }
+                }
+                Picker("默认位置", selection: $model.settings.downloadLocation) {
+                    ForEach(DownloadLocation.allCases) { location in
+                        Text(location.title).tag(location)
+                    }
+                }
+            }
+
+            Section("同名文件") {
+                Picker("处理方式", selection: $model.settings.transferConflictPolicy) {
+                    ForEach(TransferConflictPolicy.allCases) { policy in
+                        Text(policy.title).tag(policy)
+                    }
+                }
+                Text("“保留两者”会像访达一样自动添加 2、3 等编号。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            Section("分享") {
+                Picker("签名链接有效期", selection: $model.settings.signedLinkLifetime) {
+                    ForEach(SignedLinkLifetime.allCases) { lifetime in
+                        Text(lifetime.title).tag(lifetime)
+                    }
+                }
             }
 
             Section("进行传输时") {
@@ -113,6 +161,20 @@ struct SettingsView: View {
                     .onChange(of: model.settings.showMenuBarWhileTransferring) { _, enabled in
                         model.showMenuBarExtra = enabled && model.transfers.activeCount > 0
                     }
+                Toggle("全部完成时显示通知", isOn: Binding(
+                    get: { model.settings.notifyWhenTransfersFinish },
+                    set: { enabled in
+                        if enabled {
+                            requestNotificationPermission()
+                        } else {
+                            model.settings.notifyWhenTransfersFinish = false
+                        }
+                    }
+                ))
+            }
+
+            Section {
+                Button("打开传输中心") { openWindow(id: "transfers") }
             }
 
             Section("历史记录") {
@@ -121,7 +183,7 @@ struct SettingsView: View {
                     model.transfers.clearFinished()
                 }
                 .disabled(finishedTransferCount == 0)
-                Text("正在上传或下载的项目不会被清除。")
+                Text("正在进行或已暂停的项目不会被清除。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -227,7 +289,23 @@ struct SettingsView: View {
     }
 
     private var finishedTransferCount: Int {
-        model.transfers.jobs.filter { !$0.isActive }.count
+        model.transfers.jobs.filter(\.isFinished).count
+    }
+
+    private static let speedLimits: [TransferSpeedLimit] = [
+        .unlimited,
+        .megabytesPerSecond(1),
+        .megabytesPerSecond(5),
+        .megabytesPerSecond(10),
+        .megabytesPerSecond(50),
+    ]
+
+    private func requestNotificationPermission() {
+        Task {
+            let granted = (try? await UNUserNotificationCenter.current()
+                .requestAuthorization(options: [.alert, .sound])) ?? false
+            model.settings.notifyWhenTransfersFinish = granted
+        }
     }
 
     private func check(_ account: OSSAccount) {

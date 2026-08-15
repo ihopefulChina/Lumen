@@ -15,6 +15,7 @@ struct CloudObjectMapping: Hashable, Sendable {
 struct CloudDragPayload: Codable, Hashable, Transferable, Sendable {
     var accountID: UUID
     var bucketName: String
+    var sourceRegionID: String? = nil
     var objectKeys: [String]
     var folderPrefixes: [String]
 
@@ -23,7 +24,7 @@ struct CloudDragPayload: Codable, Hashable, Transferable, Sendable {
     }
 }
 
-private extension UTType {
+extension UTType {
     static let lumenCloudItems = UTType(exportedAs: "studio.lumen.oss.cloud-items")
 }
 

@@ -4,6 +4,264 @@ import Testing
 
 @MainActor
 struct TransferEngineTests {
+    @Test func oldJournalRecordDecodesWithoutCheckpoint() throws {
+        let record = PersistedTransfer(job: Self.persistedJob(status: .failed), retry: nil)
+        let encoded = try JSONEncoder().encode(record)
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "checkpoint")
+
+        let decoded = try JSONDecoder().decode(
+            PersistedTransfer.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        #expect(decoded.checkpoint == nil)
+    }
+
+    @Test func multipartCheckpointRoundTripsThroughJournalRecord() throws {
+        let checkpoint = TransferCheckpoint.upload(
+            MultipartUploadCheckpoint(
+                bucketName: "design-assets",
+                objectKey: "art/hero.psd",
+                sourceSize: 18_000_000,
+                sourceModifiedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                partSize: 8 * 1_024 * 1_024,
+                uploadID: "upload-1",
+                completedParts: [
+                    MultipartCompletedPart(number: 1, etag: "etag-1"),
+                    MultipartCompletedPart(number: 2, etag: "etag-2")
+                ]
+            )
+        )
+        let record = PersistedTransfer(
+            job: Self.persistedJob(status: .paused),
+            retry: nil,
+            checkpoint: checkpoint
+        )
+
+        let decoded = try JSONDecoder().decode(
+            PersistedTransfer.self,
+            from: JSONEncoder().encode(record)
+        )
+
+        #expect(decoded == record)
+        #expect(!decoded.job.isActive)
+        #expect(decoded.job.isResumable)
+    }
+
+    @Test func transferPreferencesPersistWithSafeDefaults() {
+        let suite = "LumenTests.TransferPreferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let first = AppSettings(defaults: defaults)
+
+        #expect(first.concurrentDownloads == 3)
+        #expect(first.transferConflictPolicy == .ask)
+        #expect(first.uploadSpeedLimit == .unlimited)
+        #expect(first.downloadLocation == .ask)
+        #expect(first.signedLinkLifetime == .oneHour)
+
+        first.concurrentDownloads = 5
+        first.transferConflictPolicy = .keepBoth
+        first.uploadSpeedLimit = .megabytesPerSecond(10)
+        first.downloadLocation = .downloads
+        first.signedLinkLifetime = .sevenDays
+
+        let restored = AppSettings(defaults: defaults)
+        #expect(restored.concurrentDownloads == 5)
+        #expect(restored.transferConflictPolicy == .keepBoth)
+        #expect(restored.uploadSpeedLimit == .megabytesPerSecond(10))
+        #expect(restored.downloadLocation == .downloads)
+        #expect(restored.signedLinkLifetime == .sevenDays)
+    }
+
+    @Test func transferThrottleAccountsForTimeAlreadySpentOnTheNetwork() {
+        let limit = TransferSpeedLimit.megabytesPerSecond(1)
+
+        #expect(
+            TransferThrottle.delayNanoseconds(
+                bytes: 1_024 * 1_024,
+                elapsed: 0.25,
+                limit: limit
+            ) == 750_000_000
+        )
+        #expect(
+            TransferThrottle.delayNanoseconds(
+                bytes: 1_024 * 1_024,
+                elapsed: 1.25,
+                limit: limit
+            ) == 0
+        )
+        #expect(
+            TransferThrottle.delayNanoseconds(
+                bytes: 1_024 * 1_024,
+                elapsed: 0,
+                limit: .unlimited
+            ) == 0
+        )
+    }
+
+    @Test func pausingPreservesCheckpointAndMakesJobResumable() throws {
+        let journal = MemoryTransferJournal()
+        let engine = TransferEngine(journal: journal)
+        let job = Self.persistedJob(status: .running)
+        let checkpoint = TransferCheckpoint.upload(
+            MultipartUploadCheckpoint(
+                bucketName: "bucket",
+                objectKey: job.objectKey,
+                sourceSize: job.total,
+                sourceModifiedAt: .distantPast,
+                partSize: OSSClient.partSize,
+                uploadID: "u-1",
+                completedParts: []
+            )
+        )
+        engine.jobs = [job]
+        engine.recordCheckpoint(job.id, checkpoint: checkpoint)
+
+        engine.pause(job.id)
+
+        #expect(engine.jobs.first?.status == .paused)
+        #expect(engine.checkpoint(for: job.id) == checkpoint)
+        #expect(journal.records.first?.checkpoint == checkpoint)
+    }
+
+    @Test func interruptedCheckpointRestoresAsPausedInsteadOfFailed() throws {
+        let source = try Self.temporaryFile(named: "paused-upload.txt")
+        defer { try? FileManager.default.removeItem(at: source) }
+        let bookmark = Data([2, 4, 6, 8])
+        let checkpoint = TransferCheckpoint.upload(
+            MultipartUploadCheckpoint(
+                bucketName: "bucket",
+                objectKey: "exact/object.txt",
+                sourceSize: 9,
+                sourceModifiedAt: .distantPast,
+                partSize: OSSClient.partSize,
+                uploadID: "u-1",
+                completedParts: []
+            )
+        )
+        let record = PersistedTransfer(
+            job: Self.persistedJob(status: .running),
+            retry: .upload(
+                PersistedUploadRetry(
+                    accountID: Self.fixedAccount.id,
+                    bucket: nil,
+                    sourceBookmark: bookmark,
+                    objectKey: "exact/object.txt",
+                    imagesOnly: false,
+                    convertHEIC: false,
+                    playSound: false
+                )
+            ),
+            checkpoint: checkpoint
+        )
+        let engine = TransferEngine(
+            journal: MemoryTransferJournal(records: [record]),
+            bookmarks: FixedTransferBookmarks(bookmark: bookmark, resolvedURL: source),
+            clientProvider: { _, _ in Self.client(transport: RetryTransport()) }
+        )
+
+        engine.restore(accounts: [Self.fixedAccount])
+
+        #expect(engine.jobs.first?.status == .paused)
+        #expect(engine.checkpoint(for: record.job.id) == checkpoint)
+        #expect(engine.canResume(record.job.id))
+    }
+
+    @Test func moveToTopOnlyReordersQueuedJobs() {
+        let engine = TransferEngine()
+        var running = Self.persistedJob(status: .running)
+        running.id = UUID()
+        var first = Self.persistedJob(status: .queued)
+        first.id = UUID()
+        var second = Self.persistedJob(status: .queued)
+        second.id = UUID()
+        engine.jobs = [running, first, second]
+
+        engine.moveToTop(second.id)
+
+        #expect(engine.jobs.map(\.id) == [running.id, second.id, first.id])
+        engine.moveToTop(running.id)
+        #expect(engine.jobs.map(\.id) == [running.id, second.id, first.id])
+    }
+
+    @Test func transferRateUsesRecentProgressSamples() {
+        let engine = TransferEngine()
+        var job = Self.persistedJob(status: .running)
+        job.transferred = 0
+        job.total = 1_000
+        engine.jobs = [job]
+        let start = Date(timeIntervalSince1970: 1_700_000_000)
+
+        engine.recordProgress(job.id, transferred: 100, total: 1_000, at: start)
+        engine.recordProgress(job.id, transferred: 300, total: 1_000, at: start.addingTimeInterval(2))
+        engine.recordProgress(job.id, transferred: 500, total: 1_000, at: start.addingTimeInterval(4))
+
+        #expect(engine.currentBytesPerSecond(job.id) == 100)
+        #expect(engine.estimatedRemaining(job.id) == 5)
+    }
+
+    @Test func keepBothUsesFinderStyleNumberingForFilesAndFolders() {
+        let existing: Set<String> = [
+            "art/hero.png",
+            "art/hero 2.png",
+            "art/Notes/",
+            "README",
+        ]
+
+        #expect(TransferConflictPlanner.availableKey(for: "art/hero.png", existing: existing) == "art/hero 3.png")
+        #expect(TransferConflictPlanner.availableKey(for: "art/Notes/", existing: existing) == "art/Notes 2/")
+        #expect(TransferConflictPlanner.availableKey(for: "README", existing: existing) == "README 2")
+    }
+
+    @Test func conflictPolicyPlansTheWholeBatchDeterministically() {
+        let keys = ["hero.png", "hero.png", "notes.txt"]
+        let existing: Set<String> = ["hero.png"]
+
+        let kept = TransferConflictPlanner.plan(keys: keys, existing: existing, policy: .keepBoth)
+        let skipped = TransferConflictPlanner.plan(keys: keys, existing: existing, policy: .skip)
+        let replaced = TransferConflictPlanner.plan(keys: keys, existing: existing, policy: .replace)
+
+        #expect(kept == [.renamed("hero 2.png"), .renamed("hero 3.png"), .useOriginal])
+        #expect(skipped == [.skip, .skip, .useOriginal])
+        #expect(replaced == [.useOriginal, .useOriginal, .useOriginal])
+    }
+
+    @Test func transferCenterFiltersJobsBySemanticState() {
+        var queued = Self.persistedJob(status: .queued)
+        queued.id = UUID()
+        var paused = Self.persistedJob(status: .paused)
+        paused.id = UUID()
+        var completed = Self.persistedJob(status: .completed)
+        completed.id = UUID()
+        var failed = Self.persistedJob(status: .failed)
+        failed.id = UUID()
+        let jobs = [queued, paused, completed, failed]
+
+        #expect(TransferFilter.all.filter(jobs).map(\.id) == jobs.map(\.id))
+        #expect(TransferFilter.active.filter(jobs).map(\.id) == [queued.id, paused.id])
+        #expect(TransferFilter.paused.filter(jobs).map(\.id) == [paused.id])
+        #expect(TransferFilter.completed.filter(jobs).map(\.id) == [completed.id])
+        #expect(TransferFilter.failed.filter(jobs).map(\.id) == [failed.id])
+    }
+
+    @Test func revealIsAvailableOnlyForACompletedDownloadWithALocalFile() throws {
+        let file = try Self.temporaryFile(named: "reveal.txt")
+        defer { try? FileManager.default.removeItem(at: file) }
+        var download = Self.persistedJob(status: .completed)
+        download.kind = .download
+        download.localURL = file
+        var upload = download
+        upload.kind = .upload
+        var missing = download
+        missing.localURL = file.appendingPathExtension("missing")
+
+        #expect(download.canRevealInFinder)
+        #expect(!upload.canRevealInFinder)
+        #expect(!missing.canRevealInFinder)
+    }
+
     @Test func clearingHistoryKeepsActiveTransfers() {
         let engine = TransferEngine()
         let running = Self.persistedJob(status: .running)
@@ -278,7 +536,7 @@ struct TransferEngineTests {
 
         #expect(try Data(contentsOf: destination) == Data("downloaded".utf8))
         let paths = await transport.requestPaths
-        #expect(paths == ["/remote/download.txt", "/remote/download.txt"])
+        #expect(paths == Array(repeating: "/remote/download.txt", count: 4))
     }
 
     @Test func finishingOneUploadNeverExceedsConfiguredConcurrency() async throws {
@@ -531,6 +789,7 @@ private actor BlockingUploadTransport: OSSHTTPTransport {
 private actor RetryTransport: OSSHTTPTransport {
     private(set) var requestPaths: [String] = []
     private let downloadURL: URL?
+    private var didFailDownloadRange = false
 
     init(downloadURL: URL? = nil) {
         self.downloadURL = downloadURL
@@ -543,6 +802,34 @@ private actor RetryTransport: OSSHTTPTransport {
         onProgress: (@Sendable (Int64, Int64) -> Void)?
     ) async throws -> OSSHTTPResult {
         requestPaths.append(request.url?.path ?? "")
+        if let downloadURL {
+            if request.httpMethod == "HEAD" {
+                let count = (try? downloadURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                return OSSHTTPResult(
+                    status: 200,
+                    headers: ["Content-Length": "\(count)"],
+                    data: Data(),
+                    temporaryDownloadURL: nil
+                )
+            }
+            if request.value(forHTTPHeaderField: "Range") != nil {
+                if !didFailDownloadRange {
+                    didFailDownloadRange = true
+                    return OSSHTTPResult(
+                        status: 500,
+                        headers: [:],
+                        data: Data("<Error><Code>InternalError</Code><Message>retry</Message></Error>".utf8),
+                        temporaryDownloadURL: nil
+                    )
+                }
+                return OSSHTTPResult(
+                    status: 206,
+                    headers: [:],
+                    data: (try? Data(contentsOf: downloadURL)) ?? Data(),
+                    temporaryDownloadURL: nil
+                )
+            }
+        }
         if requestPaths.count == 1 {
             return OSSHTTPResult(
                 status: 500,
