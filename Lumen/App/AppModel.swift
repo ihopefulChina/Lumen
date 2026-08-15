@@ -1495,6 +1495,11 @@ struct AccountDraft: Identifiable {
     var useTransferAccelerate: Bool
     var createdAt: Date
 
+    var isReadyToSave: Bool {
+        !accessKeyId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            && !secret.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     static func fresh() -> AccountDraft {
         AccountDraft(
             id: UUID(),

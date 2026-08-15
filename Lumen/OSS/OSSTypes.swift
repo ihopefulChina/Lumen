@@ -55,6 +55,10 @@ enum ObjectACL: String, CaseIterable, Identifiable, Codable, Sendable {
 
     var id: String { rawValue }
 
+    var isPublic: Bool {
+        self == .publicRead || self == .publicReadWrite
+    }
+
     var title: String {
         switch self {
         case .default: "继承存储空间"

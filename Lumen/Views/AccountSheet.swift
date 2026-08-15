@@ -13,10 +13,14 @@ struct AccountSheet: View {
     @State private var showACLConfirmation = false
 
     var body: some View {
-        NavigationStack {
+        VStack(spacing: 0) {
+            header
+
+            Divider()
+
             Form {
-                Section("账号") {
-                    TextField("名称", text: $draft.name, prompt: Text("工作室、主账号…"))
+                Section("账号信息") {
+                    TextField("显示名称", text: $draft.name, prompt: Text("工作室、主账号…"))
                     TextField("AccessKey ID", text: $draft.accessKeyId)
                         .textContentType(.username)
                     HStack {
@@ -38,7 +42,7 @@ struct AccountSheet: View {
                     }
                 }
 
-                Section("存储位置") {
+                Section("存储空间") {
                     Picker("地域", selection: $draft.regionID) {
                         ForEach(OSSRegion.all) { region in
                             Text(region.name).tag(region.id)
@@ -53,8 +57,8 @@ struct AccountSheet: View {
                     Text(draft.defaultACL.detail)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-                    if draft.defaultACL != .private {
-                        Label("公开权限会让对象可通过公网链接读取，请确认这符合你的发布用途。", systemImage: "exclamationmark.triangle.fill")
+                    if draft.defaultACL.isPublic {
+                        Label("公开权限会允许通过公网链接读取对象，请只用于明确需要公开分发的内容。", systemImage: "exclamationmark.triangle.fill")
                             .font(.callout)
                             .foregroundStyle(.orange)
                             .fixedSize(horizontal: false, vertical: true)
@@ -62,7 +66,7 @@ struct AccountSheet: View {
                     }
                 }
 
-                Section("上传路径") {
+                Section("上传") {
                     TextField("路径模板", text: $draft.prefixTemplate, prompt: Text("assets/{yyyy}/{MM}/{dd}/"))
                     Text("留空则传到当前文件夹。可用 {yyyy} {MM} {dd} {filename}。")
                         .font(.caption)
@@ -83,28 +87,43 @@ struct AccountSheet: View {
 
                 if let errorText {
                     Section {
-                        Text(errorText)
+                        Label(errorText, systemImage: "exclamationmark.circle.fill")
                             .foregroundStyle(.red)
                             .font(.callout)
                     }
                 }
             }
             .formStyle(.grouped)
-            .navigationTitle(model.editingAccount == nil ? "添加账号" : "编辑账号")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
+
+            Divider()
+
+            HStack(spacing: 12) {
+                if isTesting {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("正在验证连接…")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                 }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button(isTesting ? "正在连接…" : "存储并连接") {
-                        Task { await save() }
-                    }
-                    .disabled(!canSave || isTesting)
-                    .keyboardShortcut(.defaultAction)
+                Spacer()
+                Button("取消") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Button(model.editingAccount == nil ? "连接" : "保存") {
+                    Task { await save() }
                 }
+                .disabled(!canSave || isTesting)
+                .keyboardShortcut(.defaultAction)
             }
+            .padding(16)
         }
-        .frame(minWidth: 460, minHeight: 560)
+        .frame(
+            minWidth: 540,
+            idealWidth: 560,
+            maxWidth: 620,
+            minHeight: 600,
+            idealHeight: 650,
+            maxHeight: 760
+        )
         .confirmationDialog(
             pendingACL?.title ?? "确认公开权限",
             isPresented: $showACLConfirmation,
@@ -133,9 +152,29 @@ struct AccountSheet: View {
         }
     }
 
+    private var header: some View {
+        HStack(spacing: 14) {
+            Image(systemName: model.editingAccount == nil ? "person.crop.circle.badge.plus" : "person.crop.circle")
+                .font(.system(size: 34, weight: .regular))
+                .symbolRenderingMode(.hierarchical)
+                .foregroundStyle(.tint)
+                .frame(width: 44, height: 44)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(model.editingAccount == nil ? "添加账号" : "编辑账号")
+                    .font(.title2.weight(.semibold))
+                Label("密钥只保存在这台 Mac 的钥匙串中", systemImage: "lock.fill")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+    }
+
     private var canSave: Bool {
-        !draft.accessKeyId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            && !draft.secret.isEmpty
+        draft.isReadyToSave
     }
 
     private var commonACLs: [ObjectACL] {

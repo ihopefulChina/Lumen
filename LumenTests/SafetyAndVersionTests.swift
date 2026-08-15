@@ -71,6 +71,26 @@ struct SafetyAndVersionTests {
         #expect(account.prefersSignedLinks)
     }
 
+    @Test func onlyExplicitPublicPermissionsNeedAPublicWarning() {
+        #expect(!ObjectACL.default.isPublic)
+        #expect(!ObjectACL.private.isPublic)
+        #expect(ObjectACL.publicRead.isPublic)
+        #expect(ObjectACL.publicReadWrite.isPublic)
+    }
+
+    @Test func accountDraftRequiresNonWhitespaceCredentials() {
+        var draft = AccountDraft.fresh()
+        draft.accessKeyId = "   "
+        draft.secret = "   "
+
+        #expect(!draft.isReadyToSave)
+
+        draft.accessKeyId = "LTAI-example"
+        draft.secret = "example-secret"
+
+        #expect(draft.isReadyToSave)
+    }
+
     @Test func newlyPublicPermissionsRequireConfirmation() {
         #expect(AccountACLConfirmation.requiresConfirmation(from: .private, to: .publicRead))
         #expect(AccountACLConfirmation.requiresConfirmation(from: .publicRead, to: .publicReadWrite))
