@@ -4,6 +4,77 @@ import Testing
 
 @MainActor
 struct TransferEngineTests {
+    @Test func oldJournalRecordDecodesWithoutCheckpoint() throws {
+        let record = PersistedTransfer(job: Self.persistedJob(status: .failed), retry: nil)
+        let encoded = try JSONEncoder().encode(record)
+        var object = try #require(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        object.removeValue(forKey: "checkpoint")
+
+        let decoded = try JSONDecoder().decode(
+            PersistedTransfer.self,
+            from: JSONSerialization.data(withJSONObject: object)
+        )
+
+        #expect(decoded.checkpoint == nil)
+    }
+
+    @Test func multipartCheckpointRoundTripsThroughJournalRecord() throws {
+        let checkpoint = TransferCheckpoint.upload(
+            MultipartUploadCheckpoint(
+                bucketName: "design-assets",
+                objectKey: "art/hero.psd",
+                sourceSize: 18_000_000,
+                sourceModifiedAt: Date(timeIntervalSince1970: 1_700_000_000),
+                partSize: 8 * 1_024 * 1_024,
+                uploadID: "upload-1",
+                completedParts: [
+                    MultipartCompletedPart(number: 1, etag: "etag-1"),
+                    MultipartCompletedPart(number: 2, etag: "etag-2")
+                ]
+            )
+        )
+        let record = PersistedTransfer(
+            job: Self.persistedJob(status: .paused),
+            retry: nil,
+            checkpoint: checkpoint
+        )
+
+        let decoded = try JSONDecoder().decode(
+            PersistedTransfer.self,
+            from: JSONEncoder().encode(record)
+        )
+
+        #expect(decoded == record)
+        #expect(!decoded.job.isActive)
+        #expect(decoded.job.isResumable)
+    }
+
+    @Test func transferPreferencesPersistWithSafeDefaults() {
+        let suite = "LumenTests.TransferPreferences.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: suite)!
+        defaults.removePersistentDomain(forName: suite)
+        let first = AppSettings(defaults: defaults)
+
+        #expect(first.concurrentDownloads == 3)
+        #expect(first.transferConflictPolicy == .ask)
+        #expect(first.uploadSpeedLimit == .unlimited)
+        #expect(first.downloadLocation == .ask)
+        #expect(first.signedLinkLifetime == .oneHour)
+
+        first.concurrentDownloads = 5
+        first.transferConflictPolicy = .keepBoth
+        first.uploadSpeedLimit = .megabytesPerSecond(10)
+        first.downloadLocation = .downloads
+        first.signedLinkLifetime = .sevenDays
+
+        let restored = AppSettings(defaults: defaults)
+        #expect(restored.concurrentDownloads == 5)
+        #expect(restored.transferConflictPolicy == .keepBoth)
+        #expect(restored.uploadSpeedLimit == .megabytesPerSecond(10))
+        #expect(restored.downloadLocation == .downloads)
+        #expect(restored.signedLinkLifetime == .sevenDays)
+    }
+
     @Test func clearingHistoryKeepsActiveTransfers() {
         let engine = TransferEngine()
         let running = Self.persistedJob(status: .running)

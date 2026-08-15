@@ -153,6 +153,7 @@ private struct TransferRow: View {
         switch job.status {
         case .queued: "clock"
         case .running: job.kind == .upload ? "arrow.up.circle" : "arrow.down.circle"
+        case .paused: "pause.circle"
         case .completed: "checkmark.circle.fill"
         case .failed: "exclamationmark.circle.fill"
         case .cancelled: "minus.circle"
@@ -164,6 +165,7 @@ private struct TransferRow: View {
         case .completed: .green
         case .failed: .red
         case .cancelled: .secondary
+        case .paused: .secondary
         default: .accentColor
         }
     }
@@ -172,6 +174,7 @@ private struct TransferRow: View {
         switch job.status {
         case .queued: "排队"
         case .running: "进行中"
+        case .paused: "已暂停"
         case .completed: job.integrityVerified ? "已校验" : "完成"
         case .failed: "失败"
         case .cancelled: "已取消"
@@ -208,6 +211,7 @@ struct TransferMenu: View {
         switch job.status {
         case .running: "\(Int(job.progress * 100))%"
         case .queued: "排队"
+        case .paused: "已暂停"
         case .completed: job.integrityVerified ? "完成 · 已校验" : "完成"
         case .failed: "失败"
         case .cancelled: "已取消"
