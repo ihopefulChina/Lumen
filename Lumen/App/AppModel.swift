@@ -108,6 +108,10 @@ final class AppModel {
         selectedAccount != nil && selectedBucket != nil
     }
 
+    var canShowInformation: Bool {
+        selectedBucket != nil
+    }
+
     var canUndoCloudOperation: Bool {
         if let deletion = lastDeleteUndoOperation {
             return !isOrganizingCloud && isCurrentScope(for: deletion)

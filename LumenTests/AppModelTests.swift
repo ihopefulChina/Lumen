@@ -52,6 +52,24 @@ struct AppModelTests {
         #expect(model.browser.viewMode == .list)
     }
 
+    @Test func informationIsAvailableOnlyInsideABucket() {
+        let model = AppModel(kind: .settings, services: AppServices(accounts: []))
+
+        #expect(!model.canShowInformation)
+
+        let bucket = OSSBucket(
+            name: "design-assets",
+            regionID: "cn-hangzhou",
+            location: "oss-cn-hangzhou",
+            extranetEndpoint: "oss-cn-hangzhou.aliyuncs.com",
+            createdAt: nil
+        )
+        model.buckets = [bucket]
+        model.selectedBucketName = bucket.name
+
+        #expect(model.canShowInformation)
+    }
+
     private static func defaults() -> UserDefaults {
         let suite = "Lumen.AppModelTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
