@@ -116,6 +116,22 @@ xcodebuild -project Lumen.xcodeproj \
 
 项目使用 Swift 6、SwiftUI、AppKit、Swift Testing 和固定版本的 Sparkle，没有其他运行时依赖。
 
+## 让 AI 直接操作 OSS（lumen-mcp）
+
+仓库内置一个独立的 MCP 服务器 `lumen-mcp`，配置到 Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接：
+
+> 把桌面上的 hero.png 上传到 lumen-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接。
+
+凭证保存在 macOS 钥匙串，与 Lumen App 账号相互独立；AI 只能执行浏览、上传、下载和签名链接四类操作。快速开始：
+
+```bash
+cd Tools/lumen-mcp
+swift build -c release
+.build/release/lumen-mcp auth   # 配置 OSS 凭证（钥匙串）
+```
+
+安装与各 AI 客户端的配置方法见 [docs/mcp.md](docs/mcp.md)。
+
 ## 参与与支持
 
 问题和建议请提交到 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues/new/choose)。提交前可以从「帮助 → 复制诊断信息」拿到脱敏摘要；截图请使用虚拟数据或遮盖标识。安全问题请走 [Security Policy](SECURITY.md) 里的私密入口。
