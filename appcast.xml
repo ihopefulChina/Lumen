@@ -3,6 +3,36 @@
     <channel>
         <title>Lumen</title>
         <item>
+            <title>1.0.1</title>
+            <pubDate>Sun, 16 Aug 2026 16:54:54 +0800</pubDate>
+            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v1.0.1</link>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Lumen 1.0.1
+
+这是一个修复版本。1.0.0 的软件更新源配置有误，导致「检查更新」始终失败。这一版把更新源迁移到 GitHub Pages，并同步了发版流程。
+
+## 修复
+
+- 软件更新源从 GitHub Release 资产切换到 GitHub Pages（`https://ihopefulchina.github.io/Lumen/appcast.xml`），解决更新检查 404 的问题。
+- 发版脚本 `package-dmg.sh` 现在会自动把生成的 `appcast.xml` 同步到 `website/` 目录，确保 GitHub Pages 上的更新源始终最新。
+- GitHub Pages 部署工作流在 `appcast.xml` 变更时自动重新部署。
+- 网站验证脚本增加了对 `website/appcast.xml` 的存在性检查。
+
+## 系统要求
+
+- macOS 15 或更高版本
+- Apple Silicon Mac
+
+> 目前安装包使用 ad-hoc 签名（暂未配置开发者证书）。首次打开如果被 macOS 拦下，在访达中右键 Lumen 选择「打开」即可；以后不会再提示。
+
+完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
+]]></description>
+            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v1.0.1/Lumen-1.0.1.dmg" length="4580027" type="application/octet-stream" sparkle:edSignature="/Emp+8BkPUb5Kc0WjUefPh9/gjTzQLRC+MIOfkzm1eSEIQB3qcqqLz8mIUQKnuBrKbZO+wo9B+a+OAAZ8ZexCA=="/>
+        </item>
+        <item>
             <title>1.0.0</title>
             <pubDate>Sun, 16 Aug 2026 16:10:55 +0800</pubDate>
             <link>https://github.com/ihopefulChina/Lumen/releases/tag/v1.0.0</link>
@@ -114,38 +144,6 @@
 完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
 ]]></description>
             <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.9/Lumen-0.0.9.dmg" length="4559737" type="application/octet-stream" sparkle:edSignature="/m7hQyIJy285lIbSvbveUmblth4Ihf3rNXS7hDt+xbBUSL9aGhlfWEKSl80jLXipuxCDT6VXezJCinGdfwsxDQ=="/>
-        </item>
-        <item>
-            <title>0.0.8</title>
-            <pubDate>Sat, 15 Aug 2026 08:48:30 +0800</pubDate>
-            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.8</link>
-            <sparkle:version>8</sparkle:version>
-            <sparkle:shortVersionString>0.0.8</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Lumen 0.0.8
-
-这一版继续收紧 Lumen 的 macOS 交互：浏览窗口把空间还给内容，账号与设置也改成更接近系统应用的表达。
-
-## 新变化
-
-- 移除常驻右侧信息栏。工具栏的信息按钮或 `⌘I` 会按需打开当前文件夹、所选对象或多选项目的信息窗口。
-- 信息窗口仍可快速查看、下载、复制链接和删除；关闭后不会挤压浏览区域。
-- 添加与编辑账号改用原生 macOS 分组 Sheet，操作按钮、连接状态和钥匙串说明更清楚。
-- 新账号的对象权限默认改为「继承存储空间」，上传时沿用目标 Bucket 的 ACL；已有账号的设置不会被自动改写。
-- 修复「继承存储空间」被错误显示为公开权限警告的问题。只有明确选择公共读或公共读写时才会提示风险。
-- 设置扩展为「通用 / 传输 / 账号」三页，可选择默认网格或列表视图、清除已结束的传输记录，并验证账号连接。
-- 设置中的添加、编辑和删除账号入口现在会在当前设置窗口中正确显示和完成。
-- 自动更新继续支持在应用内安装；完成后 Lumen 会自动重新打开。
-
-## 系统要求
-
-- macOS 15 或更高版本
-- Apple 芯片 Mac
-
-完整使用说明与问题反馈入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
-]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.8/Lumen-0.0.8.dmg" length="4068213" type="application/octet-stream" sparkle:edSignature="jcQ4VRhHc0yjeATbsZl2P8w6Sbn3hSOKtM5k+hfl+QVEzSD5HpLQVHzRBXaSjyO9ICkg28aqTFRzeTPFhZjhCQ=="/>
         </item>
     </channel>
 </rss>
