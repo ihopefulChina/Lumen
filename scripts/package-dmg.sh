@@ -13,7 +13,7 @@ dist_dir="$repo_dir/dist"
 tracked_appcast_path="$repo_dir/appcast.xml"
 
 usage() {
-    print -u2 "Usage: scripts/package-dmg.sh <development|release>"
+    print -u2 "Usage: scripts/package-dmg.sh <development|adhoc|release>"
     exit 64
 }
 
@@ -22,7 +22,7 @@ fail() {
     exit 1
 }
 
-[[ "$mode" == "development" || "$mode" == "release" ]] || usage
+[[ "$mode" == "development" || "$mode" == "adhoc" || "$mode" == "release" ]] || usage
 
 if [[ "$mode" == "development" ]]; then
     artifact_name="Lumen-$version-development.dmg"
@@ -37,6 +37,8 @@ development_team="${LUMEN_DEVELOPMENT_TEAM:-}"
 notary_profile="${LUMEN_NOTARY_PROFILE:-}"
 
 # Release requirements are checked before the build or any tracked file changes.
+# Ad-hoc mode skips them on purpose: no Developer ID certificate is required,
+# the app is signed ad-hoc and Gatekeeper shows a right-click-open prompt.
 if [[ "$mode" == "release" ]]; then
     [[ -n "$developer_identity" ]] || fail "LUMEN_DEVELOPER_ID_APPLICATION is required"
     [[ -n "$development_team" ]] || fail "LUMEN_DEVELOPMENT_TEAM is required"
@@ -63,7 +65,7 @@ build_settings=(
     CODE_SIGN_STYLE=Manual
     CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO
 )
-if [[ "$mode" == "development" ]]; then
+if [[ "$mode" == "development" || "$mode" == "adhoc" ]]; then
     build_settings+=(
         CODE_SIGN_IDENTITY=-
         DEVELOPMENT_TEAM=
@@ -95,7 +97,7 @@ actual_build="$(plutil -extract CFBundleVersion raw "$app_path/Contents/Info.pli
 [[ "$actual_version" == "$version" ]] || fail "built app version is $actual_version"
 [[ "$actual_build" == "$build_number" ]] || fail "built app number is $actual_build"
 
-if [[ "$mode" == "development" ]]; then
+if [[ "$mode" == "development" || "$mode" == "adhoc" ]]; then
     codesign --force --deep --sign - "$app_path"
     codesign --verify --deep --strict --verbose=2 "$app_path"
 else
@@ -135,10 +137,12 @@ if [[ "$mode" == "development" ]]; then
     exit 0
 fi
 
-codesign --force --sign "$developer_identity" --timestamp "$temp_dmg"
-xcrun notarytool submit "$temp_dmg" --keychain-profile "$notary_profile" --wait
-xcrun stapler staple "$temp_dmg"
-xcrun stapler validate "$temp_dmg"
+if [[ "$mode" == "release" ]]; then
+    codesign --force --sign "$developer_identity" --timestamp "$temp_dmg"
+    xcrun notarytool submit "$temp_dmg" --keychain-profile "$notary_profile" --wait
+    xcrun stapler staple "$temp_dmg"
+    xcrun stapler validate "$temp_dmg"
+fi
 
 sparkle_dir="$derived_dir/SourcePackages/artifacts/sparkle/Sparkle"
 generate_appcast="$sparkle_dir/bin/generate_appcast"
@@ -171,6 +175,7 @@ fi
 LUMEN_SPARKLE_SIGN_UPDATE="$sign_update" \
 LUMEN_SPARKLE_KEY_FILE="$private_key_path" \
 LUMEN_DEVELOPMENT_TEAM="$development_team" \
+LUMEN_ADHOC="$([[ "$mode" == "adhoc" ]] && print 1 || print 0)" \
     "$script_dir/verify-release.sh" "$temp_dmg" "$version" "$build_number" "$appcast_dir/appcast.xml"
 
 # Only verified, notarized artifacts may now affect release outputs or the live appcast.

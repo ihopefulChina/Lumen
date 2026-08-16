@@ -13,6 +13,7 @@ appcast_path="${4:A}"
 expected_team="${LUMEN_DEVELOPMENT_TEAM:-}"
 sign_update="${LUMEN_SPARKLE_SIGN_UPDATE:-}"
 sparkle_key_file="${LUMEN_SPARKLE_KEY_FILE:-}"
+adhoc="${LUMEN_ADHOC:-0}"
 
 fail() {
     print -u2 "Release verification failed: $1"
@@ -21,7 +22,9 @@ fail() {
 
 [[ -f "$dmg_path" ]] || fail "DMG does not exist"
 [[ -f "$appcast_path" ]] || fail "appcast does not exist"
-[[ -n "$expected_team" ]] || fail "LUMEN_DEVELOPMENT_TEAM is required"
+if [[ "$adhoc" != "1" ]]; then
+    [[ -n "$expected_team" ]] || fail "LUMEN_DEVELOPMENT_TEAM is required"
+fi
 [[ -x "$sign_update" ]] || fail "LUMEN_SPARKLE_SIGN_UPDATE must point to sign_update"
 [[ -f "$sparkle_key_file" ]] || fail "LUMEN_SPARKLE_KEY_FILE is required"
 
@@ -39,9 +42,14 @@ cleanup() {
 trap cleanup EXIT
 
 hdiutil verify "$dmg_path" >/dev/null
-codesign --verify --strict --verbose=2 "$dmg_path"
-xcrun stapler validate "$dmg_path"
-spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg_path"
+if [[ "$adhoc" == "1" ]]; then
+    # Ad-hoc artifacts carry no Developer ID and are not notarized.
+    print 'Ad-hoc build: skipping notarization and Gatekeeper checks.'
+else
+    codesign --verify --strict --verbose=2 "$dmg_path"
+    xcrun stapler validate "$dmg_path"
+    spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg_path"
+fi
 
 mkdir -p "$mount_dir"
 hdiutil attach "$dmg_path" -readonly -nobrowse -mountpoint "$mount_dir" >/dev/null
@@ -62,19 +70,23 @@ architectures="$(lipo -archs "$executable_path")"
 
 codesign --verify --deep --strict --verbose=2 "$app_path"
 signature_details="$(codesign -dv --verbose=4 "$app_path" 2>&1)"
-print -r -- "$signature_details" | grep -Eq '^Authority=Developer ID Application:' \
-    || fail "Developer ID Application authority is missing"
-print -r -- "$signature_details" | grep -Fq "TeamIdentifier=$expected_team" \
-    || fail "TeamIdentifier does not match LUMEN_DEVELOPMENT_TEAM"
-print -r -- "$signature_details" | grep -Eq '^flags=.*runtime' \
-    || fail "Hardened Runtime flag is missing"
-print -r -- "$signature_details" | grep -Eq '^Timestamp=.+' \
-    || fail "secure timestamp is missing"
-if print -r -- "$signature_details" | grep -Fq 'Timestamp=none'; then
-    fail "secure timestamp is missing"
+if [[ "$adhoc" == "1" ]]; then
+    print -r -- "$signature_details" | grep -Fq 'Signature=adhoc' \
+        || fail "app is not ad-hoc signed"
+else
+    print -r -- "$signature_details" | grep -Eq '^Authority=Developer ID Application:' \
+        || fail "Developer ID Application authority is missing"
+    print -r -- "$signature_details" | grep -Fq "TeamIdentifier=$expected_team" \
+        || fail "TeamIdentifier does not match LUMEN_DEVELOPMENT_TEAM"
+    print -r -- "$signature_details" | grep -Eq '^flags=.*runtime' \
+        || fail "Hardened Runtime flag is missing"
+    print -r -- "$signature_details" | grep -Eq '^Timestamp=.+' \
+        || fail "secure timestamp is missing"
+    if print -r -- "$signature_details" | grep -Fq 'Timestamp=none'; then
+        fail "secure timestamp is missing"
+    fi
+    spctl --assess --type execute --verbose=2 "$app_path"
 fi
-
-spctl --assess --type execute --verbose=2 "$app_path"
 
 declared_length="$(xmllint --xpath "string(//*[local-name()='item' and *[local-name()='version' and text()='$expected_build']]/*[local-name()='enclosure']/@length)" "$appcast_path")"
 signature="$(xmllint --xpath "string(//*[local-name()='item' and *[local-name()='version' and text()='$expected_build']]/*[local-name()='enclosure']/@*[local-name()='edSignature'])" "$appcast_path")"
