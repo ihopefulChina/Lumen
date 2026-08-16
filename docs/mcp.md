@@ -31,58 +31,56 @@
 
 ## 安装
 
-### 第一步：构建
+### 第一步：配置凭证
 
 ```bash
-git clone https://github.com/ihopefulChina/Lumen.git
-cd Lumen/Tools/lumen-mcp
-swift build -c release
-```
-
-> 提示：在 Terminal.app 中执行（IDE 内置终端可能有沙箱限制）。
-
-### 第二步：配置凭证
-
-```bash
-.build/release/lumen-mcp auth
+npx lumen-mcp auth
 ```
 
 按提示填写地域、AccessKey ID / Secret（STS Token 可选）。凭证保存在当前用户的钥匙串，不会写入磁盘明文文件。支持多账号档案：
 
 | 命令 | 作用 |
 | --- | --- |
-| `lumen-mcp auth` | 交互式添加/更新配置档案 |
-| `lumen-mcp auth --list` | 列出所有配置档案（`●` 标记活动档案） |
-| `lumen-mcp auth --use <名称>` | 切换活动配置档案 |
-| `lumen-mcp auth --remove <名称>` | 删除配置档案 |
-| `lumen-mcp auth --test` | 验证当前凭证（调用 ListBuckets） |
+| `npx lumen-mcp auth` | 交互式添加/更新配置档案 |
+| `npx lumen-mcp auth --list` | 列出所有配置档案（`●` 标记活动档案） |
+| `npx lumen-mcp auth --use <名称>` | 切换活动配置档案 |
+| `npx lumen-mcp auth --remove <名称>` | 删除配置档案 |
+| `npx lumen-mcp auth --test` | 验证当前凭证（调用 ListBuckets） |
 
-### 第三步：一键接入 AI 客户端
+前置条件：macOS 与 Node ≥ 18（`node -v` 检查；没有的话 `brew install node`）。
+
+### 第二步：一键接入 AI 客户端
 
 ```bash
-.build/release/lumen-mcp install
+npx lumen-mcp install
 ```
 
 自动检测本机已安装的客户端（Claude Desktop、Claude Code、Cursor、Trae、Windsurf、Codex）并写入配置，重启客户端即可使用。支持：
 
 ```bash
-lumen-mcp install --client codex     # 只注册指定客户端（可重复传）
-lumen-mcp install --all              # 注册全部支持的客户端
-lumen-mcp install --dry-run          # 只预览将要写入的内容
-lumen-mcp uninstall                  # 移除注册
+npx lumen-mcp install --client codex   # 只注册指定客户端（可重复传）
+npx lumen-mcp install --all            # 注册全部支持的客户端
+npx lumen-mcp install --dry-run        # 只预览将要写入的内容
+npx lumen-mcp uninstall                # 移除注册
 ```
 
-JSON 配置采用合并写入并保留 `.bak` 备份，不影响其他 MCP 服务器。
+通过 npx 运行时，写入客户端的是 `npx -y lumen-mcp` 命令形式，不依赖缓存里的临时路径，重装、升级都不会失效。JSON 配置采用合并写入并保留 `.bak` 备份，不影响其他 MCP 服务器。
+
+### 替代方案
+
+- **全局安装**（少打几个字符）：`npm install -g lumen-mcp` 后直接用 `lumen-mcp auth` / `lumen-mcp install`，客户端配置里写的是 PATH 上的 `lumen-mcp`。
+- **从源码构建**（开发者 / 无 Node 环境）：克隆仓库后 `cd Tools/lumen-mcp && swift build -c release`，用 `.build/release/lumen-mcp` 绝对路径运行。在 Terminal.app 中执行（IDE 内置终端可能有沙箱限制）。
 
 ## 手动配置（可选）
 
-不想用一键安装时，可手动编辑各客户端配置。所有客户端使用相同的服务条目：
+不想用一键安装时，可手动编辑各客户端配置。所有客户端使用相同的服务条目（npx 形式最省心）：
 
 ```json
 {
   "mcpServers": {
     "lumen": {
-      "command": "/absolute/path/to/lumen-mcp"
+      "command": "npx",
+      "args": ["-y", "lumen-mcp"]
     }
   }
 }
@@ -120,3 +118,14 @@ JSON 配置采用合并写入并保留 `.bak` 备份，不影响其他 MCP 服�
 | 下载报「本地已存在同名文件」 | 这是不覆盖保护。让 AI 换一个保存路径，或先手动删除该文件 |
 
 更多问题请到 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues) 反馈。
+
+## 维护者：发布 npm 包
+
+npm 包是 Swift 服务器的薄启动器（位于 `Tools/lumen-mcp/npm/`），平台二进制通过 optionalDependencies 按架构自动安装。发布流程：
+
+```bash
+cd Tools/lumen-mcp
+./npm/publish.sh <version>    # 例如 1.0.1
+```
+
+脚本会：构建 arm64 与 x86_64 双架构 release 二进制 → 同步三个包的版本号 → 依次发布 `lumen-mcp-darwin-arm64`、`lumen-mcp-darwin-x64`、`lumen-mcp`。前置条件：`npm login` 已完成、Xcode 命令行工具可用。发布后记得把 `npm/` 下 package.json 的版本变更提交进仓库。

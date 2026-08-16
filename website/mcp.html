@@ -47,19 +47,19 @@
           <div class="mcp-step reveal">
             <span class="mcp-step-num" aria-hidden="true">1</span>
             <div class="mcp-step-body">
-              <h3>构建</h3>
-              <p>在 Terminal.app 中克隆仓库并编译（IDE 内置终端可能有沙箱限制）。</p>
-              <pre class="code-block" aria-label="构建命令"><code><span class="c-prompt">$</span> git clone https://github.com/ihopefulChina/Lumen.git
-<span class="c-prompt">$</span> cd Lumen/Tools/lumen-mcp
-<span class="c-prompt">$</span> swift build -c release</code></pre>
+              <h3>准备 Node</h3>
+              <p>需要 macOS 与 Node ≥ 18。终端里 <code>node -v</code> 检查；没有的话用 Homebrew 一行装好。</p>
+              <pre class="code-block" aria-label="安装 Node 命令"><code><span class="c-prompt">$</span> node -v
+<span class="c-cm"># 没有输出 v18+ 就执行：</span>
+<span class="c-prompt">$</span> brew install node</code></pre>
             </div>
           </div>
           <div class="mcp-step reveal" style="--reveal-delay: 90ms">
             <span class="mcp-step-num" aria-hidden="true">2</span>
             <div class="mcp-step-body">
               <h3>配置凭证</h3>
-              <p>填入 RAM 子账号 AccessKey，凭证只保存在 macOS 钥匙串，不落明文文件。</p>
-              <pre class="code-block" aria-label="配置凭证命令"><code><span class="c-prompt">$</span> .build/release/lumen-mcp auth
+              <p>npx 按需下载 lumen-mcp（内置 macOS 双架构二进制，无需编译）。填入 RAM 子账号 AccessKey，凭证只保存在 macOS 钥匙串。</p>
+              <pre class="code-block" aria-label="配置凭证命令"><code><span class="c-prompt">$</span> npx lumen-mcp auth
 <span class="c-cm"># 支持多账号：--list / --use / --remove / --test</span></code></pre>
             </div>
           </div>
@@ -67,13 +67,14 @@
             <span class="mcp-step-num" aria-hidden="true">3</span>
             <div class="mcp-step-body">
               <h3>一键注册</h3>
-              <p>自动检测本机已安装的 AI 客户端并写入配置，重启客户端即可使用。</p>
-              <pre class="code-block" aria-label="一键注册命令"><code><span class="c-prompt">$</span> .build/release/lumen-mcp install
+              <p>自动检测本机已安装的 AI 客户端并写入 <code>npx -y lumen-mcp</code>，重启客户端即可使用。</p>
+              <pre class="code-block" aria-label="一键注册命令"><code><span class="c-prompt">$</span> npx lumen-mcp install
 <span class="c-cm"># 或指定客户端：install --client codex</span></code></pre>
             </div>
           </div>
         </div>
         <div class="mcp-try reveal">然后直接对话：<b>「列出我的 OSS Bucket」</b>、<b>「把桌面的 hero.png 上传到 lumen-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接」</b>。</div>
+        <p>没有 Node？也可以<a class="text-link" href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">从源码构建</a>（克隆仓库后 <code>swift build -c release</code>，用二进制绝对路径运行）。</p>
       </section>
 
       <section aria-labelledby="tools" class="reveal">
@@ -118,7 +119,8 @@
         <pre class="code-block" aria-label="手动配置 JSON"><code>{
   <span class="c-cm">"mcpServers"</span>: {
     "lumen": {
-      "command": "/absolute/path/to/lumen-mcp"
+      "command": "npx",
+      "args": ["-y", "lumen-mcp"]
     }
   }
 }</code></pre>
