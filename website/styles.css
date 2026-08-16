@@ -1520,3 +1520,276 @@ summary {
     text-decoration-color: rgba(125, 184, 255, 0.4);
   }
 }
+
+/* ---------------------------------------------------------------
+   MCP — homepage chapter visual (AI chat scene)
+   --------------------------------------------------------------- */
+
+.mcp-scene {
+  padding: 20px 20px 16px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-medium);
+  box-shadow: 0 24px 60px rgba(30, 43, 62, 0.09);
+}
+
+.mcp-scene-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12px;
+  font-weight: 680;
+  color: var(--slate);
+}
+
+.mcp-scene-head .ai-mark {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--blue), var(--blue-deep));
+  border-radius: 7px;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.mcp-scene-head small {
+  margin-left: auto;
+  color: var(--muted);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.mcp-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 16px;
+}
+
+.mcp-bubble {
+  max-width: 82%;
+  padding: 11px 15px;
+  border-radius: 15px;
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.mcp-bubble.user {
+  align-self: flex-end;
+  color: var(--on-accent);
+  background: var(--blue-deep);
+  border-bottom-right-radius: 5px;
+}
+
+.mcp-bubble.ai {
+  align-self: flex-start;
+  color: var(--ink);
+  background: var(--canvas);
+  border: 1px solid var(--hairline);
+  border-bottom-left-radius: 5px;
+}
+
+.mcp-tools {
+  margin: 0;
+  padding: 4px 0 0;
+  list-style: none;
+}
+
+.mcp-tool-row {
+  min-height: 42px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border-top: 1px dashed var(--hairline);
+  font-size: 11.5px;
+}
+
+.mcp-tool-row:first-child { border-top: 0; }
+
+.mcp-tool-row code {
+  color: var(--blue-deep);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.mcp-tool-row small {
+  color: var(--muted);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 10px;
+}
+
+.mcp-tool-row .tool-done {
+  margin-left: auto;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+  color: #ffffff;
+  background: #27a85d;
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+/* ---------------------------------------------------------------
+   MCP — document page components (mcp.html)
+   --------------------------------------------------------------- */
+
+.mcp-steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin-top: 30px;
+}
+
+.mcp-step {
+  padding: 22px 20px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: var(--radius-medium);
+}
+
+.mcp-step > span {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  color: var(--blue-deep);
+  background: var(--blue-soft);
+  border-radius: 50%;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.mcp-step h3 {
+  margin: 16px 0 6px;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+.mcp-step > p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.code-block {
+  overflow-x: auto;
+  margin: 16px 0 0;
+  padding: 14px 16px;
+  color: #cfe0f5;
+  background: #0d1320;
+  border: 1px solid #232c3d;
+  border-radius: 12px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.75;
+  white-space: pre;
+  tab-size: 4;
+}
+
+.code-block .c-prompt { color: #5f739a; user-select: none; }
+.code-block .c-cm { color: #556586; }
+
+.document-shell code {
+  color: var(--blue-deep);
+  background: var(--blue-soft);
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88em;
+}
+
+.document-shell .code-block code {
+  padding: 0;
+  color: inherit;
+  background: none;
+  border-radius: 0;
+  font-size: inherit;
+}
+
+.document-shell table {
+  width: 100%;
+  margin: 8px 0 6px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.document-shell th {
+  padding: 10px 14px 10px 0;
+  color: var(--muted);
+  border-bottom: 1px solid var(--hairline);
+  font-size: 12px;
+  font-weight: 650;
+  text-align: left;
+  letter-spacing: 0.02em;
+}
+
+.document-shell td {
+  padding: 13px 14px 13px 0;
+  color: var(--slate);
+  border-bottom: 1px solid var(--row-line);
+  vertical-align: top;
+  line-height: 1.6;
+}
+
+.document-shell tr:last-child td { border-bottom: 0; }
+
+.document-shell td:first-child {
+  color: var(--ink);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
+  font-size: 12.5px;
+  white-space: nowrap;
+}
+
+.client-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.client-list li {
+  padding: 7px 14px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 570;
+}
+
+.document-shell .text-link {
+  color: var(--blue-deep);
+  font-weight: 680;
+}
+
+@media (max-width: 980px) {
+  .mcp-steps {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 700px) {
+  .mcp-scene {
+    padding: 14px 14px 12px;
+  }
+
+  .mcp-bubble {
+    max-width: 92%;
+    font-size: 12.5px;
+  }
+
+  .document-shell td:first-child {
+    white-space: normal;
+  }
+}
