@@ -213,8 +213,9 @@ enum MCPServerCommand {
             throw MissingArgumentError("local_path")
         }
         let fileURL = URL(fileURLWithPath: NSString(string: localPath).expandingTildeInPath)
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            throw MissingArgumentError("local_path（文件不存在：\(fileURL.path)）")
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
+            throw MissingArgumentError("local_path（文件不存在或不是普通文件：\(fileURL.path)）")
         }
         var key = arguments["key"]?.mcpString ?? ""
         if key.isEmpty {
@@ -269,7 +270,7 @@ enum MCPServerCommand {
         }
         var expires = arguments["expires_seconds"]?.mcpInt ?? 3600
         expires = max(1, min(expires, 604_800))
-        let url = client.presignedURL(bucket: bucket, key: key, expires: expires)
+        let url = try client.presignedURL(bucket: bucket, key: key, expires: expires)
         return textResult(Self.encodeJSON([
             "url": .string(url.absoluteString),
             "expires_seconds": .int(expires),

@@ -60,15 +60,13 @@ final class MCPOSSClient: @unchecked Sendable {
 
     // MARK: - Core request
 
-    private func perform(
+    private func makeSignedRequest(
         method: String,
         bucket: String?,
         key: String? = nil,
         query: [(String, String)] = [],
-        headers extraHeaders: [String: String] = [:],
-        body: Data? = nil,
-        fileURL: URL? = nil
-    ) async throws -> (Data, HTTPURLResponse) {
+        headers extraHeaders: [String: String] = [:]
+    ) throws -> URLRequest {
         let url = try makeURL(bucket: bucket, key: key, query: query)
         var request = URLRequest(url: url)
         request.httpMethod = method.uppercased()
@@ -84,6 +82,25 @@ final class MCPOSSClient: @unchecked Sendable {
         for (name, value) in signed {
             request.setValue(value, forHTTPHeaderField: name)
         }
+        return request
+    }
+
+    private func perform(
+        method: String,
+        bucket: String?,
+        key: String? = nil,
+        query: [(String, String)] = [],
+        headers extraHeaders: [String: String] = [:],
+        body: Data? = nil,
+        fileURL: URL? = nil
+    ) async throws -> (Data, HTTPURLResponse) {
+        let request = try makeSignedRequest(
+            method: method,
+            bucket: bucket,
+            key: key,
+            query: query,
+            headers: extraHeaders
+        )
 
         let data: Data
         let response: URLResponse
@@ -134,7 +151,13 @@ final class MCPOSSClient: @unchecked Sendable {
         if let delimiter, !delimiter.isEmpty { query.append(("delimiter", delimiter)) }
         if let token, !token.isEmpty { query.append(("continuation-token", token)) }
         let (data, _) = try await perform(method: "GET", bucket: bucket, query: query)
-        return try OSSXML.listing(from: data)
+        var listing = try OSSXML.listing(from: data)
+        // Hierarchical mode shows folders separately; drop the "folder/"
+        // placeholder objects so AI doesn't see them twice (matches the GUI).
+        if delimiter != nil {
+            listing.objects.removeAll { $0.isFolderPlaceholder }
+        }
+        return listing
     }
 
     struct UploadResult: Sendable {
@@ -167,7 +190,7 @@ final class MCPOSSClient: @unchecked Sendable {
             key: key,
             size: size,
             etag: etag,
-            url: publicURL(bucket: bucket, key: key)
+            url: try publicURL(bucket: bucket, key: key)
         )
     }
 
@@ -179,19 +202,81 @@ final class MCPOSSClient: @unchecked Sendable {
     }
 
     func downloadFile(bucket: String, key: String, to destination: URL) async throws -> DownloadResult {
-        let (data, _) = try await perform(method: "GET", bucket: bucket, key: key)
+        // Never silently overwrite local files — mirrors the GUI app's boundary.
+        guard !FileManager.default.fileExists(atPath: destination.path) else {
+            throw OSSServiceError(
+                statusCode: 0,
+                code: "LocalFileExists",
+                message: "本地已存在同名文件，未覆盖：\(destination.path)。请换一个保存路径，或先删除该文件。",
+                requestId: ""
+            )
+        }
+        let request = try makeSignedRequest(method: "GET", bucket: bucket, key: key)
+        // Download task streams to a temp file — memory stays flat for huge objects.
+        let (tempURL, response): (URL, URLResponse)
+        do {
+            (tempURL, response) = try await session.download(for: request)
+        } catch let urlError as URLError {
+            throw OSSServiceError(
+                statusCode: 0,
+                code: "NetworkError",
+                message: "网络请求失败：\(urlError.localizedDescription)",
+                requestId: ""
+            )
+        }
+        guard let http = response as? HTTPURLResponse else {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw OSSServiceError(statusCode: 0, code: "InvalidResponse", message: "非 HTTP 响应", requestId: "")
+        }
+        guard (200...299).contains(http.statusCode) else {
+            let body = (try? Data(contentsOf: tempURL)) ?? Data()
+            try? FileManager.default.removeItem(at: tempURL)
+            throw OSSXML.parseError(body, status: http.statusCode)
+        }
         let parent = destination.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
-        try data.write(to: destination, options: .atomic)
+        do {
+            try FileManager.default.moveItem(at: tempURL, to: destination)
+        } catch {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw error
+        }
+        let size = (try FileManager.default.attributesOfItem(atPath: destination.path)[.size] as? Int64) ?? 0
         return DownloadResult(
             bucket: bucket,
             key: key,
             localPath: destination.path,
-            size: Int64(data.count)
+            size: size
         )
     }
 
-    func presignedURL(bucket: String, key: String, expires: Int) -> URL {
+    /// Shared URL components for object addresses (virtual-host or path style,
+    /// preserving a custom endpoint's port).
+    private func objectComponents(bucket: String, key: String) throws -> URLComponents {
+        var components = URLComponents()
+        let endpoint = OSSEndpoint.parse(profile.apiEndpoint)
+        components.scheme = endpoint.scheme
+        components.host = OSSEndpoint.objectHost(endpoint: endpoint.host, bucketName: bucket)
+        components.port = endpoint.port
+        let encodedKey = OSSSigner.uriEncode(key, encodeSlash: false)
+        if components.host == endpoint.host {
+            components.percentEncodedPath = "/" + OSSSigner.uriEncode(bucket, encodeSlash: true) + "/" + encodedKey
+        } else {
+            components.percentEncodedPath = "/" + encodedKey
+        }
+        return components
+    }
+
+    private static func invalidObjectURL() -> OSSServiceError {
+        OSSServiceError(
+            statusCode: 0,
+            code: "InvalidURL",
+            message: "无法构造对象 URL（Bucket 名称或 Key 含非法字符）",
+            requestId: ""
+        )
+    }
+
+    func presignedURL(bucket: String, key: String, expires: Int) throws -> URL {
         let query = OSSSigner.presignedQuery(
             method: "GET",
             bucket: bucket,
@@ -200,16 +285,7 @@ final class MCPOSSClient: @unchecked Sendable {
             credentials: profile.credentials,
             expires: expires
         )
-        var components = URLComponents()
-        let endpoint = OSSEndpoint.parse(profile.apiEndpoint)
-        components.scheme = endpoint.scheme
-        components.host = OSSEndpoint.objectHost(endpoint: endpoint.host, bucketName: bucket)
-        let encodedKey = OSSSigner.uriEncode(key, encodeSlash: false)
-        if components.host == endpoint.host {
-            components.percentEncodedPath = "/" + OSSSigner.uriEncode(bucket, encodeSlash: true) + "/" + encodedKey
-        } else {
-            components.percentEncodedPath = "/" + encodedKey
-        }
+        var components = try objectComponents(bucket: bucket, key: key)
         components.percentEncodedQuery = query
             .map { name, value in
                 let encodedName = OSSSigner.uriEncode(name, encodeSlash: true)
@@ -217,21 +293,18 @@ final class MCPOSSClient: @unchecked Sendable {
                 return encodedName + "=" + OSSSigner.uriEncode(value, encodeSlash: true)
             }
             .joined(separator: "&")
-        return components.url!
+        guard let url = components.url else {
+            throw Self.invalidObjectURL()
+        }
+        return url
     }
 
-    func publicURL(bucket: String, key: String) -> URL {
-        var components = URLComponents()
-        let endpoint = OSSEndpoint.parse(profile.apiEndpoint)
-        components.scheme = endpoint.scheme
-        components.host = OSSEndpoint.objectHost(endpoint: endpoint.host, bucketName: bucket)
-        let encodedKey = OSSSigner.uriEncode(key, encodeSlash: false)
-        if components.host == endpoint.host {
-            components.percentEncodedPath = "/" + OSSSigner.uriEncode(bucket, encodeSlash: true) + "/" + encodedKey
-        } else {
-            components.percentEncodedPath = "/" + encodedKey
+    func publicURL(bucket: String, key: String) throws -> URL {
+        let components = try objectComponents(bucket: bucket, key: key)
+        guard let url = components.url else {
+            throw Self.invalidObjectURL()
         }
-        return components.url!
+        return url
     }
 
     /// Cheap credential check used by `lumen-mcp auth --test`.

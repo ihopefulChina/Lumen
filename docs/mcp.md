@@ -83,7 +83,7 @@ claude mcp add lumen -- /absolute/path/to/Lumen/Tools/lumen-mcp/.build/release/l
 | `list_buckets` | 列出账号下所有 Bucket（名称、地域、创建时间） |
 | `list_objects` | 浏览 Bucket 内的对象和子文件夹；默认按文件夹层级，传空 `delimiter` 可递归 |
 | `upload_file` | 上传本机文件到 OSS，返回对象 URL；Content-Type 按扩展名推断 |
-| `download_file` | 下载对象到本机指定路径 |
+| `download_file` | 下载对象到本机指定路径；本地已有同名文件时不覆盖，会报错提示换路径 |
 | `presign_url` | 为私有 Bucket 的对象生成带签名的临时下载链接（默认 1 小时） |
 
 典型对话示例：
@@ -108,5 +108,7 @@ claude mcp add lumen -- /absolute/path/to/Lumen/Tools/lumen-mcp/.build/release/l
 | AI 提示连接失败 | 检查客户端配置里的二进制路径是否为绝对路径、文件是否有执行权限 |
 | 上传报签名错误 | 运行 `lumen-mcp auth --test` 验证凭证与地域是否匹配 |
 | 想换账号 | `lumen-mcp auth --use <名称>` 切换活动档案后重启 AI 客户端 |
+| 重新编译后 AI 调用时弹钥匙串授权窗 | 二进制重新构建后签名发生变化，属正常现象，点一次「始终允许」即可 |
+| 下载报「本地已存在同名文件」 | 这是不覆盖保护。让 AI 换一个保存路径，或先手动删除该文件 |
 
 更多问题请到 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues) 反馈。
