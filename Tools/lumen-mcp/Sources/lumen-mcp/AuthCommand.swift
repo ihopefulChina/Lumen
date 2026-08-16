@@ -171,18 +171,31 @@ enum AuthCommand {
     private static func promptSecret(_ message: String) -> String? {
         print("\(message)：", terminator: "")
         fflush(stdout)
-        // Read raw chars with echo disabled so the secret stays off-screen.
-        var buffer: [CChar] = []
+        // Disable terminal echo while reading, so the secret stays off-screen.
+        // Falls back to plain reading when stdin is not a TTY (piped input).
+        var original = termios()
+        let isTTY = tcgetattr(STDIN_FILENO, &original) == 0
+        if isTTY {
+            var noEcho = original
+            noEcho.c_lflag &= ~tcflag_t(ECHO)
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &noEcho)
+        }
+        // Collect raw bytes (NOT CChar — values > 127 would trap on Int8 init).
+        var bytes: [UInt8] = []
         while true {
             let ch = getchar()
             if ch == EOF || ch == 0x0A { break }
             if ch == 0x08 || ch == 0x7F {
-                if !buffer.isEmpty { buffer.removeLast() }
+                if !bytes.isEmpty { bytes.removeLast() }
                 continue
             }
-            buffer.append(CChar(ch))
+            if ch < 0x20 { continue } // ignore other control characters
+            bytes.append(UInt8(truncatingIfNeeded: ch))
         }
-        print()
-        return String(cString: buffer + [0])
+        if isTTY {
+            tcsetattr(STDIN_FILENO, TCSAFLUSH, &original)
+            print()
+        }
+        return String(decoding: bytes, as: UTF8.self)
     }
 }
