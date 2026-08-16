@@ -3,6 +3,38 @@
     <channel>
         <title>Lumen</title>
         <item>
+            <title>1.0.2</title>
+            <pubDate>Sun, 16 Aug 2026 17:13:06 +0800</pubDate>
+            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v1.0.2</link>
+            <sparkle:version>13</sparkle:version>
+            <sparkle:shortVersionString>1.0.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Lumen 1.0.2
+
+这是一个小修复版本，重点让「传输完成时显示通知」真的生效。
+
+## 修复
+
+- 设置里「全部完成时显示通知」的开关现在会和系统通知权限保持一致。
+  - 之前如果用户拒绝过系统的通知授权，开关仍可能显示「开」，但通知其实发不出来。
+  - 启动时会自动对齐状态；如果系统权限被拒，开关会自动回到「关」。
+  - 每次在设置里重新打开开关都会再尝试请求一次授权。
+- 前台运行时完成传输，通知横幅会正常弹出并可以带声音（之前会被折叠到通知中心）。
+- 通知投递失败会写入 `NSLog`，方便后续诊断。
+
+## 系统要求
+
+- macOS 15 或更高版本
+- Apple Silicon Mac
+
+> 目前安装包使用 ad-hoc 签名（暂未配置开发者证书）。首次打开如果被 macOS 拦下，在访达中右键 Lumen 选择「打开」即可；以后不会再提示。
+
+完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
+]]></description>
+            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v1.0.2/Lumen-1.0.2.dmg" length="4578939" type="application/octet-stream" sparkle:edSignature="CEmQZwlLqnz0OgGZVR86CQXTwk5x/Hyc5w3tWZtneYR1SjEXhtn2gzitBypPPmCq/RT0AVv9iKFZ+LK/ely7AA=="/>
+        </item>
+        <item>
             <title>1.0.1</title>
             <pubDate>Sun, 16 Aug 2026 16:54:54 +0800</pubDate>
             <link>https://github.com/ihopefulChina/Lumen/releases/tag/v1.0.1</link>
@@ -92,58 +124,6 @@
 完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
 ]]></description>
             <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v1.0.0/Lumen-1.0.0.dmg" length="4579627" type="application/octet-stream" sparkle:edSignature="9Xxtn89fdhtYWLNqc4dKChjBhvghKlJRhklS0918AEjrRDP/y5WQjlyvYOkJKDYdPwxVecw6Ri0dU2EWR3ZNAA=="/>
-        </item>
-        <item>
-            <title>0.0.9</title>
-            <pubDate>Sat, 15 Aug 2026 10:15:49 +0800</pubDate>
-            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.9</link>
-            <sparkle:version>9</sparkle:version>
-            <sparkle:shortVersionString>0.0.9</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Lumen 0.0.9
-
-这一版补齐了一套更完整的 Finder 工作流：从整个 Bucket 找到对象，可靠地传输和整理，再在需要时恢复历史内容。
-
-## 查找
-
-- 搜索可在「当前文件夹」与「当前 Bucket」之间切换。
-- Bucket 搜索支持类型、大小和修改时间筛选，显示分页扫描进度，也可以随时停止。
-- 侧边栏新增最近修改、大文件、已删除对象和失败传输。
-
-## 传输
-
-- 新增独立传输中心，可暂停、继续、重试、调整队列顺序，并显示速度和剩余时间。
-- multipart 上传与 Range 下载会保存检查点；暂停或重新打开 Lumen 后可继续。
-- 新增上传/下载独立并发数、方向限速、默认下载位置、冲突策略和完成通知。
-- 同名项目可选择询问、替换、跳过或按访达方式保留两者。
-
-## 恢复
-
-- 对象菜单新增版本历史，可将历史版本恢复为新的当前版本。
-- 「已删除」位置可以恢复精确的 delete marker。
-- 新增对象属性编辑，可修改 Web 属性、用户元数据和最多十个 OSS 标签。
-
-## 整理
-
-- OSS 文件或文件夹可以直接拖到访达；多选会保留在「Lumen 下载」目录中。
-- 复制后切换 Bucket 再粘贴，可安全地跨 Bucket 复制或移动。
-- 同账号同地域使用云端复制；跨地域或跨账号会在确认后经由这台 Mac 中转。
-- 跨 Bucket 移动只在全部复制成功后删除来源。
-
-## Mac 体验
-
-- 支持原生窗口标签页，`Command–N` 新建窗口，`Option–Command–L` 打开传输中心。
-- 更新了帮助、README、官网与完全虚拟的产品截图。
-
-## 系统要求
-
-- macOS 15 或更高版本
-- Apple Silicon Mac
-
-完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
-]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.9/Lumen-0.0.9.dmg" length="4559737" type="application/octet-stream" sparkle:edSignature="/m7hQyIJy285lIbSvbveUmblth4Ihf3rNXS7hDt+xbBUSL9aGhlfWEKSl80jLXipuxCDT6VXezJCinGdfwsxDQ=="/>
         </item>
     </channel>
 </rss>
