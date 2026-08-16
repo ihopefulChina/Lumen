@@ -1,7 +1,6 @@
 import AppKit
 import Foundation
 import Observation
-import UniformTypeIdentifiers
 
 enum BannerAction: Equatable {
     case undoCloudOperation
@@ -58,13 +57,10 @@ final class AppModel {
     var searchController = BucketSearchController()
 
     var showInspector = false
-    var versionHistoryModel: VersionHistoryModel?
-    var showVersionHistory = false
     var objectPropertiesModel: ObjectPropertiesModel?
     var showObjectProperties = false
     var crossBucketPreflight: CrossBucketPreflight?
     var showCrossBucketPreflight = false
-    var activeSmartLocation: SmartLocation?
     var showAccountSheet = false
     var editingAccount: OSSAccount?
     var isLoadingBuckets = false
@@ -82,11 +78,16 @@ final class AppModel {
     var inspectorText: String?
     var isLoadingHead = false
     var wantsDeleteConfirmation = false
+    private var pendingDeleteKeys: Set<String> = []
     var wantsNewFolder = false
-    var isOrganizingCloud = false
+    var isOrganizingCloud = false {
+        didSet { ProcessLifetime.setOrganizing(isOrganizingCloud) }
+    }
     private(set) var lastCloudUndoOperation: CloudUndoOperation?
     private(set) var lastDeleteUndoOperation: CloudDeleteUndoOperation?
     var cloudClipboard: CloudDragPayload?
+    var cloudClipboardMode: CloudOperationMode = .copy
+    private var cloudClipboardChangeCount = -1
     var pendingOpenURLs: [URL] = []
     private var pendingOwnedTemporaryURLs: Set<URL> = []
     private var ownedPreviewURLs: Set<URL> = []
@@ -158,26 +159,14 @@ final class AppModel {
         self.updates = services.updates
         self.favorites = services.favorites
         browser.viewMode = services.settings.preferredViewMode
-        if kind == .window, let source = services.focused {
-            selectedAccountID = source.selectedAccountID
-            buckets = source.buckets
-            selectedBucketName = source.selectedBucketName
-            browser.prefix = source.browser.prefix
-            browser.viewMode = source.browser.viewMode
-            browser.imagesOnly = services.settings.imagesOnly
-        } else if let stored = UUID(uuidString: lastAccountID), services.accounts.contains(where: { $0.id == stored }) {
+        browser.imagesOnly = services.settings.imagesOnly
+        if let stored = UUID(uuidString: lastAccountID), services.accounts.contains(where: { $0.id == stored }) {
             selectedAccountID = stored
         } else {
             selectedAccountID = services.accounts.first?.id
         }
         if kind == .window {
             services.register(self)
-        }
-    }
-
-    deinit {
-        if kind == .window {
-            // unregister is MainActor; session list is compacted on next register
         }
     }
 
@@ -221,6 +210,43 @@ final class AppModel {
             }
         }
         browser.imagesOnly = settings.imagesOnly
+    }
+
+    var sidebarSelection: SidebarSelection? {
+        if let accountID = selectedAccountID,
+           let favorite = favorites.items.first(where: {
+               $0.accountID == accountID
+                   && $0.bucketName == selectedBucketName
+                   && $0.prefix == browser.prefix
+           }) {
+            return .favorite(favorite.id)
+        }
+        if let name = selectedBucketName {
+            return .bucket(name)
+        }
+        if let id = selectedAccountID {
+            return .account(id)
+        }
+        return nil
+    }
+
+    func applySidebarSelection(_ selection: SidebarSelection?) {
+        switch selection {
+        case .account(let id):
+            guard let account = accounts.first(where: { $0.id == id }),
+                  selectedAccountID != id
+            else { return }
+            selectAccount(account)
+        case .bucket(let name):
+            guard let bucket = buckets.first(where: { $0.name == name }) else { return }
+            if selectedBucketName == name, browser.prefix.isEmpty { return }
+            selectBucket(bucket)
+        case .favorite(let id):
+            guard let favorite = favorites.items.first(where: { $0.id == id }) else { return }
+            openFavorite(favorite)
+        case nil:
+            break
+        }
     }
 
     func selectAccount(_ account: OSSAccount) {
@@ -299,6 +325,9 @@ final class AppModel {
             return
         }
 
+        let expectedAccountID = favorite.accountID
+        let expectedBucketName = favorite.bucketName
+
         if selectedAccountID != account.id {
             invalidateAllBrowserRequests()
             selectedAccountID = account.id
@@ -309,10 +338,12 @@ final class AppModel {
         }
 
         Task {
-            if !buckets.contains(where: { $0.name == favorite.bucketName }) {
-                await refreshBuckets(selecting: favorite.bucketName)
+            if selectedAccountID == expectedAccountID,
+               !buckets.contains(where: { $0.name == expectedBucketName }) {
+                await refreshBuckets(selecting: expectedBucketName)
             }
-            guard let bucket = buckets.first(where: { $0.name == favorite.bucketName }) else {
+            guard selectedAccountID == expectedAccountID else { return }
+            guard let bucket = buckets.first(where: { $0.name == expectedBucketName }) else {
                 favorites.remove(favorite)
                 present("这个常用位置的存储空间已不存在", error: true)
                 return
@@ -507,14 +538,26 @@ final class AppModel {
             useTransferAccelerate: draft.useTransferAccelerate,
             createdAt: draft.createdAt
         )
-        try AccountStore.storeSecrets(id: account.id, secret: draft.secret, token: draft.token)
         var updatedAccounts = accounts
         if let index = updatedAccounts.firstIndex(where: { $0.id == account.id }) {
             updatedAccounts[index] = account
         } else {
             updatedAccounts.append(account)
         }
+        let previousSecret = SecretStore.get(account: AccountStore.secretAccount(account.id))
+        let previousToken = SecretStore.get(account: AccountStore.tokenAccount(account.id))
         try AccountStore.save(updatedAccounts)
+        do {
+            try AccountStore.storeSecrets(id: account.id, secret: draft.secret, token: draft.token)
+        } catch {
+            try? AccountStore.save(accounts)
+            if let previousSecret {
+                try? AccountStore.storeSecrets(id: account.id, secret: previousSecret, token: previousToken)
+            } else {
+                AccountStore.deleteSecrets(id: account.id)
+            }
+            throw error
+        }
         accounts = updatedAccounts
         buckets = found.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
         selectedAccountID = account.id
@@ -557,11 +600,16 @@ final class AppModel {
         applyTemplate: Bool? = nil,
         ownedTemporaryURLs: Set<URL> = []
     ) {
-        guard selectedAccount != nil, selectedBucket != nil, makeClient() != nil else {
+        // makeClient() reports its own error (e.g. missing credentials), so
+        // avoid stacking a second, misleading banner on top of it.
+        let clientMissing = makeClient() == nil
+        guard selectedAccount != nil, selectedBucket != nil, !clientMissing else {
             pendingOpenURLs.append(contentsOf: urls)
             pendingOwnedTemporaryURLs.formUnion(ownedTemporaryURLs)
-            showAccountSheet = accounts.isEmpty
-            present("先添加账号并选择存储空间", error: true)
+            if selectedAccount == nil || selectedBucket == nil {
+                showAccountSheet = accounts.isEmpty
+                present("先添加账号并选择存储空间", error: true)
+            }
             return
         }
         let dest = prefix ?? browser.prefix
@@ -579,7 +627,13 @@ final class AppModel {
     func confirmOverwrite() {
         guard let prompt = overwritePrompt else { return }
         overwritePrompt = nil
-        commit(plan: prompt.plan, client: prompt.client, account: prompt.account, bucket: prompt.bucket)
+        commit(
+            plan: prompt.plan,
+            client: prompt.client,
+            account: prompt.account,
+            bucket: prompt.bucket,
+            allowOverwrite: true
+        )
     }
 
     func skipOverwriteConflicts() {
@@ -690,7 +744,8 @@ final class AppModel {
             client: client,
             account: account,
             bucket: bucket,
-            excludingSources: excludedSources
+            excludingSources: excludedSources,
+            allowOverwrite: settings.transferConflictPolicy == .replace
         )
     }
 
@@ -699,7 +754,8 @@ final class AppModel {
         client: OSSClient,
         account: OSSAccount,
         bucket: OSSBucket?,
-        excludingSources: Set<URL> = []
+        excludingSources: Set<URL> = [],
+        allowOverwrite: Bool = false
     ) {
         transfers.enqueue(
             plan: plan,
@@ -707,12 +763,13 @@ final class AppModel {
             account: account,
             bucket: bucket,
             settings: settings,
-            excludingSources: excludingSources
+            excludingSources: excludingSources,
+            allowOverwrite: allowOverwrite
         )
         scheduleListingRefresh()
     }
 
-    private func existingKeys(among keys: [String], client: OSSClient) async throws -> Set<String> {
+    func existingKeys(among keys: [String], client: OSSClient) async throws -> Set<String> {
         let unique = Array(Set(keys))
         if unique.count > 40 {
             let parents = Set(unique.map { PathTemplate.parentPrefix($0) })
@@ -720,7 +777,12 @@ final class AppModel {
             for parent in parents {
                 let listing = try await client.listAllObjects(prefix: parent)
                 if listing.truncated {
-                    throw OSSServiceError(statusCode: 0, code: "IncompleteList", message: "无法完整确认是否重名", requestId: "")
+                    for key in unique where PathTemplate.parentPrefix(key) == parent {
+                        if try await client.objectExists(key: key) {
+                            found.insert(key)
+                        }
+                    }
+                    continue
                 }
                 found.formUnion(listing.objects.map(\.key))
             }
@@ -754,13 +816,44 @@ final class AppModel {
     }
 
     func requestDeleteSelection() {
-        guard !browser.actionableSelectionKeys.isEmpty else { return }
-        wantsDeleteConfirmation = true
+        requestDeleteSelection(keys: browser.actionableSelectionKeys)
+    }
+
+    func requestDeleteSelection(keys: Set<String>, deferConfirmation: Bool = false) {
+        guard !isOrganizingCloud else {
+            present("请等待当前云端整理完成", error: true)
+            return
+        }
+        // Restrict to what the browser actually shows and what deleteSelection
+        // will act on, so the confirmation dialog never over-counts.
+        let known = Set(keys.filter { browser.visibleKeys.contains($0) })
+        guard !known.isEmpty else { return }
+        pendingDeleteKeys = known
+        browser.replaceSelection(known)
+        if deferConfirmation {
+            DispatchQueue.main.async { [weak self] in
+                self?.wantsDeleteConfirmation = true
+            }
+        } else {
+            wantsDeleteConfirmation = true
+        }
+    }
+
+    func cancelPendingDelete() {
+        pendingDeleteKeys = []
+    }
+
+    private var deleteTargetFolders: [OSSFolder] {
+        browser.folders.filter { pendingDeleteKeys.contains($0.prefix) }
+    }
+
+    private var deleteTargetObjects: [OSSObject] {
+        browser.objects.filter { pendingDeleteKeys.contains($0.key) }
     }
 
     var deleteDialogTitle: String {
-        let folders = browser.selectedFolders
-        let files = browser.selectedObjects
+        let folders = deleteTargetFolders
+        let files = deleteTargetObjects
         let count = folders.count + files.count
         if count <= 1, let folder = folders.first, files.isEmpty {
             return "删除文件夹“\(folder.name)”？"
@@ -768,12 +861,12 @@ final class AppModel {
         if count <= 1, let file = files.first {
             return "删除“\(file.name)”？"
         }
-        return "删除 \(max(count, browser.selectedKeys.count)) 项？"
+        return "删除 \(max(count, pendingDeleteKeys.count)) 项？"
     }
 
     var deleteDialogMessage: String {
-        let folders = browser.selectedFolders
-        let files = browser.selectedObjects
+        let folders = deleteTargetFolders
+        let files = deleteTargetObjects
         var lines: [String] = folders.prefix(8).map { "\($0.name)/" }
         let remain = 8 - lines.count
         if remain > 0 {
@@ -814,6 +907,7 @@ final class AppModel {
         let key = PathTemplate.join(browser.prefix, key: name) + "/"
         do {
             try await client.putData(key: key, data: Data(), contentType: "application/x-directory", acl: .default)
+            noteBucketMutated()
             await refreshListing()
         } catch {
             present(error.localizedDescription, error: true)
@@ -821,15 +915,20 @@ final class AppModel {
     }
 
     func deleteSelection() async {
+        guard !isOrganizingCloud else {
+            present("请等待当前云端整理完成", error: true)
+            return
+        }
         guard let client = makeClient(),
               let accountID = selectedAccountID,
               let bucketName = selectedBucketName
         else { return }
-        let selectedKeys = browser.actionableSelectionKeys
+        let selectedKeys = pendingDeleteKeys.isEmpty ? browser.actionableSelectionKeys : pendingDeleteKeys
+        pendingDeleteKeys = []
         let keys = browser.orderedVisibleKeys.filter(selectedKeys.contains)
         guard !keys.isEmpty else { return }
-        lastCloudUndoOperation = nil
-        lastDeleteUndoOperation = nil
+        let previousCloudUndo = lastCloudUndoOperation
+        let previousDeleteUndo = lastDeleteUndoOperation
         var receipts: [OSSDeleteReceipt] = []
         do {
             for key in keys {
@@ -841,12 +940,14 @@ final class AppModel {
                     receipts.append(try await client.deleteObject(key: key))
                 }
             }
+            lastCloudUndoOperation = nil
             recordDeleteUndo(
                 receipts: receipts,
                 sourceSelection: Set(keys),
                 accountID: accountID,
                 bucketName: bucketName
             )
+            noteBucketMutated()
             browser.clearSelection()
             await refreshListing()
             Haptics.alignment()
@@ -856,31 +957,25 @@ final class AppModel {
             )
         } catch {
             guard !receipts.isEmpty else {
+                lastCloudUndoOperation = previousCloudUndo
+                lastDeleteUndoOperation = previousDeleteUndo
                 present(error.localizedDescription, error: true)
                 return
             }
+            lastCloudUndoOperation = nil
             recordDeleteUndo(
                 receipts: receipts,
                 sourceSelection: Set(receipts.map(\.key)),
                 accountID: accountID,
                 bucketName: bucketName
             )
+            noteBucketMutated()
             await refreshListing()
             present(
                 "已删除 \(receipts.count) 个对象，之后失败：\(error.localizedDescription)",
                 error: true,
                 action: lastDeleteUndoOperation == nil ? nil : .undoCloudOperation
             )
-        }
-    }
-
-    func deleteFolder(_ folder: OSSFolder) async {
-        guard let client = makeClient() else { return }
-        do {
-            try await deletePrefix(folder.prefix, client: client) { _ in }
-            await refreshListing()
-        } catch {
-            present(error.localizedDescription, error: true)
         }
     }
 
@@ -946,6 +1041,7 @@ final class AppModel {
         defer { isOrganizingCloud = false }
         do {
             try await client.renameObject(from: object.key, to: dest, overwrite: false)
+            noteBucketMutated()
             await refreshListing()
             browser.select(key: dest, modifiers: [])
             lastDeleteUndoOperation = nil
@@ -962,6 +1058,12 @@ final class AppModel {
             )
             present("已重命名“\(name)”", action: .undoCloudOperation)
             return true
+        } catch CloudObjectOperationError.sourceCleanupFailed {
+            // Copy committed but the source delete failed: the object now
+            // exists under both names. Refresh so the browser shows the truth.
+            await refreshListing()
+            present("目标已复制完成，但未能删除原文件", error: true)
+            return false
         } catch {
             present(error.localizedDescription, error: true)
             return false
@@ -1005,6 +1107,7 @@ final class AppModel {
                 source: folder.prefix,
                 destination: destination
             )
+            noteBucketMutated()
             await refreshListing()
             browser.select(key: destination, modifiers: [])
             lastDeleteUndoOperation = nil
@@ -1024,6 +1127,12 @@ final class AppModel {
             )
             present("已重命名“\(folder.name)”", action: .undoCloudOperation)
             return true
+        } catch CloudObjectOperationError.sourceCleanupFailed {
+            // A folder rename is a copy-then-delete of every object in it and
+            // can partially succeed; refresh so the listing shows the truth.
+            await refreshListing()
+            present("目标已复制完成，但未能删除部分原文件", error: true)
+            return false
         } catch {
             present(error.localizedDescription, error: true)
             return false
@@ -1054,19 +1163,11 @@ final class AppModel {
         guard (!payload.objectKeys.isEmpty || !payload.folderPrefixes.isEmpty),
               let client = makeClient()
         else { return NSItemProvider() }
-        return FinderExportCoordinator.itemProvider(for: payload, client: client)
-    }
-
-    func presentVersionHistory(for object: OSSObject) {
-        guard let client = makeClient() else { return }
-        versionHistoryModel = VersionHistoryModel(
-            title: "“\(object.name)”的版本",
-            prefix: object.key,
-            markerOnly: false,
+        return FinderExportCoordinator.itemProvider(
+            for: payload,
             client: client,
-            onRecovered: { [weak self] in self?.didRecoverCloudObject() }
+            speedLimit: settings.downloadSpeedLimit
         )
-        showVersionHistory = true
     }
 
     func presentObjectProperties(for object: OSSObject) {
@@ -1079,125 +1180,237 @@ final class AppModel {
         showObjectProperties = true
     }
 
-    @discardableResult
-    func openSmartLocation(_ location: SmartLocation) -> Bool {
-        if location == .failedTransfers {
-            transferFilter = .failed
-            activeSmartLocation = location
-            return true
-        }
-        guard selectedBucket != nil, let client = makeClient() else {
-            present("请先选择一个 Bucket", error: true)
-            return false
-        }
-        activeSmartLocation = location
-        switch location {
-        case .recent:
-            searchScope = .bucket
-            browser.searchText = ""
-            searchFilter = .recentObjects(days: 7)
-            Task { await runBucketSearch() }
-        case .large:
-            searchScope = .bucket
-            browser.searchText = ""
-            searchFilter = .largeObjects
-            Task { await runBucketSearch() }
-        case .deleted:
-            versionHistoryModel = VersionHistoryModel(
-                title: "已删除的对象",
-                prefix: "",
-                markerOnly: true,
-                client: client,
-                onRecovered: { [weak self] in self?.didRecoverCloudObject() }
-            )
-            showVersionHistory = true
-        case .failedTransfers:
-            break
-        }
-        return true
-    }
-
-    private func didRecoverCloudObject() {
-        if let accountID = selectedAccountID, let bucketName = selectedBucketName {
-            searchController.invalidate(accountID: accountID, bucketName: bucketName)
-        }
-        scheduleListingRefresh()
-        present("对象已恢复")
-    }
-
     private func didSaveObjectProperties() {
-        if let accountID = selectedAccountID, let bucketName = selectedBucketName {
-            searchController.invalidate(accountID: accountID, bucketName: bucketName)
-        }
+        noteBucketMutated()
         scheduleListingRefresh()
-        present("对象属性已存储")
+        Task { await loadInspector() }
+        present("对象属性已保存到云端")
     }
 
-    func copyCloudSelection(clickedKey: String) {
-        let payload = cloudDragPayload(clickedKey: clickedKey)
-        guard !payload.objectKeys.isEmpty || !payload.folderPrefixes.isEmpty else { return }
+    func noteBucketMutated(accountID: UUID? = nil, bucketName: String? = nil) {
+        if let accountID, let bucketName {
+            searchController.invalidate(accountID: accountID, bucketName: bucketName)
+            return
+        }
+        if let selectedAccountID, let selectedBucketName {
+            searchController.invalidate(accountID: selectedAccountID, bucketName: selectedBucketName)
+        }
+    }
+
+    var canCopyCloudItems: Bool {
+        !browser.actionableSelectionKeys.isEmpty
+    }
+
+    var resolvedClipboardItem: CloudClipboardItem? {
+        if let item = CloudClipboard.read() {
+            return item
+        }
+        if let payload = cloudClipboard,
+           NSPasteboard.general.changeCount == cloudClipboardChangeCount
+        {
+            return CloudClipboardItem(payload: payload, mode: cloudClipboardMode)
+        }
+        return nil
+    }
+
+    var resolvedCloudClipboard: CloudDragPayload? {
+        resolvedClipboardItem?.payload
+    }
+
+    var canPasteCloudItems: Bool {
+        resolvedClipboardItem != nil || cloudClipboard != nil
+    }
+
+    var canPaste: Bool {
+        canPasteCloudItems || hasFileURLsOnPasteboard
+    }
+
+    var pasteMenuTitle: String {
+        clipboardMode == .move ? "移动到此处" : "粘贴"
+    }
+
+    var pasteIntoFolderTitle: String {
+        clipboardMode == .move ? "移动到此文件夹" : "粘贴到此文件夹"
+    }
+
+    private var clipboardMode: CloudOperationMode {
+        resolvedClipboardItem?.mode ?? cloudClipboardMode
+    }
+
+    func copyCloudSelection(clickedKey: String? = nil) {
+        rememberSelectionOnClipboard(clickedKey: clickedKey, mode: .copy)
+    }
+
+    func cutCloudSelection(clickedKey: String? = nil) {
+        rememberSelectionOnClipboard(clickedKey: clickedKey, mode: .move)
+    }
+
+    func paste(into destinationPrefix: String? = nil) {
+        let destination = destinationPrefix ?? browser.prefix
+        if let item = resolvedClipboardItem
+            ?? cloudClipboard.map({ CloudClipboardItem(payload: $0, mode: cloudClipboardMode) })
+        {
+            if item.mode == .move,
+               CloudObjectOperation.staysInPlace(
+                objectKeys: item.payload.objectKeys,
+                folderPrefixes: item.payload.folderPrefixes,
+                destinationPrefix: destination
+               )
+            {
+                present("项目已经在这个位置")
+                return
+            }
+            Task {
+                let succeeded = await organizeCloud(item.payload, to: destination, mode: item.mode)
+                if succeeded, item.mode == .move {
+                    clearCloudClipboard()
+                }
+            }
+            return
+        }
+        pasteFromClipboard(to: destination)
+    }
+
+    func pasteCloudItems(into destinationPrefix: String? = nil) {
+        paste(into: destinationPrefix)
+    }
+
+    private func rememberSelectionOnClipboard(clickedKey: String?, mode: CloudOperationMode) {
+        let key = clickedKey
+            ?? browser.actionableSelectionKeys.sorted().first
+            ?? ""
+        let payload = cloudDragPayload(clickedKey: key)
+        guard !payload.isEmpty else { return }
+        rememberCloudClipboard(payload, mode: mode)
+        if mode == .move {
+            present("已剪切 \(payload.itemCount) 项")
+        } else {
+            present("已复制 \(payload.itemCount) 项")
+        }
+    }
+
+    private func rememberCloudClipboard(_ payload: CloudDragPayload, mode: CloudOperationMode) {
         cloudClipboard = payload
-        let count = payload.objectKeys.count + payload.folderPrefixes.count
-        present("已复制 \(count) 项，可在目标文件夹粘贴")
+        cloudClipboardMode = mode
+        CloudClipboard.write(payload, mode: mode)
+        cloudClipboardChangeCount = NSPasteboard.general.changeCount
     }
 
-    func pasteCloudItems() {
-        guard let payload = cloudClipboard else { return }
-        Task { await organizeCloud(payload, to: browser.prefix, mode: .copy) }
+    private func clearCloudClipboard() {
+        cloudClipboard = nil
+        cloudClipboardMode = .copy
+        cloudClipboardChangeCount = -1
+        CloudClipboard.clear()
     }
 
     func moveCloudItems(_ payload: CloudDragPayload, to destinationPrefix: String) {
         Task { await organizeCloud(payload, to: destinationPrefix, mode: .move) }
     }
 
+    @discardableResult
     func organizeCloud(
         _ payload: CloudDragPayload,
         to destinationPrefix: String,
         mode: CloudOperationMode
-    ) async {
+    ) async -> Bool {
         guard !isOrganizingCloud else {
             present("请等待当前云端整理完成", error: true)
-            return
+            return false
         }
         guard payload.accountID == selectedAccountID,
               payload.bucketName == selectedBucketName
         else {
             await prepareCrossBucketOperation(payload, to: destinationPrefix, mode: mode)
-            return
+            return false
         }
         guard let client = makeClient(),
               let accountID = selectedAccountID,
               let bucketName = selectedBucketName
-        else { return }
+        else { return false }
 
         isOrganizingCloud = true
         defer { isOrganizingCloud = false }
         do {
-            var mappings = payload.objectKeys.map { sourceKey in
-                CloudObjectMapping(
-                    sourceKey: sourceKey,
-                    destinationKey: PathTemplate.join(
+            var mappings: [CloudObjectMapping] = []
+            var movedPrefixes: [(source: String, destination: String)] = []
+            var selection = Set<String>()
+            if mode == .copy {
+                let planned = payload.objectKeys.map {
+                    CloudObjectOperation.copyDestination(
+                        source: $0,
+                        destinationPrefix: destinationPrefix,
+                        isFolder: false,
+                        reserved: []
+                    )
+                } + payload.folderPrefixes.map {
+                    CloudObjectOperation.copyDestination(
+                        source: $0,
+                        destinationPrefix: destinationPrefix,
+                        isFolder: true,
+                        reserved: []
+                    )
+                }
+                var reserved = try await existingKeys(among: planned, client: client)
+                for sourceKey in payload.objectKeys {
+                    let destination = CloudObjectOperation.copyDestination(
+                        source: sourceKey,
+                        destinationPrefix: destinationPrefix,
+                        isFolder: false,
+                        reserved: reserved
+                    )
+                    reserved.insert(destination)
+                    mappings.append(CloudObjectMapping(sourceKey: sourceKey, destinationKey: destination))
+                    selection.insert(destination)
+                }
+                for sourcePrefix in payload.folderPrefixes {
+                    let destination = CloudObjectOperation.copyDestination(
+                        source: sourcePrefix,
+                        destinationPrefix: destinationPrefix,
+                        isFolder: true,
+                        reserved: reserved
+                    )
+                    reserved.insert(destination)
+                    mappings.append(contentsOf: try await client.prefixMappings(
+                        from: sourcePrefix,
+                        to: destination
+                    ))
+                    movedPrefixes.append((sourcePrefix, destination))
+                    selection.insert(destination)
+                }
+            } else {
+                // Moving an item that is already at the destination would make
+                // CloudObjectOperation.validate throw for the whole batch, so
+                // skip those and move only what actually changes place.
+                mappings = payload.objectKeys.compactMap { sourceKey in
+                    let destination = PathTemplate.join(
                         destinationPrefix,
                         key: PathTemplate.lastComponent(sourceKey)
                     )
-                )
-            }
-            var movedPrefixes: [(source: String, destination: String)] = []
-            var selection = Set(mappings.map(\.destinationKey))
-            for sourcePrefix in payload.folderPrefixes {
-                let destination = PathTemplate.join(
-                    destinationPrefix,
-                    key: PathTemplate.lastComponent(sourcePrefix)
-                ) + "/"
-                mappings.append(contentsOf: try await client.prefixMappings(
-                    from: sourcePrefix,
-                    to: destination
-                ))
-                movedPrefixes.append((sourcePrefix, destination))
-                selection.insert(destination)
+                    guard destination != sourceKey else { return nil }
+                    return CloudObjectMapping(sourceKey: sourceKey, destinationKey: destination)
+                }
+                selection = Set(mappings.map(\.destinationKey))
+                for sourcePrefix in payload.folderPrefixes {
+                    let destination = PathTemplate.join(
+                        destinationPrefix,
+                        key: PathTemplate.lastComponent(sourcePrefix)
+                    ) + "/"
+                    guard destination != sourcePrefix else { continue }
+                    mappings.append(contentsOf: try await client.prefixMappings(
+                        from: sourcePrefix,
+                        to: destination
+                    ))
+                    movedPrefixes.append((sourcePrefix, destination))
+                    selection.insert(destination)
+                }
+                guard !mappings.isEmpty else {
+                    present("项目已经在这个位置")
+                    return false
+                }
             }
 
             try await client.performCloudOperation(mappings, mode: mode)
+            noteBucketMutated()
             if mode == .move {
                 for pair in movedPrefixes {
                     favorites.replacePrefix(
@@ -1233,8 +1446,16 @@ final class AppModel {
                 mode == .move ? "已移动 \(count) 项" : "已复制 \(count) 项",
                 action: mode == .move ? .undoCloudOperation : nil
             )
+            return true
+        } catch CloudObjectOperationError.sourceCleanupFailed {
+            // A move copies first and deletes second, so it can partially
+            // succeed. Refresh so the browser shows what actually happened.
+            await refreshListing()
+            present("目标已复制完成，但未能删除部分原文件", error: true)
+            return false
         } catch {
             present(error.localizedDescription, error: true)
+            return false
         }
     }
 
@@ -1252,17 +1473,27 @@ final class AppModel {
             return
         }
         let sourceRegion = payload.sourceRegionID ?? sourceAccount.regionID
-        let sourceBucket = buckets.first(where: { $0.name == payload.bucketName })
-            ?? OSSBucket(
-                name: payload.bucketName,
-                regionID: sourceRegion,
-                location: sourceRegion,
-                extranetEndpoint: "",
-                createdAt: nil
-            )
+        // Resolve the source bucket from the SOURCE account. Using the
+        // destination account's bucket list could pick a same-named bucket in
+        // a different region and route the source client to the wrong endpoint.
+        let sourceBucket: OSSBucket?
+        if sourceAccount.id == selectedAccountID {
+            sourceBucket = buckets.first(where: { $0.name == payload.bucketName })
+        } else {
+            sourceBucket = try? await clientProvider(sourceAccount, nil)
+                .listBuckets()
+                .first(where: { $0.name == payload.bucketName })
+        }
+        let resolvedSourceBucket = sourceBucket ?? OSSBucket(
+            name: payload.bucketName,
+            regionID: sourceRegion,
+            location: sourceRegion,
+            extranetEndpoint: "",
+            createdAt: nil
+        )
         let sourceClient: OSSClient
         do {
-            sourceClient = try clientProvider(sourceAccount, sourceBucket)
+            sourceClient = try clientProvider(sourceAccount, resolvedSourceBucket)
         } catch {
             present(error.localizedDescription, error: true)
             return
@@ -1280,7 +1511,7 @@ final class AppModel {
             var plan = try CrossBucketOperation.plan(
                 sourceAccountID: sourceAccount.id,
                 destinationAccountID: destinationAccount.id,
-                sourceRegion: sourceBucket.regionID,
+                sourceRegion: resolvedSourceBucket.regionID,
                 destinationRegion: destinationBucket.regionID,
                 destinationPrefix: destinationPrefix,
                 objectKeys: payload.objectKeys,
@@ -1298,7 +1529,7 @@ final class AppModel {
 
             var renamed = 0
             var filtered: [CrossBucketMapping] = []
-            var reserved = Set(plan.mappings.map(\.destinationKey))
+            var reserved = Set(plan.mappings.map { $0.destinationKey })
             for var mapping in plan.mappings {
                 let exists = try await destinationClient.objectExists(key: mapping.destinationKey)
                 guard exists else { filtered.append(mapping); continue }
@@ -1325,16 +1556,17 @@ final class AppModel {
                     filtered.append(mapping)
                 }
             }
+            let hadMappings = !plan.mappings.isEmpty
             plan.mappings = filtered
             guard !filtered.isEmpty else {
-                present("所有同名项目都已跳过")
+                present(CrossBucketOperation.emptyResultMessage(hadMappings: hadMappings))
                 return
             }
             crossBucketPreflight = CrossBucketPreflight(
                 plan: plan,
                 mode: mode,
                 sourceAccount: sourceAccount,
-                sourceBucket: sourceBucket,
+                sourceBucket: resolvedSourceBucket,
                 destinationAccount: destinationAccount,
                 destinationBucket: destinationBucket,
                 sourceClient: sourceClient,
@@ -1359,6 +1591,8 @@ final class AppModel {
         isOrganizingCloud = true
         defer { isOrganizingCloud = false }
         var copied: [CrossBucketMapping] = []
+        var destinationVersions: [String: String] = [:]
+        var removedSources: Set<String> = []
         let temporaryRoot = FileManager.default.temporaryDirectory.appending(
             path: "Lumen-CrossBucket-\(UUID().uuidString)",
             directoryHint: .isDirectory
@@ -1371,12 +1605,15 @@ final class AppModel {
             for mapping in preflight.plan.mappings {
                 try Task.checkCancellation()
                 if preflight.plan.method == .serverSide {
-                    try await preflight.destinationClient.copyObject(
+                    let versionID = try await preflight.destinationClient.copyObject(
                         fromBucket: preflight.sourceBucket.name,
                         sourceKey: mapping.sourceKey,
                         to: mapping.destinationKey,
                         overwrite: preflight.overwrite
                     )
+                    if let versionID, !versionID.isEmpty {
+                        destinationVersions[mapping.destinationKey] = versionID
+                    }
                 } else {
                     let local = temporaryRoot.appending(path: UUID().uuidString)
                     let head = try await preflight.sourceClient.head(key: mapping.sourceKey)
@@ -1392,8 +1629,13 @@ final class AppModel {
                         fileURL: local,
                         contentType: head.contentType ?? "application/octet-stream",
                         acl: preflight.destinationAccount.defaultACL,
+                        overwrite: preflight.overwrite,
                         speedLimit: settings.uploadSpeedLimit
                     )
+                    if let versionID = try? await preflight.destinationClient.head(key: mapping.destinationKey).versionID,
+                       !versionID.isEmpty {
+                        destinationVersions[mapping.destinationKey] = versionID
+                    }
                     if let tags = try? await preflight.sourceClient.getObjectTags(key: mapping.sourceKey), !tags.isEmpty {
                         try await preflight.destinationClient.putObjectTags(key: mapping.destinationKey, tags: tags)
                     }
@@ -1404,14 +1646,40 @@ final class AppModel {
             if preflight.mode == .move {
                 for mapping in preflight.plan.mappings {
                     _ = try await preflight.sourceClient.deleteObject(key: mapping.sourceKey)
+                    removedSources.insert(mapping.sourceKey)
                 }
             }
+            noteBucketMutated(
+                accountID: preflight.sourceAccount.id,
+                bucketName: preflight.sourceBucket.name
+            )
+            noteBucketMutated(
+                accountID: preflight.destinationAccount.id,
+                bucketName: preflight.destinationBucket.name
+            )
             await refreshListing()
+            if preflight.mode == .move {
+                clearCloudClipboard()
+            }
             present(preflight.mode == .move ? "已移动 \(copied.count) 个对象" : "已复制 \(copied.count) 个对象")
         } catch {
-            for mapping in copied.reversed() {
-                _ = try? await preflight.destinationClient.deleteObject(key: mapping.destinationKey)
+            for mapping in CrossBucketOperation.rollbackDestinations(
+                copied: copied,
+                removedSources: removedSources
+            ) {
+                _ = try? await preflight.destinationClient.deleteObject(
+                    key: mapping.destinationKey,
+                    versionID: destinationVersions[mapping.destinationKey]
+                )
             }
+            noteBucketMutated(
+                accountID: preflight.sourceAccount.id,
+                bucketName: preflight.sourceBucket.name
+            )
+            noteBucketMutated(
+                accountID: preflight.destinationAccount.id,
+                bucketName: preflight.destinationBucket.name
+            )
             present("跨 Bucket 操作未完成：\(error.localizedDescription)", error: true)
         }
     }
@@ -1431,6 +1699,7 @@ final class AppModel {
                     )
                 }
                 lastDeleteUndoOperation = nil
+                noteBucketMutated()
                 browser.clearSelection()
                 await refreshListing()
                 browser.replaceSelection(deletion.sourceSelection)
@@ -1461,6 +1730,7 @@ final class AppModel {
                 )
             }
             lastCloudUndoOperation = nil
+            noteBucketMutated()
             browser.clearSelection()
             await refreshListing()
             browser.replaceSelection(operation.sourceSelection)
@@ -1515,7 +1785,7 @@ final class AppModel {
         return panel.url
     }
 
-    private func startDownloads(
+    func startDownloads(
         objects: [OSSObject],
         folders: [OSSFolder],
         to dest: URL,
@@ -1537,7 +1807,6 @@ final class AppModel {
             }
             items.append((object: object, destination: url))
         }
-        var truncated = false
         var prefixes: [(String, String)] = folders.map { ($0.prefix, $0.name) }
         if let extraPrefix {
             prefixes.append(extraPrefix)
@@ -1548,7 +1817,10 @@ final class AppModel {
         for (prefix, folderName) in prefixes {
             do {
                 let listing = try await client.listAllObjects(prefix: prefix)
-                if listing.truncated { truncated = true }
+                if listing.truncated {
+                    present("“\(folderName)”没有完整列出，已取消下载，以免遗漏", error: true)
+                    return
+                }
                 if listing.objects.isEmpty {
                     present("“\(folderName)”里没有可下载的文件", error: true)
                     continue
@@ -1595,11 +1867,10 @@ final class AppModel {
             account: account,
             bucket: bucket,
             scopedRoot: dest,
-            speedLimit: settings.downloadSpeedLimit
+            speedLimit: settings.downloadSpeedLimit,
+            allowOverwrite: resolved.allowOverwrite
         )
-        if truncated {
-            present("已加入 \(items.count) 个下载，部分目录未列完")
-        } else if skippedLocal + skippedUnsafe > 0 {
+        if skippedLocal + skippedUnsafe > 0 {
             present("已加入 \(items.count) 个下载，跳过 \(skippedLocal + skippedUnsafe) 项")
         } else if items.count > 1 {
             present("已加入 \(items.count) 个下载")
@@ -1609,7 +1880,7 @@ final class AppModel {
     private func resolveDownloadConflicts(
         items: [(object: OSSObject, destination: URL)],
         root: URL
-    ) -> (items: [(object: OSSObject, destination: URL)], skipped: Int)? {
+    ) -> (items: [(object: OSSObject, destination: URL)], skipped: Int, allowOverwrite: Bool)? {
         let rootPath = root.standardizedFileURL.path
         let rootPrefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
         let relativePaths = items.map { item -> String in
@@ -1652,18 +1923,10 @@ final class AppModel {
                 }
                 resolved.append((item.object, destination))
             case .useOriginal:
-                if existing.contains(relativePaths[index]), policy == .replace {
-                    do {
-                        try FileManager.default.removeItem(at: item.destination)
-                    } catch {
-                        skipped += 1
-                        continue
-                    }
-                }
                 resolved.append(item)
             }
         }
-        return (resolved, skipped)
+        return (resolved, skipped, policy == .replace)
     }
 
     func copyURLs(style: LinkStyle = .plain) {
@@ -1749,8 +2012,18 @@ final class AppModel {
     }
 
     func quickLookSelection() async {
-        guard let object = browser.primarySelection else { return }
-        await quickLook(object)
+        let objects = browser.selectedObjects
+        if let object = objects.first, objects.count == 1 {
+            await quickLook(object)
+            return
+        }
+        // Space with only a single folder selected opens it (folders have no
+        // QuickLook payload); this matches the double-click behavior in both
+        // grid and list views.
+        let folders = browser.selectedFolders
+        if objects.isEmpty, folders.count == 1, let folder = folders.first {
+            openFolder(folder)
+        }
     }
 
     func quickLook(_ object: OSSObject) async {
@@ -1806,10 +2079,10 @@ final class AppModel {
         banner = BannerMessage(text: text, isError: error, action: action)
     }
 
-    func pasteFromClipboard() {
+    func pasteFromClipboard(to prefix: String? = nil) {
         let board = NSPasteboard.general
         if let urls = board.readObjects(forClasses: [NSURL.self], options: nil) as? [URL], !urls.isEmpty {
-            upload(urls: urls)
+            upload(urls: urls, to: prefix)
             return
         }
         if let images = board.readObjects(forClasses: [NSImage.self], options: nil) as? [NSImage] {
@@ -1820,9 +2093,14 @@ final class AppModel {
                 }
             }
             if !files.isEmpty {
-                upload(urls: files, ownedTemporaryURLs: Set(files))
+                upload(urls: files, to: prefix, ownedTemporaryURLs: Set(files))
             }
         }
+    }
+
+    private var hasFileURLsOnPasteboard: Bool {
+        NSPasteboard.general.canReadObject(forClasses: [NSURL.self], options: nil)
+            || NSPasteboard.general.canReadObject(forClasses: [NSImage.self], options: nil)
     }
 
     private static func writeTemporaryJPEG(_ image: NSImage) -> URL? {
@@ -1831,22 +2109,22 @@ final class AppModel {
               let data = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.92])
         else { return nil }
         let url = FileManager.default.temporaryDirectory.appending(path: "clipboard-\(UUID().uuidString).jpg")
-        try? data.write(to: url)
+        do {
+            try data.write(to: url)
+        } catch {
+            return nil
+        }
         return url
     }
 
     private static func defaultClient(account: OSSAccount, bucket: OSSBucket?) throws -> OSSClient {
         let credentials = try AccountStore.credentials(for: account)
-        var client = OSSClient(
+        return OSSClient(
             credentials: credentials,
             region: account.signingRegion(for: bucket),
             endpointHost: account.apiHost(for: bucket),
             bucket: bucket?.name
         )
-        if let bucket {
-            client = client.scoped(to: bucket, account: account)
-        }
-        return client
     }
 
     private func invalidateListingAndInspectorRequests() {

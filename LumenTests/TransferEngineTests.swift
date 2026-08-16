@@ -60,12 +60,15 @@ struct TransferEngineTests {
         #expect(first.uploadSpeedLimit == .unlimited)
         #expect(first.downloadLocation == .ask)
         #expect(first.signedLinkLifetime == .oneHour)
+        #expect(first.appearance == .system)
 
         first.concurrentDownloads = 5
         first.transferConflictPolicy = .keepBoth
         first.uploadSpeedLimit = .megabytesPerSecond(10)
         first.downloadLocation = .downloads
         first.signedLinkLifetime = .sevenDays
+        first.appearance = .dark
+        defer { first.appearance = .system }
 
         let restored = AppSettings(defaults: defaults)
         #expect(restored.concurrentDownloads == 5)
@@ -73,6 +76,7 @@ struct TransferEngineTests {
         #expect(restored.uploadSpeedLimit == .megabytesPerSecond(10))
         #expect(restored.downloadLocation == .downloads)
         #expect(restored.signedLinkLifetime == .sevenDays)
+        #expect(restored.appearance == .dark)
     }
 
     @Test func transferThrottleAccountsForTimeAlreadySpentOnTheNetwork() {
@@ -225,7 +229,10 @@ struct TransferEngineTests {
 
         #expect(kept == [.renamed("hero 2.png"), .renamed("hero 3.png"), .useOriginal])
         #expect(skipped == [.skip, .skip, .useOriginal])
-        #expect(replaced == [.useOriginal, .useOriginal, .useOriginal])
+        // .replace may overwrite the remote object once, but a duplicate key
+        // inside the same batch must not silently overwrite its own earlier
+        // item, so the second occurrence is renamed instead.
+        #expect(replaced == [.useOriginal, .renamed("hero 2.png"), .useOriginal])
     }
 
     @Test func transferCenterFiltersJobsBySemanticState() {
@@ -240,7 +247,7 @@ struct TransferEngineTests {
         let jobs = [queued, paused, completed, failed]
 
         #expect(TransferFilter.all.filter(jobs).map(\.id) == jobs.map(\.id))
-        #expect(TransferFilter.active.filter(jobs).map(\.id) == [queued.id, paused.id])
+        #expect(TransferFilter.active.filter(jobs).map(\.id) == [queued.id])
         #expect(TransferFilter.paused.filter(jobs).map(\.id) == [paused.id])
         #expect(TransferFilter.completed.filter(jobs).map(\.id) == [completed.id])
         #expect(TransferFilter.failed.filter(jobs).map(\.id) == [failed.id])
@@ -481,6 +488,140 @@ struct TransferEngineTests {
         #expect(!FileManager.default.fileExists(atPath: source.path))
     }
 
+    @Test func restoreRehydratesDownloadPathAndUploadLink() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-rehydrate-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "file.txt")
+        try Data("ok".utf8).write(to: destination)
+        let rootBookmark = Data([11, 22, 33])
+        let source = try Self.temporaryFile(named: "source.txt")
+        defer { try? FileManager.default.removeItem(at: source) }
+        let sourceBookmark = Data([44, 55, 66])
+        var downloadJob = Self.persistedJob(status: .completed)
+        downloadJob.id = UUID()
+        downloadJob.kind = .download
+        downloadJob.objectKey = "file.txt"
+        downloadJob.localURL = nil
+        var uploadJob = Self.persistedJob(status: .completed)
+        uploadJob.id = UUID()
+        uploadJob.objectKey = "exact/object.txt"
+        uploadJob.publicURL = nil
+        let bucket = OSSBucket(
+            name: "bucket",
+            regionID: "cn-hangzhou",
+            location: "oss-cn-hangzhou",
+            extranetEndpoint: "oss-cn-hangzhou.aliyuncs.com",
+            createdAt: nil
+        )
+        let records = [
+            PersistedTransfer(
+                job: downloadJob,
+                retry: .download(
+                    PersistedDownloadRetry(
+                        accountID: Self.fixedAccount.id,
+                        bucket: bucket,
+                        rootBookmark: rootBookmark,
+                        object: OSSObject(
+                            key: "file.txt",
+                            size: 2,
+                            etag: "e",
+                            lastModified: nil,
+                            storageClass: "Standard"
+                        ),
+                        relativeDestination: "file.txt"
+                    )
+                )
+            ),
+            PersistedTransfer(
+                job: uploadJob,
+                retry: .upload(
+                    PersistedUploadRetry(
+                        accountID: Self.fixedAccount.id,
+                        bucket: bucket,
+                        sourceBookmark: sourceBookmark,
+                        objectKey: "exact/object.txt",
+                        imagesOnly: false,
+                        convertHEIC: false,
+                        playSound: false
+                    )
+                )
+            )
+        ]
+        let engine = TransferEngine(
+            journal: MemoryTransferJournal(records: records),
+            bookmarks: MappingTransferBookmarks(map: [
+                rootBookmark: directory,
+                sourceBookmark: source
+            ]),
+            clientProvider: { _, _ in Self.client(transport: RetryTransport()) }
+        )
+
+        engine.restore(accounts: [Self.fixedAccount])
+
+        let download = try #require(engine.jobs.first(where: { $0.kind == .download }))
+        let upload = try #require(engine.jobs.first(where: { $0.kind == .upload }))
+        #expect(download.localURL == destination)
+        #expect(download.canRevealInFinder)
+        #expect(upload.publicURL?.absoluteString.contains("exact/object.txt") == true)
+    }
+
+    @Test func restoredHEICUploadReconvertsInsteadOfUploadingTheOriginal() async throws {
+        let source = try Self.temporaryFile(named: "photo.heic")
+        defer { try? FileManager.default.removeItem(at: source) }
+        let bookmark = Data([9, 9, 9, 9])
+        var job = Self.persistedJob(status: .running)
+        job.objectKey = "photo.jpg"
+        job.title = "photo.jpg"
+        let record = PersistedTransfer(
+            job: job,
+            retry: .upload(
+                PersistedUploadRetry(
+                    accountID: Self.fixedAccount.id,
+                    bucket: OSSBucket(
+                        name: "bucket",
+                        regionID: "cn-hangzhou",
+                        location: "oss-cn-hangzhou",
+                        extranetEndpoint: "oss-cn-hangzhou.aliyuncs.com",
+                        createdAt: nil
+                    ),
+                    sourceBookmark: bookmark,
+                    objectKey: "photo.jpg",
+                    imagesOnly: false,
+                    convertHEIC: true,
+                    playSound: false
+                )
+            ),
+            checkpoint: TransferCheckpoint.upload(
+                MultipartUploadCheckpoint(
+                    bucketName: "bucket",
+                    objectKey: "photo.jpg",
+                    sourceSize: 1_000,
+                    sourceModifiedAt: .distantPast,
+                    partSize: OSSClient.partSize,
+                    uploadID: "u-heic",
+                    completedParts: []
+                )
+            )
+        )
+        let transport = RetryTransport()
+        let engine = TransferEngine(
+            journal: MemoryTransferJournal(records: [record]),
+            bookmarks: FixedTransferBookmarks(bookmark: bookmark, resolvedURL: source),
+            clientProvider: { _, _ in Self.client(transport: transport) }
+        )
+
+        engine.restore(accounts: [Self.fixedAccount])
+        let id = try #require(engine.jobs.first?.id)
+        #expect(engine.jobs.first?.status == .paused)
+        engine.resume(id)
+        try await Self.waitUntil { engine.jobs.first?.status == .failed }
+
+        #expect(engine.jobs.first?.errorMessage?.contains("HEIC") == true)
+        #expect(await transport.requestPaths.isEmpty)
+    }
+
     @Test func retryingAnUploadKeepsTheExactOriginalObjectKey() async throws {
         let source = try Self.temporaryFile(named: "local-name.txt")
         defer { try? FileManager.default.removeItem(at: source) }
@@ -503,6 +644,7 @@ struct TransferEngineTests {
 
         let paths = await transport.requestPaths
         #expect(paths == ["/chosen/final-name.txt", "/chosen/final-name.txt"])
+        #expect(await transport.forbidOverwrite == ["true", "true"])
     }
 
     @Test func failedDownloadCanRetryToTheSameDestination() async throws {
@@ -720,6 +862,22 @@ private final class CountingTransferJournal: TransferJournaling, @unchecked Send
     }
 }
 
+private struct MappingTransferBookmarks: TransferBookmarking {
+    var map: [Data: URL]
+
+    func makeBookmark(for url: URL) throws -> Data {
+        if let existing = map.first(where: { $0.value.standardizedFileURL == url.standardizedFileURL })?.key {
+            return existing
+        }
+        throw TransferBookmarkError.stale
+    }
+
+    func resolve(_ bookmark: Data) throws -> URL {
+        guard let url = map[bookmark] else { throw TransferBookmarkError.stale }
+        return url
+    }
+}
+
 private struct FixedTransferBookmarks: TransferBookmarking {
     var bookmark: Data
     var resolvedURL: URL
@@ -788,6 +946,7 @@ private actor BlockingUploadTransport: OSSHTTPTransport {
 
 private actor RetryTransport: OSSHTTPTransport {
     private(set) var requestPaths: [String] = []
+    private(set) var forbidOverwrite: [String?] = []
     private let downloadURL: URL?
     private var didFailDownloadRange = false
 
@@ -802,12 +961,18 @@ private actor RetryTransport: OSSHTTPTransport {
         onProgress: (@Sendable (Int64, Int64) -> Void)?
     ) async throws -> OSSHTTPResult {
         requestPaths.append(request.url?.path ?? "")
+        forbidOverwrite.append(request.value(forHTTPHeaderField: "x-oss-forbid-overwrite"))
         if let downloadURL {
             if request.httpMethod == "HEAD" {
                 let count = (try? downloadURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                let checksum = ((try? Data(contentsOf: downloadURL)).map(CRC64XZ.checksum)).map(String.init)
+                var headers = ["Content-Length": "\(count)"]
+                if let checksum {
+                    headers["x-oss-hash-crc64ecma"] = checksum
+                }
                 return OSSHTTPResult(
                     status: 200,
-                    headers: ["Content-Length": "\(count)"],
+                    headers: headers,
                     data: Data(),
                     temporaryDownloadURL: nil
                 )

@@ -23,7 +23,7 @@ struct CrossBucketPreflightView: View {
                 row("来源", "\(preflight.sourceAccount.displayName) / \(preflight.sourceBucket.name)")
                 row("目标", "\(preflight.destinationAccount.displayName) / \(preflight.destinationBucket.name)")
                 row("项目", "\(preflight.plan.mappings.count) 个对象")
-                row("已知大小", ByteCountFormatter.string(fromByteCount: preflight.plan.knownBytes, countStyle: .file))
+                row("已知大小", Formatters.bytes(preflight.plan.knownBytes))
                 row("方式", preflight.plan.method.title)
                 if preflight.renamedConflicts > 0 {
                     row("同名项目", "保留两者（\(preflight.renamedConflicts) 项已重新命名）")
@@ -43,6 +43,7 @@ struct CrossBucketPreflightView: View {
                     dismiss()
                     confirm()
                 }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
             }
         }

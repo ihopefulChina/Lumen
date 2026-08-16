@@ -16,6 +16,18 @@ enum ScreenshotDemo {
         return nil
     }
 
+    static var forcedAppearance: NSAppearance? {
+        guard currentMode != nil else { return nil }
+        return NSAppearance(
+            named: ProcessInfo.processInfo.arguments.contains("--lumen-screenshot-dark") ? .darkAqua : .aqua
+        )
+    }
+
+    static func applyAppearance() {
+        guard let forcedAppearance else { return }
+        NSApp.appearance = forcedAppearance
+    }
+
     static let accountDraft = AccountDraft(
         id: UUID(uuidString: "6A7ED12A-73B6-4C18-A6DE-3BD395520001")!,
         name: "Lumen 演示工作室",
@@ -59,6 +71,8 @@ enum ScreenshotDemo {
         model.browser.prefix = "campaigns/2026-autumn/"
         model.browser.viewMode = .list
         model.browser.imagesOnly = false
+        model.searchScope = .folder
+        model.searchFilter = .all
         model.browser.folders = folders
         model.browser.objects = objects
         model.browser.backStack = ["", "campaigns/"]
@@ -76,22 +90,6 @@ enum ScreenshotDemo {
             name: "待发布"
         ))
         if mode == .browser {
-            model.searchScope = .bucket
-            model.searchFilter = .recentObjects(days: 30)
-            let query = BucketSearchQuery(
-                accountID: accountID,
-                bucketName: "lumen-studio-assets",
-                text: "",
-                filter: model.searchFilter
-            )
-            model.searchController.seedForScreenshot(
-                BucketSearchSnapshot(
-                    query: query,
-                    objects: objects,
-                    progress: BucketSearchProgress(scanned: 2_418, matched: objects.count, pages: 3),
-                    isIncomplete: false
-                )
-            )
             model.transfers.jobs = [
                 TransferJob(
                     id: UUID(),
@@ -126,9 +124,12 @@ enum ScreenshotDemo {
     }
 
     static func prepareWindow() {
+        applyAppearance()
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
             guard let window = NSApp.windows.first(where: { $0.canBecomeKey }) else { return }
-            window.setContentSize(NSSize(width: 1240, height: 800))
+            applyAppearance()
+            window.appearance = NSApp.appearance
+            window.setFrame(NSRect(origin: .zero, size: NSSize(width: 1240, height: 800)), display: true)
             window.center()
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
@@ -173,7 +174,7 @@ enum ScreenshotDemo {
         object("官网文案.txt", size: 9_842, modified: 1_785_628_800),
         object("素材索引.json", size: 124_908, modified: 1_785_369_600),
         object("片头动画.mov", size: 186_422_901, modified: 1_784_851_200),
-        object("历史版本.zip", size: 74_208_552, modified: 1_783_209_600)
+        object("封面视觉.psd", size: 74_208_552, modified: 1_783_209_600)
     ]
 
     private static func object(_ name: String, size: Int64, modified: TimeInterval) -> OSSObject {

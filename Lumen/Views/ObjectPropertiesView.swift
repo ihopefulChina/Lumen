@@ -11,21 +11,32 @@ struct ObjectPropertiesView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Form {
-                    Section("Web 行为") {
-                        TextField("Content-Type", text: $properties.draft.contentType)
-                        TextField("Cache-Control", text: $properties.draft.cacheControl)
-                        TextField("Content-Disposition", text: $properties.draft.contentDisposition)
+                    Section {
+                        Text("这些是这个对象在 OSS 上的 HTTP 元数据和标签。点“保存”后立即写回云端，链接、下载文件名和缓存行为会按新值生效。")
+                            .foregroundStyle(.secondary)
+                    }
+                    Section("打开与下载") {
+                        TextField("文件类型", text: $properties.draft.contentType, prompt: Text("例如 image/jpeg"))
+                        TextField("缓存", text: $properties.draft.cacheControl, prompt: Text("例如 max-age=3600"))
+                        TextField("下载文件名", text: $properties.draft.contentDisposition, prompt: Text("例如 attachment; filename=\"封面.jpg\""))
                     }
                     editableSection(
-                        "用户元数据",
+                        "自定义元数据",
                         rows: $properties.draft.metadata,
                         add: { properties.draft.metadata.append(EditableProperty(key: "", value: "")) }
                     )
-                    editableSection(
-                        "标签",
-                        rows: $properties.draft.tags,
-                        add: { properties.draft.tags.append(EditableProperty(key: "", value: "")) }
-                    )
+                    if properties.tagsUnavailable {
+                        Section("标签") {
+                            Text("当前账号没有读取标签的权限，标签未改动。")
+                                .foregroundStyle(.secondary)
+                        }
+                    } else {
+                        editableSection(
+                            "标签",
+                            rows: $properties.draft.tags,
+                            add: { properties.draft.tags.append(EditableProperty(key: "", value: "")) }
+                        )
+                    }
                     if !properties.draft.validationErrors.isEmpty {
                         Section {
                             ForEach(properties.draft.validationErrors, id: \.self) { error in
@@ -47,9 +58,10 @@ struct ObjectPropertiesView: View {
                 }
                 Spacer()
                 Button("取消") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("存储") {
+                Button("保存") {
                     Task { if await properties.save() { dismiss() } }
                 }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!properties.canSave)
             }
@@ -74,9 +86,9 @@ struct ObjectPropertiesView: View {
                     Button {
                         rows.wrappedValue.removeAll { $0.id == row.id }
                     } label: {
-                        Image(systemName: "minus.circle.fill").foregroundStyle(.secondary)
+                        Image(systemName: "minus.circle")
                     }
-                    .buttonStyle(.plain)
+                    .buttonStyle(.borderless)
                     .accessibilityLabel("移除")
                 }
             }

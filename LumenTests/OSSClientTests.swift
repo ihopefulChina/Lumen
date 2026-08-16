@@ -448,8 +448,17 @@ struct OSSClientTests {
         let first = Data(repeating: 1, count: Int(OSSClient.downloadChunkSize))
         let second = Data(repeating: 2, count: Int(OSSClient.downloadChunkSize))
         let third = Data(repeating: 3, count: size - first.count - second.count)
+        let checksum = CRC64XZ.checksum(first + second + third)
         let transport = StubOSSTransport(steps: [
-            .response(status: 200, headers: ["Content-Length": "\(size)", "ETag": "v1"], data: Data()),
+            .response(
+                status: 200,
+                headers: [
+                    "Content-Length": "\(size)",
+                    "ETag": "v1",
+                    "x-oss-hash-crc64ecma": String(checksum)
+                ],
+                data: Data()
+            ),
             .response(status: 206, headers: [:], data: first),
             .response(status: 206, headers: [:], data: second),
             .response(status: 206, headers: [:], data: third)
@@ -483,8 +492,12 @@ struct OSSClientTests {
         let destination = directory.appending(path: "large.bin")
         let partialName = ".lumen-known.partial"
         let partial = directory.appending(path: partialName)
-        try Data(repeating: 1, count: Int(OSSClient.downloadChunkSize)).write(to: partial)
+        let first = Data(repeating: 1, count: Int(OSSClient.downloadChunkSize))
+        try first.write(to: partial)
         let size = 20 * 1_024 * 1_024
+        let second = Data(repeating: 2, count: Int(OSSClient.downloadChunkSize))
+        let third = Data(repeating: 3, count: size - first.count - second.count)
+        let checksum = CRC64XZ.checksum(first + second + third)
         let checkpoint = RangeDownloadCheckpoint(
             bucketName: "bucket",
             objectKey: "large.bin",
@@ -495,9 +508,17 @@ struct OSSClientTests {
             partialFileName: partialName
         )
         let transport = StubOSSTransport(steps: [
-            .response(status: 200, headers: ["Content-Length": "\(size)", "ETag": "v1"], data: Data()),
-            .response(status: 206, headers: [:], data: Data(repeating: 2, count: Int(OSSClient.downloadChunkSize))),
-            .response(status: 206, headers: [:], data: Data(repeating: 3, count: size - Int(OSSClient.downloadChunkSize * 2)))
+            .response(
+                status: 200,
+                headers: [
+                    "Content-Length": "\(size)",
+                    "ETag": "v1",
+                    "x-oss-hash-crc64ecma": String(checksum)
+                ],
+                data: Data()
+            ),
+            .response(status: 206, headers: [:], data: second),
+            .response(status: 206, headers: [:], data: third)
         ])
 
         _ = try await Self.client(transport: transport).downloadResumable(
@@ -544,6 +565,69 @@ struct OSSClientTests {
         let partialName = try #require(recorder.values.compactMap { $0 }.last?.partialFileName)
         #expect(!FileManager.default.fileExists(atPath: destination.path))
         #expect(FileManager.default.fileExists(atPath: directory.appending(path: partialName).path))
+    }
+
+    @Test func resumableDownloadReplacesAnExistingFileOnlyAfterIntegrityPasses() async throws {
+        let directory = try Self.temporaryDirectory(named: "range-replace")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "small.bin")
+        try Data("original".utf8).write(to: destination)
+        let bytes = Data("replaced!".utf8)
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 200,
+                headers: [
+                    "Content-Length": "\(bytes.count)",
+                    "ETag": "v2",
+                    "x-oss-hash-crc64ecma": String(CRC64XZ.checksum(bytes))
+                ],
+                data: Data()
+            ),
+            .response(status: 206, headers: [:], data: bytes)
+        ])
+
+        _ = try await Self.client(transport: transport).downloadResumable(
+            key: "small.bin",
+            to: destination,
+            within: directory,
+            expectedSize: Int64(bytes.count),
+            overwrite: true
+        )
+
+        #expect(try Data(contentsOf: destination) == bytes)
+    }
+
+    @Test func failedOverwriteDownloadLeavesTheOriginalFile() async throws {
+        let directory = try Self.temporaryDirectory(named: "range-keep")
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "small.bin")
+        let original = Data("original".utf8)
+        try original.write(to: destination)
+        let bytes = Data("new".utf8)
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 200,
+                headers: [
+                    "Content-Length": "\(bytes.count)",
+                    "ETag": "v2",
+                    "x-oss-hash-crc64ecma": "1"
+                ],
+                data: Data()
+            ),
+            .response(status: 206, headers: [:], data: bytes)
+        ])
+
+        await #expect(throws: OSSIntegrityError.self) {
+            try await Self.client(transport: transport).downloadResumable(
+                key: "small.bin",
+                to: destination,
+                within: directory,
+                expectedSize: Int64(bytes.count),
+                overwrite: true
+            )
+        }
+
+        #expect(try Data(contentsOf: destination) == original)
     }
 
     @Test func prefixPlanPreservesRelativePaths() throws {
@@ -593,6 +677,148 @@ struct OSSClientTests {
             .compactMap { $0.url?.path }
         #expect(deletedPaths == ["/new/a.txt"])
         #expect(!deletedPaths.contains(where: { $0.hasPrefix("/old/") }))
+    }
+
+    @Test func putObjectForbidsOverwriteUnlessRequested() async throws {
+        let file = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-put-forbid-\(UUID().uuidString).txt")
+        try Data("payload".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: [:], data: Data()),
+            .response(status: 200, headers: [:], data: Data())
+        ])
+        let client = Self.client(transport: transport)
+
+        _ = try await client.putObject(
+            key: "safe.txt",
+            fileURL: file,
+            contentType: "text/plain",
+            acl: .private
+        )
+        _ = try await client.putObject(
+            key: "replace.txt",
+            fileURL: file,
+            contentType: "text/plain",
+            acl: .private,
+            overwrite: true
+        )
+
+        let requests = await transport.recordedRequests()
+        #expect(requests[0].value(forHTTPHeaderField: "x-oss-forbid-overwrite") == "true")
+        #expect(requests[1].value(forHTTPHeaderField: "x-oss-forbid-overwrite") == nil)
+    }
+
+    @Test func downloadWithoutServerCRCStillPublishesTheDestination() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-missing-crc-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "download.txt")
+        let temporary = directory.appending(path: "response.tmp")
+        let payload = Data("downloaded bytes".utf8)
+        try payload.write(to: temporary)
+        let transport = StubOSSTransport(steps: [
+            .download(temporary, headers: [:])
+        ])
+
+        let verified = try await Self.client(transport: transport).download(
+            key: "download.txt",
+            to: destination,
+            within: directory
+        )
+
+        #expect(verified == false)
+        #expect(try Data(contentsOf: destination) == payload)
+    }
+
+    @Test func putObjectTreatsMatchingForbiddenOverwriteAsSuccess() async throws {
+        let payload = Data("same-bytes".utf8)
+        let file = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-put-exists-\(UUID().uuidString).txt")
+        try payload.write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let checksum = CRC64XZ.checksum(payload)
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 409,
+                headers: [:],
+                data: Self.errorXML(code: "FileAlreadyExists", message: "Exists", requestID: "exists")
+            ),
+            .response(
+                status: 200,
+                headers: [
+                    "Content-Length": "\(payload.count)",
+                    "x-oss-hash-crc64ecma": String(checksum)
+                ],
+                data: Data()
+            )
+        ])
+
+        let verified = try await Self.client(transport: transport).putObject(
+            key: "same.txt",
+            fileURL: file,
+            contentType: "text/plain",
+            acl: .private
+        )
+
+        #expect(verified)
+        let requests = await transport.recordedRequests()
+        #expect(requests.map(\.httpMethod) == ["PUT", "HEAD"])
+    }
+
+    @Test func putObjectRejectsADifferentExistingObject() async throws {
+        let file = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-put-conflict-\(UUID().uuidString).txt")
+        try Data("local".utf8).write(to: file)
+        defer { try? FileManager.default.removeItem(at: file) }
+        let transport = StubOSSTransport(steps: [
+            .response(
+                status: 409,
+                headers: [:],
+                data: Self.errorXML(code: "FileAlreadyExists", message: "Exists", requestID: "exists")
+            ),
+            .response(
+                status: 200,
+                headers: ["Content-Length": "99"],
+                data: Data()
+            )
+        ])
+
+        await #expect(throws: OSSServiceError.self) {
+            try await Self.client(transport: transport).putObject(
+                key: "other.txt",
+                fileURL: file,
+                contentType: "text/plain",
+                acl: .private
+            )
+        }
+    }
+
+    @Test func sourceCleanupFailureRemovesUnfinishedDestinations() async throws {
+        let listing = Data("""
+        <ListBucketResult>
+          <IsTruncated>false</IsTruncated>
+          <Contents><Key>old/a.txt</Key><Size>1</Size><ETag>a</ETag></Contents>
+        </ListBucketResult>
+        """.utf8)
+        let transport = StubOSSTransport(steps: [
+            .response(status: 200, headers: [:], data: listing),
+            .response(status: 404, headers: [:], data: Self.errorXML(code: "NoSuchKey", message: "missing", requestID: "head-a")),
+            .response(status: 200, headers: ["x-oss-version-id": "copied-v1"], data: Data()),
+            .response(status: 500, headers: [:], data: Self.errorXML(code: "InternalError", message: "delete failed", requestID: "del-a")),
+            .response(status: 204, headers: [:], data: Data())
+        ])
+
+        await #expect(throws: CloudObjectOperationError.sourceCleanupFailed("old/a.txt")) {
+            try await Self.client(transport: transport).movePrefix(from: "old/", to: "new/")
+        }
+
+        let requests = await transport.recordedRequests()
+        #expect(requests.map(\.httpMethod) == ["GET", "HEAD", "PUT", "DELETE", "DELETE"])
+        #expect(requests[3].url?.path == "/old/a.txt")
+        #expect(requests[4].url?.path == "/new/a.txt")
+        #expect(requests[4].url?.query == "versionId=copied-v1")
     }
 
     private static func client(

@@ -1,75 +1,36 @@
 import SwiftUI
 
+enum SidebarSelection: Hashable {
+    case account(UUID)
+    case bucket(String)
+    case favorite(String)
+}
+
 struct SidebarView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.openWindow) private var openWindow
     @State private var accountToDelete: OSSAccount?
 
     var body: some View {
         @Bindable var model = model
         List(selection: Binding(
-            get: { model.selectedBucketName },
-            set: { name in
-                if let name, let bucket = model.buckets.first(where: { $0.name == name }) {
-                    model.selectBucket(bucket)
-                }
-            }
+            get: { model.sidebarSelection },
+            set: { model.applySidebarSelection($0) }
         )) {
-            Section("位置") {
-                locationButton(.recent, symbol: "clock")
-                locationButton(.large, symbol: "externaldrive.badge.plus")
-                locationButton(.deleted, symbol: "trash")
-                locationButton(.failedTransfers, symbol: "exclamationmark.arrow.triangle.2.circlepath")
-            }
-
-            if !model.favorites.items.isEmpty {
-                Section("常用") {
-                    ForEach(model.favorites.items) { favorite in
-                        Button {
-                            model.openFavorite(favorite)
-                        } label: {
-                            Label {
-                                VStack(alignment: .leading, spacing: 1) {
-                                    Text(favorite.name)
-                                        .lineLimit(1)
-                                    Text(favorite.bucketName)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                }
-                            } icon: {
-                                Image(systemName: favorite.prefix.isEmpty ? "externaldrive" : "folder")
-                            }
-                        }
-                        .buttonStyle(.plain)
-                        .contextMenu {
-                            Button("从常用中移除") {
-                                model.favorites.remove(favorite)
-                            }
-                        }
-                    }
-                }
-            }
-
             Section("账号") {
                 ForEach(model.accounts) { account in
-                    Button {
-                        model.selectAccount(account)
-                    } label: {
-                        Label {
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(account.displayName)
-                                    .lineLimit(1)
-                                Text(account.region.name)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-                        } icon: {
-                            Image(systemName: account.id == model.selectedAccountID ? "cloud.fill" : "cloud")
+                    Label {
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(account.displayName)
+                                .lineLimit(1)
+                            Text(account.region.name)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
                         }
+                    } icon: {
+                        Image(systemName: account.id == model.selectedAccountID ? "cloud.fill" : "cloud")
                     }
-                    .buttonStyle(.plain)
+                    .tag(SidebarSelection.account(account.id))
                     .accessibilityValue(account.id == model.selectedAccountID ? "当前账号" : "")
                     .contextMenu {
                         Button("编辑…") {
@@ -108,7 +69,32 @@ struct SidebarView: View {
                         } icon: {
                             Image(systemName: "externaldrive")
                         }
-                        .tag(bucket.name)
+                        .tag(SidebarSelection.bucket(bucket.name))
+                    }
+                }
+            }
+
+            if !model.favorites.items.isEmpty {
+                Section("常用") {
+                    ForEach(model.favorites.items) { favorite in
+                        Label {
+                            VStack(alignment: .leading, spacing: 1) {
+                                Text(favorite.name)
+                                    .lineLimit(1)
+                                Text(favorite.bucketName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .lineLimit(1)
+                            }
+                        } icon: {
+                            Image(systemName: favorite.prefix.isEmpty ? "externaldrive" : "folder")
+                        }
+                        .tag(SidebarSelection.favorite(favorite.id))
+                        .contextMenu {
+                            Button("从常用中移除") {
+                                model.favorites.remove(favorite)
+                            }
+                        }
                     }
                 }
             }
@@ -143,17 +129,5 @@ struct SidebarView: View {
         } message: {
             Text("只删除这台 Mac 上的登录信息，不会改动云端数据。")
         }
-    }
-
-    private func locationButton(_ location: SmartLocation, symbol: String) -> some View {
-        Button {
-            if model.openSmartLocation(location), location == .failedTransfers {
-                openWindow(id: "transfers")
-            }
-        } label: {
-            Label(location.title, systemImage: symbol)
-        }
-        .buttonStyle(.plain)
-        .disabled(location != .failedTransfers && model.selectedBucket == nil)
     }
 }

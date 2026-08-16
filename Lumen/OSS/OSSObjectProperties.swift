@@ -46,13 +46,15 @@ struct ObjectPropertiesDraft: Equatable, Sendable {
     var isValid: Bool { validationErrors.isEmpty }
 
     var properties: OSSObjectProperties {
-        OSSObjectProperties(
+        var userMetadata: [String: String] = [:]
+        for row in metadata {
+            userMetadata[row.key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()] = row.value
+        }
+        return OSSObjectProperties(
             contentType: contentType,
             cacheControl: cacheControl,
             contentDisposition: contentDisposition,
-            userMetadata: Dictionary(uniqueKeysWithValues: metadata.map {
-                ($0.key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(), $0.value)
-            })
+            userMetadata: userMetadata
         )
     }
 

@@ -25,9 +25,16 @@ protocol OSSHTTPTransport: Sendable {
 struct URLSessionOSSHTTPTransport: OSSHTTPTransport {
     var session: URLSession
 
-    init(session: URLSession = .shared) {
+    init(session: URLSession = URLSessionOSSHTTPTransport.liveSession) {
         self.session = session
     }
+
+    private static let liveSession: URLSession = {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.requestCachePolicy = .reloadIgnoringLocalCacheData
+        configuration.urlCache = nil
+        return URLSession(configuration: configuration)
+    }()
 
     func send(
         _ request: URLRequest,
@@ -75,7 +82,13 @@ struct URLSessionOSSHTTPTransport: OSSHTTPTransport {
 
     private static func headers(_ response: URLResponse) -> [String: String] {
         guard let http = response as? HTTPURLResponse else { return [:] }
-        return Dictionary(uniqueKeysWithValues: http.allHeaderFields.map { ("\($0.key)", "\($0.value)") })
+        // allHeaderFields can contain duplicate names in rare cases; merge
+        // instead of trapping with uniqueKeysWithValues.
+        var merged: [String: String] = [:]
+        for (key, value) in http.allHeaderFields {
+            merged["\(key)"] = "\(value)"
+        }
+        return merged
     }
 }
 

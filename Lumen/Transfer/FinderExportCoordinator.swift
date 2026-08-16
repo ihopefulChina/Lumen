@@ -22,7 +22,12 @@ struct FinderExportPlan: Equatable, Sendable {
         guard selectionCount > 0 else { throw FinderExportError.emptySelection }
         let wrapsSelection = selectionCount > 1
         let rootName = wrapsSelection ? "Lumen 下载" : ""
-        let objectMap = Dictionary(uniqueKeysWithValues: objects.map { ($0.key, $0) })
+        // Overlapping payloads (an object key that also appears in a dragged
+        // folder's listing) must not trap on duplicate keys.
+        var objectMap: [String: OSSObject] = [:]
+        for object in objects {
+            objectMap[object.key] = object
+        }
         var reservedNames = Set<String>()
         var entries: [FinderExportEntry] = []
 
@@ -151,7 +156,11 @@ enum FinderExportCoordinator {
     }
 
     @MainActor
-    static func itemProvider(for payload: CloudDragPayload, client: OSSClient) -> NSItemProvider {
+    static func itemProvider(
+        for payload: CloudDragPayload,
+        client: OSSClient,
+        speedLimit: TransferSpeedLimit = .unlimited
+    ) -> NSItemProvider {
         let provider = NSItemProvider()
         provider.suggestedName = suggestedName(for: payload)
         provider.registerDataRepresentation(
@@ -176,7 +185,11 @@ enum FinderExportCoordinator {
             let progress = Progress(totalUnitCount: 1)
             let task = Task {
                 do {
-                    let url = try await export(payload: payload, client: client)
+                    let url = try await export(
+                        payload: payload,
+                        client: client,
+                        speedLimit: speedLimit
+                    )
                     progress.completedUnitCount = 1
                     completion(url, false, nil)
                 } catch {
@@ -189,11 +202,15 @@ enum FinderExportCoordinator {
         return provider
     }
 
-    static func export(payload: CloudDragPayload, client: OSSClient) async throws -> URL {
+    static func export(
+        payload: CloudDragPayload,
+        client: OSSClient,
+        speedLimit: TransferSpeedLimit = .unlimited
+    ) async throws -> URL {
         try Task.checkCancellation()
         let root = cacheRoot
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
-        try pruneOwnedExports(in: root)
+        pruneOwnedExports(in: root)
         let exportDirectory = root.appending(
             path: "export-\(UUID().uuidString)",
             directoryHint: .isDirectory
@@ -249,7 +266,8 @@ enum FinderExportCoordinator {
                     key: entry.objectKey,
                     to: destination,
                     within: exportDirectory,
-                    expectedSize: entry.expectedSize
+                    expectedSize: entry.expectedSize,
+                    speedLimit: speedLimit
                 )
             }
             return exportedRoot
@@ -259,24 +277,26 @@ enum FinderExportCoordinator {
         }
     }
 
+    /// Best-effort cleanup: one locked or stale export directory must never
+    /// abort a brand-new export.
     static func pruneOwnedExports(
         in root: URL,
         now: Date = .now,
         maximumAge: TimeInterval = maximumCacheAge
-    ) throws {
+    ) {
         guard FileManager.default.fileExists(atPath: root.path) else { return }
-        let urls = try FileManager.default.contentsOfDirectory(
+        guard let urls = try? FileManager.default.contentsOfDirectory(
             at: root,
             includingPropertiesForKeys: [.contentModificationDateKey, .isDirectoryKey],
             options: [.skipsHiddenFiles]
-        )
+        ) else { return }
         for url in urls where url.lastPathComponent.hasPrefix("export-") {
-            let values = try url.resourceValues(forKeys: [.contentModificationDateKey, .isDirectoryKey])
-            guard values.isDirectory == true,
+            guard let values = try? url.resourceValues(forKeys: [.contentModificationDateKey, .isDirectoryKey]),
+                  values.isDirectory == true,
                   let modified = values.contentModificationDate,
                   now.timeIntervalSince(modified) > maximumAge
             else { continue }
-            try FileManager.default.removeItem(at: url)
+            try? FileManager.default.removeItem(at: url)
         }
     }
 

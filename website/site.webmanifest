@@ -1,7 +1,7 @@
 {
   "name": "Lumen",
   "short_name": "Lumen",
-  "description": "像访达一样浏览阿里云 OSS。",
+  "description": "用访达的方式打开阿里云 OSS。",
   "start_url": "./",
   "display": "standalone",
   "background_color": "#f4f6f9",

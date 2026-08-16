@@ -10,8 +10,11 @@ enum PathTemplate {
         let hour = String(format: "%02d", parts.hour ?? 0)
         let minute = String(format: "%02d", parts.minute ?? 0)
         let second = String(format: "%02d", parts.second ?? 0)
-        let name = (filename as NSString).deletingPathExtension
-        let ext = (filename as NSString).pathExtension
+        // For folder uploads `filename` is a relative path such as
+        // "Folder/sub/x.txt"; the {name}/{ext} tokens describe the leaf file.
+        let leaf = lastComponent(filename)
+        let name = (leaf as NSString).deletingPathExtension
+        let ext = (leaf as NSString).pathExtension
 
         var result = template
         let replacements: [String: String] = [
@@ -98,20 +101,6 @@ enum PathTemplate {
             items.append((part, running))
         }
         return items
-    }
-
-    static func sanitizedRelative(_ relative: String) -> String? {
-        let parts = relative.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
-        guard !parts.isEmpty, parts.allSatisfy({ $0 != ".." && $0 != "." && !$0.contains(":") }) else {
-            return nil
-        }
-        return parts.joined(separator: "/")
-    }
-
-    static func isInside(_ url: URL, root: URL) -> Bool {
-        let folder = root.standardizedFileURL.path
-        let path = url.standardizedFileURL.path
-        return path == folder || path.hasPrefix(folder + "/")
     }
 
     static func sanitizeKey(_ key: String) -> String {

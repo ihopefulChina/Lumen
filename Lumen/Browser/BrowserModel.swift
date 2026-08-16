@@ -91,8 +91,6 @@ final class BrowserModel {
     var errorMessage: String?
     var dropTargets: Set<String> = []
 
-    var isDropTargeted: Bool { !dropTargets.isEmpty }
-
     var activeDropPrefix: String? {
         dropTargets.max(by: { $0.count < $1.count })
     }
@@ -160,10 +158,6 @@ final class BrowserModel {
         selectedKeys = visibleKeys
     }
 
-    func invertVisibleSelection() {
-        selectedKeys = visibleKeys.subtracting(selectedKeys)
-    }
-
     var primarySelection: OSSObject? {
         visibleObjects.first(where: { selectedKeys.contains($0.key) })
     }
@@ -211,6 +205,19 @@ final class BrowserModel {
         let first = orderedVisibleKeys.first(where: { visible.contains($0) })
         focusedKey = first
         selectionAnchorKey = first
+    }
+
+    func selectForContextMenu(key: String) {
+        guard visibleKeys.contains(key) else { return }
+        if selectedKeys.contains(key) {
+            focusedKey = key
+            if selectionAnchorKey == nil {
+                selectionAnchorKey = key
+            }
+            selectionEpoch += 1
+            return
+        }
+        select(key: key, modifiers: [])
     }
 
     func moveSelection(_ direction: BrowserSelectionDirection, extending: Bool) {

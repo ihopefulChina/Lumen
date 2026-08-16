@@ -9,6 +9,7 @@ final class ObjectPropertiesModel {
     var isLoading = false
     var isSaving = false
     var errorMessage: String?
+    var tagsUnavailable = false
     private var original = ObjectPropertiesDraft.empty
     private let client: OSSClient
     private let onSaved: @MainActor () -> Void
@@ -25,9 +26,15 @@ final class ObjectPropertiesModel {
         isLoading = true
         errorMessage = nil
         do {
-            async let headRequest = client.head(key: object.key)
-            async let tagsRequest = client.getObjectTags(key: object.key)
-            let (head, tags) = try await (headRequest, tagsRequest)
+            let head = try await client.head(key: object.key)
+            let tags: [OSSObjectTag]
+            do {
+                tags = try await client.getObjectTags(key: object.key)
+                tagsUnavailable = false
+            } catch {
+                tags = []
+                tagsUnavailable = true
+            }
             let loaded = ObjectPropertiesDraft(
                 contentType: head.contentType ?? "",
                 cacheControl: head.cacheControl ?? "",
@@ -52,9 +59,16 @@ final class ObjectPropertiesModel {
         do {
             if draft.properties != original.properties {
                 try await client.replaceMetadata(key: object.key, properties: draft.properties)
+                // Track what actually reached the cloud, so a later failure
+                // doesn't pretend the metadata edit never happened.
+                original.contentType = draft.contentType
+                original.cacheControl = draft.cacheControl
+                original.contentDisposition = draft.contentDisposition
+                original.metadata = draft.metadata
             }
-            if draft.objectTags != original.objectTags {
+            if !tagsUnavailable, draft.tags != original.tags {
                 try await client.putObjectTags(key: object.key, tags: draft.objectTags)
+                original.tags = draft.tags
             }
             original = draft
             onSaved()

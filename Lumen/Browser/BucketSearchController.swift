@@ -23,6 +23,7 @@ final class BucketSearchController {
     private var generation = 0
     private var accessCounter: UInt64 = 0
     private var cache: [BucketSearchQuery: CacheEntry] = [:]
+    private var searchTask: Task<Void, Never>?
 
     func search(
         query: BucketSearchQuery,
@@ -45,6 +46,33 @@ final class BucketSearchController {
         snapshot = nil
         isSearching = true
 
+        searchTask?.cancel()
+        let task = Task { [weak self] in
+            await self?.performSearch(
+                query: query,
+                now: now,
+                generation: requestGeneration,
+                pageLoader: pageLoader
+            )
+            return ()
+        }
+        searchTask = task
+        await task.value
+    }
+
+    func cancel() {
+        generation += 1
+        searchTask?.cancel()
+        searchTask = nil
+        isSearching = false
+    }
+
+    private func performSearch(
+        query: BucketSearchQuery,
+        now: Date,
+        generation requestGeneration: Int,
+        pageLoader: @escaping @Sendable (String?) async throws -> ObjectListing
+    ) async {
         var token: String?
         var seenTokens = Set<String>()
         var matches: [String: OSSObject] = [:]
@@ -114,11 +142,6 @@ final class BucketSearchController {
         }
     }
 
-    func cancel() {
-        generation += 1
-        isSearching = false
-    }
-
     func clear() {
         cancel()
         activeQuery = nil
@@ -154,6 +177,9 @@ final class BucketSearchController {
     }
 
     private func cachedSnapshot(for query: BucketSearchQuery) -> BucketSearchSnapshot? {
+        // Date-relative filters (最近 N 天) depend on the current date, so a
+        // cached snapshot from earlier would silently return stale results.
+        guard query.filter.modified == .any else { return nil }
         guard var entry = cache[query] else { return nil }
         accessCounter &+= 1
         entry.lastAccess = accessCounter
@@ -177,9 +203,15 @@ final class BucketSearchController {
                 ($0.lastModified ?? .distantPast) > ($1.lastModified ?? .distantPast)
             }
         default:
-            if query.filter.minimumSize == BucketSearchFilter.largeObjects.minimumSize,
-               query.filter.maximumSize == nil,
-               query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            // Only the dedicated "大文件" view (a pure minimum-size filter) is
+            // size-descending; any other filter combination keeps name order
+            // so ordering stays predictable.
+            let isPureSizeFloor = query.filter.kind == .any
+                && query.filter.modified == .any
+                && query.filter.minimumSize != nil
+                && query.filter.maximumSize == nil
+                && query.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            if isPureSizeFloor {
                 return objects.sorted {
                     $0.size == $1.size
                         ? $0.key.localizedStandardCompare($1.key) == .orderedAscending

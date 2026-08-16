@@ -47,14 +47,6 @@ struct PathTemplateTests {
         )
     }
 
-    @Test func sanitizedRelativeRejectsTraversal() {
-        #expect(PathTemplate.sanitizedRelative("avatars/2024/b.png") == "avatars/2024/b.png")
-        #expect(PathTemplate.sanitizedRelative("../secret.png") == nil)
-        #expect(PathTemplate.sanitizedRelative("a/../../b.png") == nil)
-        #expect(PathTemplate.isInside(URL(filePath: "/tmp/out/a.png"), root: URL(filePath: "/tmp/out")))
-        #expect(!PathTemplate.isInside(URL(filePath: "/tmp/other.png"), root: URL(filePath: "/tmp/out")))
-    }
-
     @Test func replacingLastComponentKeepsParents() {
         #expect(PathTemplate.replacingLastComponent("avatars/pic.heic", with: "pic.jpg") == "avatars/pic.jpg")
         #expect(PathTemplate.replacingLastComponent("pic.heic", with: "pic.jpg") == "pic.jpg")
@@ -136,6 +128,11 @@ struct SignerTests {
         #expect(ImageKind.contentType(for: "notes.txt") == "text/plain")
         #expect(ImageKind.contentType(for: "data.json") == "application/json")
         #expect(ImageKind.displayKind(for: "data.json") == "JSON")
+    }
+
+    @Test func byteFormatterDoesNotSpellOutZero() {
+        #expect(Formatters.bytes(0) == "0 KB")
+        #expect(!Formatters.bytes(1_300_000).localizedStandardContains("Zero"))
     }
 
     @Test func canonicalRequestHasRequiredBlankAdditionalHeaders() {

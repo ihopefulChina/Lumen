@@ -10,81 +10,92 @@ struct BrowserView: View {
 
     var body: some View {
         @Bindable var model = model
+        // Resolve the AppModel ONCE here. Closures that execute later —
+        // toolbar button actions, drop handlers, and especially Table cell
+        // content — run in AppKit hosting contexts where reading
+        // `@Environment(AppModel.self)` can trap ("No Observable object of
+        // type AppModel found"), so they must use this captured reference.
+        let modelRef = model
         content
             .navigationTitle(title)
             .navigationSubtitle(subtitle)
             .searchable(text: $model.browser.searchText, placement: .toolbar, prompt: searchPrompt)
-            .searchScopes($model.searchScope) {
-                ForEach(BucketSearchScope.allCases) { scope in
-                    Text(scope.title).tag(scope)
-                }
-            }
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
                     Button {
-                        model.goBack()
+                        modelRef.goBack()
                     } label: {
                         Label("后退", systemImage: "chevron.left")
                     }
-                    .disabled(!model.browser.canGoBack)
+                    .disabled(!modelRef.browser.canGoBack)
                     .help("后退")
 
                     Button {
-                        model.goForward()
+                        modelRef.goForward()
                     } label: {
                         Label("前进", systemImage: "chevron.right")
                     }
-                    .disabled(!model.browser.canGoForward)
+                    .disabled(!modelRef.browser.canGoForward)
                     .help("前进")
                 }
             }
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if showsSearchChrome {
+                    searchScopeBar
+                }
+            }
             .safeAreaInset(edge: .bottom, spacing: 0) {
-                if model.selectedBucket != nil {
+                if modelRef.selectedBucket != nil {
                     PathBar(showFileImporter: $showFileImporter)
                 }
             }
+            .onChange(of: model.searchScope) { _, scope in
+                if scope == .folder {
+                    modelRef.searchFilter = .all
+                }
+            }
             .overlay {
-                if let prefix = model.browser.activeDropPrefix, prefix == model.browser.prefix {
+                if let prefix = modelRef.browser.activeDropPrefix, prefix == modelRef.browser.prefix {
                     dropScrim(title: "放到当前文件夹")
                 }
             }
             .dropDestination(for: URL.self) { urls, _ in
-                model.upload(urls: urls, to: model.browser.prefix, applyTemplate: false)
+                modelRef.upload(urls: urls, to: modelRef.browser.prefix, applyTemplate: modelRef.browser.prefix.isEmpty)
                 return true
             } isTargeted: { targeted in
-                model.browser.setDropTarget(model.browser.prefix, active: targeted)
+                modelRef.browser.setDropTarget(modelRef.browser.prefix, active: targeted)
             }
             .dropDestination(for: CloudDragPayload.self) { payloads, _ in
                 guard let payload = payloads.first else { return false }
-                model.moveCloudItems(payload, to: model.browser.prefix)
+                modelRef.moveCloudItems(payload, to: modelRef.browser.prefix)
                 return true
             } isTargeted: { targeted in
-                model.browser.setDropTarget(model.browser.prefix, active: targeted)
+                modelRef.browser.setDropTarget(modelRef.browser.prefix, active: targeted)
             }
-            .onPasteCommand(of: [.image, .fileURL, .gif, .webP, .png, .jpeg]) { _ in
-                model.pasteFromClipboard()
+            .onPasteCommand(of: [UTType.lumenCloudItems, .image, .fileURL, .gif, .webP, .png, .jpeg]) { _ in
+                modelRef.paste()
             }
             .onChange(of: photos) { _, items in
-                Task { await importPhotos(items) }
+                Task { await importPhotos(modelRef, items: items) }
             }
             .task(id: searchRequest) {
                 #if DEBUG
                 if ScreenshotDemo.currentMode == .browser { return }
                 #endif
                 guard isBucketSearchPresented else {
-                    model.searchController.clear()
+                    modelRef.searchController.clear()
                     return
                 }
                 do {
                     try await Task.sleep(for: .milliseconds(250))
                     try Task.checkCancellation()
-                    await model.runBucketSearch()
+                    await modelRef.runBucketSearch()
                 } catch {
-                    model.cancelBucketSearch()
+                    modelRef.cancelBucketSearch()
                 }
             }
             .overlay(alignment: .top) {
-                if model.isOrganizingCloud {
+                if modelRef.isOrganizingCloud {
                     HStack(spacing: 8) {
                         ProgressView().controlSize(.small)
                         Text("正在整理云端项目…")
@@ -100,25 +111,32 @@ struct BrowserView: View {
 
     @ViewBuilder
     private var content: some View {
-        if model.selectedBucket == nil {
-            ContentUnavailableView("选择一个存储空间", systemImage: "externaldrive", description: Text("从左侧打开 Bucket，就可以浏览和上传素材。"))
+        let modelRef = model
+        if modelRef.selectedBucket == nil {
+            Text("在左侧选择一个存储空间")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         } else if isBucketSearchPresented {
             BucketSearchView()
-        } else if model.browser.isLoading && model.browser.objects.isEmpty && model.browser.folders.isEmpty {
-            ProgressView("正在读取对象…")
+        } else if modelRef.browser.isLoading && modelRef.browser.objects.isEmpty && modelRef.browser.folders.isEmpty {
+            ProgressView()
                 .controlSize(.small)
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-        } else if let message = model.browser.errorMessage, model.browser.objects.isEmpty && model.browser.folders.isEmpty {
-            ContentUnavailableView {
-                Label("无法读取", systemImage: "wifi.exclamationmark")
-            } description: {
+        } else if let message = modelRef.browser.errorMessage, modelRef.browser.objects.isEmpty && modelRef.browser.folders.isEmpty {
+            VStack(spacing: 8) {
+                Text("无法读取这个文件夹")
+                    .foregroundStyle(.secondary)
                 Text(message)
-            } actions: {
-                Button("再试一次") { Task { await model.refreshListing() } }
+                    .font(.callout)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(2)
+                Button("再试一次") { Task { await modelRef.refreshListing() } }
+                    .buttonStyle(.borderless)
             }
-        } else if model.browser.visibleFolders.isEmpty && model.browser.visibleObjects.isEmpty {
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if modelRef.browser.visibleFolders.isEmpty && modelRef.browser.visibleObjects.isEmpty {
             emptyState
-        } else if model.browser.viewMode == .grid {
+        } else if modelRef.browser.viewMode == .grid {
             grid
         } else {
             table
@@ -154,6 +172,60 @@ struct BrowserView: View {
         model.searchScope == .folder ? "搜索当前文件夹" : "搜索当前 Bucket"
     }
 
+    private var isSearching: Bool {
+        !model.browser.searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            || model.searchFilter != .all
+    }
+
+    private var showsSearchChrome: Bool {
+        model.selectedBucket != nil && (isSearching || model.searchScope == .bucket)
+    }
+
+    private var searchScopeBar: some View {
+        @Bindable var model = model
+        return HStack(spacing: 10) {
+            Picker("搜索范围", selection: $model.searchScope) {
+                ForEach(BucketSearchScope.allCases) { scope in
+                    Text(scope.title).tag(scope)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+            .frame(width: 220)
+
+            if model.searchScope == .bucket {
+                if model.searchController.isSearching {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text("已扫描 \(model.searchController.progress.scanned) 项")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                    Button("停止") { model.cancelBucketSearch() }
+                        .buttonStyle(.borderless)
+                        .controlSize(.small)
+                } else if isBucketSearchPresented {
+                    Text(model.searchController.snapshot?.isIncomplete == true
+                         ? "找到 \(model.searchController.progress.matched) 项，结果可能不完整"
+                         : "找到 \(model.searchController.progress.matched) 项")
+                        .foregroundStyle(.secondary)
+                        .monospacedDigit()
+                }
+            }
+
+            Spacer(minLength: 8)
+
+            if model.searchScope == .bucket {
+                BucketSearchFilterMenu()
+            }
+        }
+        .font(.callout)
+        .padding(.horizontal, 12)
+        .frame(height: 28)
+        .background(.bar)
+        .overlay(alignment: .bottom) { Divider() }
+    }
+
     private var isBucketSearchPresented: Bool {
         guard model.searchScope == .bucket else { return false }
         let text = model.browser.searchText.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -171,19 +243,21 @@ struct BrowserView: View {
     }
 
     private var emptyState: some View {
-        VStack(spacing: 10) {
+        let modelRef = model
+        return VStack(spacing: 10) {
             Image(systemName: "photo")
                 .font(.system(size: 36, weight: .light))
                 .symbolRenderingMode(.hierarchical)
                 .foregroundStyle(.secondary)
             Text(model.browser.searchText.isEmpty ? "此文件夹为空" : "没有匹配的项目")
-                .font(.title3)
+                .foregroundStyle(.secondary)
             if model.browser.searchText.isEmpty {
                 Text("拖入文件，或从工具栏上传。")
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Button("选取文件…") { showFileImporter = true }
+                        .buttonStyle(.borderedProminent)
                     PhotosPicker(selection: $photos, maxSelectionCount: 80, matching: .images) {
                         Text("从照片选取")
                     }
@@ -194,78 +268,70 @@ struct BrowserView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .contentShape(Rectangle())
-        .contextMenu { backgroundMenu() }
+        .contextMenu { backgroundMenu(modelRef) }
+        .overlay { backgroundMenuOverlay(modelRef).allowsHitTesting(false) }
     }
 
     private var grid: some View {
-        let selected = model.browser.selectedKeys
-        let _ = model.browser.selectionEpoch
+        let modelRef = model
+        let selected = modelRef.browser.selectedKeys
+        let _ = modelRef.browser.selectionEpoch
         return GeometryReader { geo in
             ScrollView {
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 140), spacing: 8)], spacing: 12) {
-                    ForEach(model.browser.visibleFolders) { folder in
+                ZStack(alignment: .topLeading) {
+                    Color.clear
+                        .frame(maxWidth: .infinity, minHeight: geo.size.height)
+                        .contentShape(Rectangle())
+                        .contextMenu { backgroundMenu(modelRef) }
+                    LazyVGrid(columns: [GridItem(.adaptive(minimum: 104, maximum: 140), spacing: 8)], spacing: 12) {
+                    ForEach(modelRef.browser.visibleFolders) { folder in
                         FolderCell(
                             folder: folder,
                             selected: selected.contains(folder.prefix),
-                            dropTargeted: model.browser.activeDropPrefix == folder.prefix,
-                            renameSession: renameSession(for: folder.prefix),
-                            renameText: renameTextBinding,
-                            onRenameCommit: commitRename,
-                            onRenameCancel: model.browser.cancelRenaming
-                        ) {
-                            selectFolder(folder, modifiers: currentSelectionModifiers)
-                        } onOpen: {
-                            model.openFolder(folder)
-                        }
+                            dropTargeted: modelRef.browser.activeDropPrefix == folder.prefix,
+                            renameSession: renameSession(modelRef: modelRef, for: folder.prefix),
+                            renameText: renameTextBinding(modelRef: modelRef),
+                            onRenameCommit: { commitRename(with: modelRef) },
+                            onRenameCancel: { modelRef.browser.cancelRenaming() }
+                        )
+                        .contentShape(Rectangle())
                         .contextMenu {
-                            Button("打开") {
-                                model.openFolder(folder)
+                            folderMenu(modelRef, folder: folder)
+                        }
+                        .modifier(BrowserFolderDropModifier(
+                            folder: folder,
+                            onUpload: { urls, prefix in
+                                modelRef.upload(urls: urls, to: prefix, applyTemplate: prefix.isEmpty)
+                            },
+                            onMoveCloudItems: { payload, prefix in
+                                modelRef.moveCloudItems(payload, to: prefix)
+                            },
+                            onSetDropTarget: { prefix, active in
+                                modelRef.browser.setDropTarget(prefix, active: active)
                             }
-                            .onAppear { selectForMenu(folder.prefix) }
-                            folderMenu(folder)
-                        }
-                        .dropDestination(for: URL.self) { urls, _ in
-                            model.upload(urls: urls, to: folder.prefix, applyTemplate: false)
-                            return true
-                        } isTargeted: { targeted in
-                            model.browser.setDropTarget(folder.prefix, active: targeted)
-                        }
-                        .dropDestination(for: CloudDragPayload.self) { payloads, _ in
-                            guard let payload = payloads.first else { return false }
-                            model.moveCloudItems(payload, to: folder.prefix)
-                            return true
-                        } isTargeted: { targeted in
-                            model.browser.setDropTarget(folder.prefix, active: targeted)
-                        }
+                        ))
                         .onDrag {
-                            model.finderItemProvider(clickedKey: folder.prefix)
+                            modelRef.finderItemProvider(clickedKey: folder.prefix)
                         } preview: {
                             dragPreview(name: folder.name, symbol: "folder.fill")
                         }
                     }
-                    ForEach(model.browser.visibleObjects) { object in
+                    ForEach(modelRef.browser.visibleObjects) { object in
                         AssetCell(
                             object: object,
                             selected: selected.contains(object.key),
-                            renameSession: renameSession(for: object.key),
-                            renameText: renameTextBinding,
-                            onRenameCommit: commitRename,
-                            onRenameCancel: model.browser.cancelRenaming
-                        ) {
-                            select(object, modifiers: currentSelectionModifiers)
-                        } onOpen: {
-                            Task { await model.quickLookSelection() }
-                        }
+                            renameSession: renameSession(modelRef: modelRef, for: object.key),
+                            renameText: renameTextBinding(modelRef: modelRef),
+                            onRenameCommit: { commitRename(with: modelRef) },
+                            onRenameCancel: { modelRef.browser.cancelRenaming() },
+                            loadClient: { modelRef.makeClient() }
+                        )
+                        .contentShape(Rectangle())
                         .contextMenu {
-                            Button("快速查看") {
-                                selectForMenu(object.key)
-                                Task { await model.quickLookSelection() }
-                            }
-                            .onAppear { selectForMenu(object.key) }
-                            objectMenu(object)
+                            objectMenu(modelRef, object: object)
                         }
                         .onDrag {
-                            model.finderItemProvider(clickedKey: object.key)
+                            modelRef.finderItemProvider(clickedKey: object.key)
                         } preview: {
                             dragPreview(name: object.name, symbol: object.isImage ? "photo" : "doc")
                         }
@@ -274,31 +340,31 @@ struct BrowserView: View {
                 .padding(.horizontal, 10)
                 .padding(.top, 8)
                 .padding(.bottom, 12)
-                .frame(maxWidth: .infinity, minHeight: geo.size.height, alignment: .topLeading)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+                }
             }
-            .background {
-                Color.clear
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .contentShape(Rectangle())
-                    .contextMenu { backgroundMenu() }
-            }
-        }
-        .onTapGesture {
-            model.browser.clearSelection()
         }
         .contentMargins(.all, 0, for: .scrollContent)
         .scrollContentBackground(.hidden)
         .background(Color(nsColor: .controlBackgroundColor))
+        .overlay { backgroundMenuOverlay(modelRef).allowsHitTesting(false) }
     }
 
     private var table: some View {
-        Table(of: BrowserRow.self, selection: tableSelection) {
+        // Cell content is rendered by the AppKit table in its own hosting
+        // context; capture the model reference up front and never touch
+        // @Environment inside the cell closures.
+        let modelRef = model
+        return Table(of: BrowserRow.self, selection: tableSelection(modelRef)) {
             TableColumn("名称") { row in
+                let renameSession = modelRef.browser.renameSession.flatMap {
+                    $0.key == row.id ? $0 : nil
+                }
                 HStack(spacing: 6) {
                     if row.isFolder {
                         FinderFolderIcon(size: 16)
                     } else if let object = row.object, object.isImage {
-                        ThumbnailView(object: object, style: .row)
+                        ThumbnailView(object: object, style: .row, loadClient: { modelRef.makeClient() })
                             .frame(width: 18, height: 18)
                             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                     } else if let object = row.object {
@@ -308,14 +374,17 @@ struct BrowserView: View {
                             .foregroundStyle(.secondary)
                             .frame(width: 16)
                     }
-                    if let renameSession = renameSession(for: row.id) {
+                    if let renameSession {
                         FinderRenameField(
-                            text: renameTextBinding,
+                            text: Binding(
+                                get: { modelRef.browser.renameSession?.draft ?? "" },
+                                set: { modelRef.browser.updateRenameDraft($0) }
+                            ),
                             initialSelection: renameSession.initialSelection,
                             alignment: .left,
                             isCommitting: renameSession.isCommitting,
-                            onCommit: commitRename,
-                            onCancel: model.browser.cancelRenaming
+                            onCommit: { commitRename(with: modelRef) },
+                            onCancel: { modelRef.browser.cancelRenaming() }
                         )
                         .frame(maxWidth: .infinity, minHeight: 20)
                     } else {
@@ -325,36 +394,24 @@ struct BrowserView: View {
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
+                .accessibilityIdentifier("lumen.browser.item")
                 .onDrag {
-                    model.finderItemProvider(clickedKey: row.id)
+                    modelRef.finderItemProvider(clickedKey: row.id)
                 } preview: {
                     dragPreview(name: row.name, symbol: row.symbol)
                 }
-                .onTapGesture(count: 2) {
-                    if let folder = row.folder {
-                        model.openFolder(folder)
-                    } else {
-                        Task { await model.quickLookSelection() }
+                .modifier(BrowserFolderDropModifier(
+                    folder: row.folder,
+                    onUpload: { urls, prefix in
+                        modelRef.upload(urls: urls, to: prefix, applyTemplate: prefix.isEmpty)
+                    },
+                    onMoveCloudItems: { payload, prefix in
+                        modelRef.moveCloudItems(payload, to: prefix)
+                    },
+                    onSetDropTarget: { prefix, active in
+                        modelRef.browser.setDropTarget(prefix, active: active)
                     }
-                }
-                .background {
-                    if let folder = row.folder {
-                        Color.clear
-                            .dropDestination(for: URL.self) { urls, _ in
-                                model.upload(urls: urls, to: folder.prefix, applyTemplate: false)
-                                return true
-                            } isTargeted: { targeted in
-                                model.browser.setDropTarget(folder.prefix, active: targeted)
-                            }
-                            .dropDestination(for: CloudDragPayload.self) { payloads, _ in
-                                guard let payload = payloads.first else { return false }
-                                model.moveCloudItems(payload, to: folder.prefix)
-                                return true
-                            } isTargeted: { targeted in
-                                model.browser.setDropTarget(folder.prefix, active: targeted)
-                            }
-                    }
-                }
+                ))
             }
             TableColumn("大小") { row in
                 Text(row.sizeLabel)
@@ -377,31 +434,24 @@ struct BrowserView: View {
                 TableRow(row)
                     .contextMenu {
                         if let object = row.object {
-                            Button("快速查看") {
-                                selectForMenu(object.key)
-                                Task { await model.quickLookSelection() }
-                            }
-                            .onAppear { selectForMenu(object.key) }
-                            objectMenu(object)
+                            objectMenu(modelRef, object: object)
                         } else if let folder = row.folder {
-                            Button("打开") { model.openFolder(folder) }
-                                .onAppear { selectForMenu(folder.prefix) }
-                            folderMenu(folder)
+                            folderMenu(modelRef, folder: folder)
                         }
                     }
             }
         }
-        .contextMenu { backgroundMenu() }
+        .overlay { backgroundMenuOverlay(modelRef).allowsHitTesting(false) }
     }
 
     private var tableRows: [BrowserRow] {
         model.browser.visibleFolders.map(BrowserRow.init) + model.browser.visibleObjects.map(BrowserRow.init)
     }
 
-    private var tableSelection: Binding<Set<BrowserRow.ID>> {
+    private func tableSelection(_ modelRef: AppModel) -> Binding<Set<BrowserRow.ID>> {
         Binding(
-            get: { model.browser.selectedKeys },
-            set: { model.browser.replaceSelection($0) }
+            get: { modelRef.browser.selectedKeys },
+            set: { modelRef.browser.replaceSelection($0) }
         )
     }
 
@@ -418,184 +468,280 @@ struct BrowserView: View {
             .allowsHitTesting(false)
     }
 
-    @ViewBuilder
-    private func backgroundMenu() -> some View {
-        if model.cloudClipboard != nil {
-            Button("粘贴到此处") { model.pasteCloudItems() }
-            Divider()
-        }
-        Button("上传…") { showFileImporter = true }
-        Button("从剪贴板上传") { model.pasteFromClipboard() }
-        Button("新建文件夹…") { model.wantsNewFolder = true }
-        Divider()
-        Button("下载当前文件夹…") { model.downloadCurrentPrefix() }
-        Button("刷新") { Task { await model.refreshListing() } }
-        Divider()
-        Button("全选") { model.browser.selectAllVisible() }
-        if !model.browser.selectedKeys.isEmpty {
-            Button("取消选择") { model.browser.clearSelection() }
-        }
-    }
-
-    @ViewBuilder
-    private func folderMenu(_ folder: OSSFolder) -> some View {
-        Button(model.isFavorite(prefix: folder.prefix) ? "从常用中移除" : "添加到常用") {
-            model.toggleFavorite(prefix: folder.prefix, name: folder.name)
-        }
-        Divider()
-        Button(downloadTitle(clickedKey: folder.prefix)) {
-            selectForMenu(folder.prefix)
-            model.downloadSelection()
-        }
-        Button("复制") {
-            selectForMenu(folder.prefix)
-            model.copyCloudSelection(clickedKey: folder.prefix)
-        }
-        Button("重命名…") {
-            beginRenaming(key: folder.prefix)
-        }
-        .disabled(model.isOrganizingCloud)
-        Divider()
-        Button(deleteTitle(clickedKey: folder.prefix), role: .destructive) {
-            selectForMenu(folder.prefix)
-            model.requestDeleteSelection()
-        }
-    }
-
-    @ViewBuilder
-    private func objectMenu(_ object: OSSObject) -> some View {
-        Button("复制链接") {
-            selectForMenu(object.key)
-            model.copyURLs(style: .plain)
-        }
-        Button("复制 Markdown") {
-            selectForMenu(object.key)
-            model.copyURLs(style: .markdown)
-        }
-        Divider()
-        Button("复制") {
-            selectForMenu(object.key)
-            model.copyCloudSelection(clickedKey: object.key)
-        }
-        Button(downloadTitle(clickedKey: object.key)) {
-            selectForMenu(object.key)
-            model.downloadSelection()
-        }
-        Button("重命名…") {
-            beginRenaming(key: object.key)
-        }
-        .disabled(model.isOrganizingCloud)
-        Button("版本历史…") {
-            selectForMenu(object.key)
-            model.presentVersionHistory(for: object)
-        }
-        Button("对象属性…") {
-            selectForMenu(object.key)
-            model.presentObjectProperties(for: object)
-        }
-        Divider()
-        Button(deleteTitle(clickedKey: object.key), role: .destructive) {
-            selectForMenu(object.key)
-            model.requestDeleteSelection()
-        }
-    }
-
-    private func selectForMenu(_ key: String) {
-        if !model.browser.selectedKeys.contains(key) {
-            model.browser.select(key: key, modifiers: [])
-        }
-    }
-
-    private func downloadTitle(clickedKey: String) -> String {
-        let keys: Set<String> = model.browser.selectedKeys.contains(clickedKey)
-            ? model.browser.selectedKeys
-            : [clickedKey]
-        let files = model.browser.objects.filter { keys.contains($0.key) }.count
-        let folders = model.browser.folders.filter { keys.contains($0.prefix) }.count
-        if folders == 1 && files == 0 && keys.count == 1 {
-            return "下载文件夹…"
-        }
-        if files + folders > 1 {
-            return "下载 \(files + folders) 项…"
-        }
-        return "下载…"
-    }
-
-    private func deleteTitle(clickedKey: String) -> String {
-        let keys: Set<String> = model.browser.selectedKeys.contains(clickedKey)
-            ? model.browser.selectedKeys
-            : [clickedKey]
-        let count = keys.count
-        if count > 1 {
-            return "删除 \(count) 项…"
-        }
-        if model.browser.folders.contains(where: { $0.prefix == clickedKey }) {
-            return "删除文件夹…"
-        }
-        return "删除…"
-    }
-
-    private var currentSelectionModifiers: BrowserSelectionModifiers {
-        let flags = NSEvent.modifierFlags.intersection(.deviceIndependentFlagsMask)
-        var modifiers: BrowserSelectionModifiers = []
-        if flags.contains(.command) { modifiers.insert(.toggle) }
-        if flags.contains(.shift) { modifiers.insert(.extendRange) }
-        return modifiers
-    }
-
-    private func selectFolder(_ folder: OSSFolder, modifiers: BrowserSelectionModifiers) {
-        model.browser.select(key: folder.prefix, modifiers: modifiers)
-    }
-
-    private func select(_ object: OSSObject, modifiers: BrowserSelectionModifiers) {
-        model.browser.select(key: object.key, modifiers: modifiers)
-    }
-
-    private var renameTextBinding: Binding<String> {
-        Binding(
-            get: { model.browser.renameSession?.draft ?? "" },
-            set: { model.browser.updateRenameDraft($0) }
+    private func backgroundMenuOverlay(_ modelRef: AppModel) -> BrowserBackgroundMenuOverlay {
+        BrowserBackgroundMenuOverlay(
+            actions: BrowserContextActions(
+                pasteTitle: modelRef.pasteMenuTitle,
+                pasteIntoFolderTitle: modelRef.pasteIntoFolderTitle,
+                canPaste: { modelRef.canPaste },
+                hasCloudClipboard: { modelRef.canPasteCloudItems },
+                canDeselect: !modelRef.browser.selectedKeys.isEmpty,
+                isOrganizing: modelRef.isOrganizingCloud,
+                tableItemIDs: tableRows.map(\.id),
+                viewMode: modelRef.browser.viewMode,
+                selectedKeys: { modelRef.browser.selectedKeys },
+                isFavorite: { prefix in modelRef.isFavorite(prefix: prefix) },
+                deleteTitle: { deleteTitle(modelRef, clickedKey: $0) },
+                downloadTitle: { downloadTitle(modelRef, clickedKey: $0) },
+                onHighlight: { selectForMenu(modelRef, $0) },
+                onSelectItem: { key, modifiers in
+                    modelRef.browser.select(key: key, modifiers: modifiers)
+                },
+                onBackgroundClick: { modelRef.browser.clearSelection() },
+                onOpenItem: { openItem(modelRef, id: $0) },
+                onPaste: { modelRef.paste() },
+                onPasteInto: { modelRef.paste(into: $0) },
+                onUpload: { showFileImporter = true },
+                onPasteLocal: { modelRef.pasteFromClipboard() },
+                onNewFolder: { modelRef.wantsNewFolder = true },
+                onDownloadCurrent: { modelRef.downloadCurrentPrefix() },
+                onRefresh: { Task { await modelRef.refreshListing() } },
+                onSelectAll: { modelRef.browser.selectAllVisible() },
+                onDeselect: { modelRef.browser.clearSelection() },
+                onOpenFolder: { prefix in
+                    if let folder = modelRef.browser.folders.first(where: { $0.prefix == prefix }) {
+                        modelRef.openFolder(folder)
+                    }
+                },
+                onQuickLook: { key in
+                    selectForMenu(modelRef, key)
+                    Task { await modelRef.quickLookSelection() }
+                },
+                onCopy: { modelRef.copyCloudSelection(clickedKey: $0) },
+                onCut: { modelRef.cutCloudSelection(clickedKey: $0) },
+                onRename: { beginRenaming(modelRef, key: $0) },
+                onDelete: { key in
+                    modelRef.requestDeleteSelection(
+                        keys: menuActionKeys(modelRef, clickedKey: key),
+                        deferConfirmation: true
+                    )
+                },
+                onDownload: { key in
+                    selectForMenu(modelRef, key)
+                    modelRef.downloadSelection()
+                },
+                onToggleFavorite: { prefix in
+                    if let folder = modelRef.browser.folders.first(where: { $0.prefix == prefix }) {
+                        modelRef.toggleFavorite(prefix: prefix, name: folder.name)
+                    }
+                },
+                onCopyLink: { key in
+                    selectForMenu(modelRef, key)
+                    modelRef.copyURLs(style: .plain)
+                },
+                onCopyMarkdown: { key in
+                    selectForMenu(modelRef, key)
+                    modelRef.copyURLs(style: .markdown)
+                },
+                onObjectProperties: { key in
+                    if let object = modelRef.browser.objects.first(where: { $0.key == key }) {
+                        modelRef.presentObjectProperties(for: object)
+                    }
+                }
+            )
         )
     }
 
-    private func renameSession(for key: String) -> BrowserRenameSession? {
-        guard model.browser.renameSession?.key == key else { return nil }
-        return model.browser.renameSession
-    }
-
-    private func beginRenaming(key: String) {
-        guard !model.isOrganizingCloud else { return }
-        Task { @MainActor in
-            await Task.yield()
-            model.browser.beginRenaming(key: key)
+    @ViewBuilder
+    private func backgroundMenu(_ modelRef: AppModel) -> some View {
+        Button(modelRef.pasteMenuTitle) { modelRef.paste() }
+            .disabled(!modelRef.canPaste)
+        Divider()
+        Button("上传") { showFileImporter = true }
+        Button("从剪贴板上传") { modelRef.pasteFromClipboard() }
+        Button("新建文件夹") { modelRef.wantsNewFolder = true }
+        Divider()
+        Button("下载当前文件夹") { modelRef.downloadCurrentPrefix() }
+        Button("刷新") { Task { await modelRef.refreshListing() } }
+        Divider()
+        Button("全选") { modelRef.browser.selectAllVisible() }
+        if !modelRef.browser.selectedKeys.isEmpty {
+            Button("取消选择") { modelRef.browser.clearSelection() }
         }
     }
 
-    private func commitRename() {
-        guard let session = model.browser.renameSession,
+    @ViewBuilder
+    private func folderMenu(_ modelRef: AppModel, folder: OSSFolder) -> some View {
+        Button("打开") {
+            modelRef.openFolder(folder)
+        }
+        .onAppear { selectForMenu(modelRef, folder.prefix) }
+        Button(deleteTitle(modelRef, clickedKey: folder.prefix), role: .destructive) {
+            modelRef.requestDeleteSelection(
+                keys: menuActionKeys(modelRef, clickedKey: folder.prefix),
+                deferConfirmation: true
+            )
+        }
+        .disabled(modelRef.isOrganizingCloud)
+        Divider()
+        Button(modelRef.isFavorite(prefix: folder.prefix) ? "从常用中移除" : "添加到常用") {
+            modelRef.toggleFavorite(prefix: folder.prefix, name: folder.name)
+        }
+        Button(downloadTitle(modelRef, clickedKey: folder.prefix)) {
+            selectForMenu(modelRef, folder.prefix)
+            modelRef.downloadSelection()
+        }
+        Button("复制") {
+            selectForMenu(modelRef, folder.prefix)
+            modelRef.copyCloudSelection(clickedKey: folder.prefix)
+        }
+        Button("剪切") {
+            selectForMenu(modelRef, folder.prefix)
+            modelRef.cutCloudSelection(clickedKey: folder.prefix)
+        }
+        Button(modelRef.pasteIntoFolderTitle) {
+            modelRef.paste(into: folder.prefix)
+        }
+        .disabled(!modelRef.canPaste)
+        Button("重命名") {
+            beginRenaming(modelRef, key: folder.prefix)
+        }
+        .disabled(modelRef.isOrganizingCloud)
+    }
+
+    @ViewBuilder
+    private func objectMenu(_ modelRef: AppModel, object: OSSObject) -> some View {
+        Button("快速查看") {
+            selectForMenu(modelRef, object.key)
+            Task { await modelRef.quickLookSelection() }
+        }
+        .onAppear { selectForMenu(modelRef, object.key) }
+        Button(deleteTitle(modelRef, clickedKey: object.key), role: .destructive) {
+            modelRef.requestDeleteSelection(
+                keys: menuActionKeys(modelRef, clickedKey: object.key),
+                deferConfirmation: true
+            )
+        }
+        .disabled(modelRef.isOrganizingCloud)
+        Divider()
+        Button("复制链接") {
+            selectForMenu(modelRef, object.key)
+            modelRef.copyURLs(style: .plain)
+        }
+        Button("复制 Markdown") {
+            selectForMenu(modelRef, object.key)
+            modelRef.copyURLs(style: .markdown)
+        }
+        Button("复制") {
+            selectForMenu(modelRef, object.key)
+            modelRef.copyCloudSelection(clickedKey: object.key)
+        }
+        Button("剪切") {
+            selectForMenu(modelRef, object.key)
+            modelRef.cutCloudSelection(clickedKey: object.key)
+        }
+        Button(modelRef.pasteMenuTitle) {
+            modelRef.paste()
+        }
+        .disabled(!modelRef.canPaste)
+        Button(downloadTitle(modelRef, clickedKey: object.key)) {
+            selectForMenu(modelRef, object.key)
+            modelRef.downloadSelection()
+        }
+        Button("重命名") {
+            beginRenaming(modelRef, key: object.key)
+        }
+        .disabled(modelRef.isOrganizingCloud)
+        Button("对象属性") {
+            selectForMenu(modelRef, object.key)
+            modelRef.presentObjectProperties(for: object)
+        }
+    }
+
+    private func selectForMenu(_ modelRef: AppModel, _ key: String) {
+        modelRef.browser.selectForContextMenu(key: key)
+    }
+
+    private func openItem(_ modelRef: AppModel, id: String) {
+        if let folder = modelRef.browser.folders.first(where: { $0.prefix == id }) {
+            modelRef.openFolder(folder)
+            return
+        }
+        selectForMenu(modelRef, id)
+        Task { await modelRef.quickLookSelection() }
+    }
+
+    private func menuActionKeys(_ modelRef: AppModel, clickedKey: String) -> Set<String> {
+        if modelRef.browser.selectedKeys.contains(clickedKey) {
+            return modelRef.browser.actionableSelectionKeys
+        }
+        return [clickedKey]
+    }
+
+    private func downloadTitle(_ modelRef: AppModel, clickedKey: String) -> String {
+        let keys: Set<String> = modelRef.browser.selectedKeys.contains(clickedKey)
+            ? modelRef.browser.selectedKeys
+            : [clickedKey]
+        let files = modelRef.browser.objects.filter { keys.contains($0.key) }.count
+        let folders = modelRef.browser.folders.filter { keys.contains($0.prefix) }.count
+        if folders == 1 && files == 0 && keys.count == 1 {
+            return "下载文件夹"
+        }
+        if files + folders > 1 {
+            return "下载 \(files + folders) 项"
+        }
+        return "下载"
+    }
+
+    private func deleteTitle(_ modelRef: AppModel, clickedKey: String) -> String {
+        let keys: Set<String> = modelRef.browser.selectedKeys.contains(clickedKey)
+            ? modelRef.browser.selectedKeys
+            : [clickedKey]
+        let count = keys.count
+        if count > 1 {
+            return "删除 \(count) 项"
+        }
+        if modelRef.browser.folders.contains(where: { $0.prefix == clickedKey }) {
+            return "删除文件夹"
+        }
+        return "删除"
+    }
+
+    private func renameTextBinding(modelRef: AppModel) -> Binding<String> {
+        Binding(
+            get: { modelRef.browser.renameSession?.draft ?? "" },
+            set: { modelRef.browser.updateRenameDraft($0) }
+        )
+    }
+
+    private func renameSession(modelRef: AppModel, for key: String) -> BrowserRenameSession? {
+        guard modelRef.browser.renameSession?.key == key else { return nil }
+        return modelRef.browser.renameSession
+    }
+
+    private func beginRenaming(_ modelRef: AppModel, key: String) {
+        guard !modelRef.isOrganizingCloud else { return }
+        Task { @MainActor in
+            await Task.yield()
+            modelRef.browser.beginRenaming(key: key)
+        }
+    }
+
+    private func commitRename(with modelRef: AppModel) {
+        guard let session = modelRef.browser.renameSession,
               !session.isCommitting
         else { return }
-        model.browser.setRenameCommitting(true)
+        modelRef.browser.setRenameCommitting(true)
         Task { @MainActor in
             let succeeded: Bool
             switch session.kind {
             case .object:
-                guard let object = model.browser.objects.first(where: { $0.key == session.key }) else {
-                    model.browser.finishRenaming()
+                guard let object = modelRef.browser.objects.first(where: { $0.key == session.key }) else {
+                    modelRef.browser.finishRenaming()
                     return
                 }
-                succeeded = await model.rename(object, to: session.draft)
+                succeeded = await modelRef.rename(object, to: session.draft)
             case .folder:
-                guard let folder = model.browser.folders.first(where: { $0.prefix == session.key }) else {
-                    model.browser.finishRenaming()
+                guard let folder = modelRef.browser.folders.first(where: { $0.prefix == session.key }) else {
+                    modelRef.browser.finishRenaming()
                     return
                 }
-                succeeded = await model.renameFolder(folder, to: session.draft)
+                succeeded = await modelRef.renameFolder(folder, to: session.draft)
             }
             if succeeded {
-                model.browser.finishRenaming()
+                modelRef.browser.finishRenaming()
             } else {
-                model.browser.setRenameCommitting(false)
+                modelRef.browser.setRenameCommitting(false)
             }
         }
     }
@@ -608,7 +754,7 @@ struct BrowserView: View {
             .background(.bar, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
     }
 
-    private func importPhotos(_ items: [PhotosPickerItem]) async {
+    private func importPhotos(_ modelRef: AppModel, items: [PhotosPickerItem]) async {
         guard !items.isEmpty else { return }
         var urls: [URL] = []
         for item in items {
@@ -621,7 +767,7 @@ struct BrowserView: View {
         }
         photos = []
         if !urls.isEmpty {
-            model.upload(urls: urls, ownedTemporaryURLs: Set(urls))
+            modelRef.upload(urls: urls, ownedTemporaryURLs: Set(urls))
         }
     }
 }
@@ -682,7 +828,7 @@ private struct PathBar: View {
                             pathMenu(prefix: crumb.prefix, isCurrent: crumb.prefix == model.browser.prefix)
                         }
                         .dropDestination(for: URL.self) { urls, _ in
-                            model.upload(urls: urls, to: crumb.prefix, applyTemplate: false)
+                            model.upload(urls: urls, to: crumb.prefix, applyTemplate: crumb.prefix.isEmpty)
                             return true
                         } isTargeted: { targeted in
                             model.browser.setDropTarget(crumb.prefix, active: targeted)
@@ -739,13 +885,11 @@ private struct PathBar: View {
 
     @ViewBuilder
     private func pathMenu(prefix: String, isCurrent: Bool) -> some View {
-        if model.cloudClipboard != nil {
-            Button("粘贴到此处") {
-                guard let payload = model.cloudClipboard else { return }
-                Task { await model.organizeCloud(payload, to: prefix, mode: .copy) }
-            }
-            Divider()
+        Button(model.pasteMenuTitle) {
+            model.paste(into: prefix)
         }
+        .disabled(!model.canPaste)
+        Divider()
         Button("复制路径") {
             model.copyFolderPath(prefix, includeBucket: false)
         }
@@ -761,24 +905,52 @@ private struct PathBar: View {
                 model.goToPrefix(prefix)
             }
         }
-        Button("上传到此处…") {
+        Button("上传到此处") {
             if !isCurrent {
                 model.goToPrefix(prefix)
             }
             showFileImporter = true
         }
-        Button("在此处新建文件夹…") {
+        Button("在此处新建文件夹") {
             if !isCurrent {
                 model.goToPrefix(prefix)
             }
             model.wantsNewFolder = true
         }
-        Button("下载此文件夹…") {
+        Button("下载此文件夹") {
             if isCurrent {
                 model.downloadCurrentPrefix()
             } else {
                 model.downloadFolder(OSSFolder(prefix: prefix))
             }
+        }
+    }
+}
+
+private struct BrowserFolderDropModifier: ViewModifier {
+    var folder: OSSFolder?
+    var onUpload: ([URL], String) -> Void
+    var onMoveCloudItems: (CloudDragPayload, String) -> Void
+    var onSetDropTarget: (String, Bool) -> Void
+
+    func body(content: Content) -> some View {
+        if let folder {
+            content
+                .dropDestination(for: URL.self) { urls, _ in
+                    onUpload(urls, folder.prefix)
+                    return true
+                } isTargeted: { targeted in
+                    onSetDropTarget(folder.prefix, targeted)
+                }
+                .dropDestination(for: CloudDragPayload.self) { payloads, _ in
+                    guard let payload = payloads.first else { return false }
+                    onMoveCloudItems(payload, folder.prefix)
+                    return true
+                } isTargeted: { targeted in
+                    onSetDropTarget(folder.prefix, targeted)
+                }
+        } else {
+            content
         }
     }
 }
@@ -791,47 +963,39 @@ private struct FolderCell: View {
     @Binding var renameText: String
     var onRenameCommit: () -> Void
     var onRenameCancel: () -> Void
-    var action: () -> Void
-    var onOpen: () -> Void
-    @State private var selectedDuringPress = false
 
     var body: some View {
         let highlighted = selected || dropTargeted
         ZStack(alignment: .bottom) {
-            Button(action: selectOnRelease) {
-                VStack(spacing: 4) {
-                    FinderFolderIcon(size: 64)
-                        .padding(8)
-                        .background {
+            VStack(spacing: 4) {
+                FinderFolderIcon(size: 64)
+                    .padding(8)
+                    .background {
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(highlighted ? Color.accentColor.opacity(dropTargeted ? 0.4 : 0.3) : Color.clear)
+                    }
+                    .overlay {
+                        if dropTargeted {
                             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(highlighted ? Color.accentColor.opacity(dropTargeted ? 0.4 : 0.3) : Color.clear)
+                                .strokeBorder(Color.accentColor, lineWidth: 2)
                         }
-                        .overlay {
-                            if dropTargeted {
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .strokeBorder(Color.accentColor, lineWidth: 2)
-                            }
-                        }
+                    }
 
-                    Text(folder.name)
-                        .font(.system(size: 12))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background {
-                            RoundedRectangle(cornerRadius: 4, style: .continuous)
-                                .fill(highlighted ? Color.accentColor : Color.clear)
-                        }
-                        .foregroundStyle(highlighted ? Color.white : Color.primary)
-                        .opacity(renameSession == nil ? 1 : 0)
-                }
-                .frame(maxWidth: .infinity)
-                .contentShape(Rectangle())
+                Text(folder.name)
+                    .font(.system(size: 12))
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background {
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(highlighted ? Color.accentColor : Color.clear)
+                    }
+                    .foregroundStyle(highlighted ? Color.white : Color.primary)
+                    .opacity(renameSession == nil ? 1 : 0)
             }
-            .buttonStyle(FinderItemButtonStyle(onPress: selectOnPress))
+            .frame(maxWidth: .infinity)
             .contentShape(Rectangle())
-            .simultaneousGesture(TapGesture(count: 2).onEnded(onOpen))
 
             if let renameSession {
                 FinderRenameField(
@@ -846,20 +1010,17 @@ private struct FolderCell: View {
                 .padding(.horizontal, 3)
             }
         }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
         .help(folder.name)
+        .overlay {
+            BrowserItemMarker(id: "lumen.folder:\(folder.prefix)")
+                .allowsHitTesting(false)
+        }
+        .accessibilityIdentifier("lumen.browser.item")
         .accessibilityLabel("文件夹，\(folder.name)")
         .accessibilityValue(selected ? "已选择" : "未选择")
         .accessibilityHint("双击打开")
-    }
-
-    private func selectOnPress() {
-        selectedDuringPress = true
-        action()
-    }
-
-    private func selectOnRelease() {
-        if !selectedDuringPress { action() }
-        selectedDuringPress = false
     }
 }
 
@@ -870,36 +1031,32 @@ private struct AssetCell: View {
     @Binding var renameText: String
     var onRenameCommit: () -> Void
     var onRenameCancel: () -> Void
-    var action: () -> Void
-    var onOpen: () -> Void
-    @State private var selectedDuringPress = false
+    var loadClient: () -> OSSClient?
 
     var body: some View {
         ZStack(alignment: .bottom) {
-            Button(action: selectOnRelease) {
-                VStack(spacing: 4) {
-                    ThumbnailView(object: object)
-                        .aspectRatio(1, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: 5, style: .continuous)
-                                .strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 3)
-                        }
-                        .clipped()
-                    Text(object.name)
-                        .font(.caption)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(selected ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
-                        .foregroundStyle(selected ? Color.white : Color.primary)
-                        .frame(maxWidth: .infinity)
-                        .opacity(renameSession == nil ? 1 : 0)
-                }
+            VStack(spacing: 4) {
+                ThumbnailView(object: object, loadClient: loadClient)
+                    .aspectRatio(1, contentMode: .fit)
+                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .strokeBorder(selected ? Color.accentColor : .clear, lineWidth: 3)
+                    }
+                    .clipped()
+                Text(object.name)
+                    .font(.caption)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 4)
+                    .padding(.vertical, 1)
+                    .background(selected ? Color.accentColor : .clear, in: RoundedRectangle(cornerRadius: 4, style: .continuous))
+                    .foregroundStyle(selected ? Color.white : Color.primary)
+                    .frame(maxWidth: .infinity)
+                    .opacity(renameSession == nil ? 1 : 0)
             }
-            .buttonStyle(FinderItemButtonStyle(onPress: selectOnPress))
-            .simultaneousGesture(TapGesture(count: 2).onEnded { onOpen() })
+            .frame(maxWidth: .infinity)
+            .contentShape(Rectangle())
 
             if let renameSession {
                 FinderRenameField(
@@ -914,32 +1071,17 @@ private struct AssetCell: View {
                 .padding(.horizontal, 3)
             }
         }
+        .frame(maxWidth: .infinity)
+        .contentShape(Rectangle())
         .help(object.name)
+        .overlay {
+            BrowserItemMarker(id: "lumen.file:\(object.key)")
+                .allowsHitTesting(false)
+        }
+        .accessibilityIdentifier("lumen.browser.item")
         .accessibilityLabel("\(ImageKind.displayKind(for: object.key))，\(object.name)")
         .accessibilityValue(selected ? "已选择" : "未选择")
         .accessibilityHint("双击快速查看")
-    }
-
-    private func selectOnPress() {
-        selectedDuringPress = true
-        action()
-    }
-
-    private func selectOnRelease() {
-        if !selectedDuringPress { action() }
-        selectedDuringPress = false
-    }
-}
-
-private struct FinderItemButtonStyle: ButtonStyle {
-    var onPress: () -> Void
-
-    func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .opacity(configuration.isPressed ? 0.86 : 1)
-            .onChange(of: configuration.isPressed) { _, pressed in
-                if pressed { onPress() }
-            }
     }
 }
 

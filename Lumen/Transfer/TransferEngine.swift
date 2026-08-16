@@ -27,6 +27,7 @@ final class TransferEngine {
     private let journal: any TransferJournaling
     private let bookmarks: any TransferBookmarking
     private var lastProgressPersistenceAt: Date?
+    private var lastCheckpointWrite: [UUID: TimeInterval] = [:]
     private let clientProvider: @MainActor @Sendable (OSSAccount, OSSBucket?) throws -> OSSClient
 
     init(
@@ -59,7 +60,6 @@ final class TransferEngine {
 
     var activeCount: Int { jobs.filter(\.isActive).count }
     var hasJobs: Bool { !jobs.isEmpty }
-    var completedThisSession: [TransferJob] { jobs.filter { $0.status == .completed } }
 
     struct PlannedUpload {
         var sourceURL: URL
@@ -184,7 +184,8 @@ final class TransferEngine {
         account: OSSAccount,
         bucket: OSSBucket?,
         settings: AppSettings,
-        excludingSources: Set<URL> = []
+        excludingSources: Set<URL> = [],
+        allowOverwrite: Bool = false
     ) {
         enqueue(
             plan: plan,
@@ -194,29 +195,13 @@ final class TransferEngine {
             concurrentUploads: settings.concurrentUploads,
             speedLimit: settings.uploadSpeedLimit,
             playCompleteSound: settings.playCompleteSound,
-            excludingSources: excludingSources
+            excludingSources: excludingSources,
+            allowOverwrite: allowOverwrite
         )
     }
 
     func abandon(plan: UploadPlan) {
         plan.items.forEach { $0.resource.finish() }
-    }
-
-    func enqueueDownloads(
-        objects: [OSSObject],
-        client: OSSClient,
-        account: OSSAccount? = nil,
-        bucket: OSSBucket? = nil,
-        folder: URL
-    ) {
-        enqueueDownloadJobs(
-            items: objects.map { ($0, folder.appending(path: $0.name)) },
-            client: client,
-            account: account,
-            bucket: bucket,
-            scopedRoot: folder,
-            speedLimit: downloadSpeedLimit
-        )
     }
 
     func enqueueDownloadJobs(
@@ -225,7 +210,8 @@ final class TransferEngine {
         account: OSSAccount? = nil,
         bucket: OSSBucket? = nil,
         scopedRoot: URL,
-        speedLimit: TransferSpeedLimit? = nil
+        speedLimit: TransferSpeedLimit? = nil,
+        allowOverwrite: Bool = false
     ) {
         guard !items.isEmpty else { return }
         let rootLease = SecurityScopeLease(url: scopedRoot)
@@ -254,7 +240,8 @@ final class TransferEngine {
                     object: item.object,
                     destination: dest,
                     scopedRoot: scopedRoot,
-                    speedLimit: speedLimit ?? downloadSpeedLimit
+                    speedLimit: speedLimit ?? downloadSpeedLimit,
+                    allowOverwrite: allowOverwrite
                 )
             )
             if let account,
@@ -266,7 +253,8 @@ final class TransferEngine {
                         bucket: bucket,
                         rootBookmark: rootBookmark,
                         object: item.object,
-                        relativeDestination: relativeDestination
+                        relativeDestination: relativeDestination,
+                        allowOverwrite: allowOverwrite
                     )
                 )
             }
@@ -336,6 +324,9 @@ final class TransferEngine {
             finishResource(id)
         }
         pumpFinished()
+        if activeCount == 0, !jobs.contains(where: { $0.status == .paused }) {
+            onAllFinished?()
+        }
     }
 
     func cancelAll() {
@@ -346,6 +337,11 @@ final class TransferEngine {
         let removedIDs = Set(jobs.filter(\.isFinished).map(\.id))
         jobs.removeAll(where: \.isFinished)
         for id in removedIDs {
+            let checkpoint = checkpoints[id]
+            let descriptor = retryDescriptors[id]
+            Task { [weak self] in
+                await self?.discardCheckpoint(checkpoint, descriptor: descriptor)
+            }
             retryDescriptors[id] = nil
             persistedRetries[id] = nil
             unavailableRetryReasons[id] = nil
@@ -375,7 +371,14 @@ final class TransferEngine {
 
     func recordCheckpoint(_ id: UUID, checkpoint: TransferCheckpoint?) {
         checkpoints[id] = checkpoint
-        persistJournal()
+        // Checkpoint callbacks fire per chunk; persist at most every ~0.5 s
+        // per job instead of rewriting the whole journal per chunk. The final
+        // state is always flushed by the status-change persistJournal calls.
+        let now = ProcessInfo.processInfo.systemUptime
+        if checkpoint == nil || now - (lastCheckpointWrite[id] ?? -.infinity) >= 0.5 {
+            lastCheckpointWrite[id] = now
+            persistJournal()
+        }
     }
 
     func moveToTop(_ id: UUID) {
@@ -416,7 +419,8 @@ final class TransferEngine {
                     bucket: upload.bucket,
                     concurrentUploads: concurrency,
                     speedLimit: upload.speedLimit,
-                    playCompleteSound: upload.playSound
+                    playCompleteSound: upload.playSound,
+                    allowOverwrite: upload.allowOverwrite
                 )
             }
         case .download(let download):
@@ -426,7 +430,8 @@ final class TransferEngine {
                 account: download.account,
                 bucket: download.bucket,
                 scopedRoot: download.scopedRoot,
-                speedLimit: download.speedLimit
+                speedLimit: download.speedLimit,
+                allowOverwrite: download.allowOverwrite
             )
         }
     }
@@ -437,9 +442,13 @@ final class TransferEngine {
         retryDescriptors.removeAll()
         persistedRetries.removeAll()
         unavailableRetryReasons.removeAll()
-        checkpoints = Dictionary(uniqueKeysWithValues: records.compactMap { record in
-            record.checkpoint.map { (record.job.id, $0) }
-        })
+        var restored: [UUID: TransferCheckpoint] = [:]
+        for record in records {
+            if let checkpoint = record.checkpoint {
+                restored[record.job.id] = checkpoint
+            }
+        }
+        checkpoints = restored
 
         for record in records {
             let id = record.job.id
@@ -460,6 +469,7 @@ final class TransferEngine {
             guard let retry = record.retry else { continue }
             persistedRetries[id] = retry
             restore(retry: retry, for: id, accounts: accounts)
+            rehydrateJobURLs(id)
         }
         persistJournal()
         updateDockBadge()
@@ -473,7 +483,8 @@ final class TransferEngine {
         concurrentUploads: Int,
         speedLimit: TransferSpeedLimit,
         playCompleteSound: Bool,
-        excludingSources: Set<URL> = []
+        excludingSources: Set<URL> = [],
+        allowOverwrite: Bool = false
     ) {
         concurrency = concurrentUploads
         uploadSpeedLimit = speedLimit
@@ -531,10 +542,17 @@ final class TransferEngine {
                     acl: account.defaultACL,
                     options: plan.options,
                     speedLimit: speedLimit,
-                    playSound: playCompleteSound
+                    playSound: playCompleteSound,
+                    allowOverwrite: allowOverwrite
                 )
             )
             if let sourceBookmark = try? bookmarks.makeBookmark(for: item.sourceURL) {
+                let preparedBookmark: Data?
+                if item.fileURL.standardizedFileURL != item.sourceURL.standardizedFileURL {
+                    preparedBookmark = try? bookmarks.makeBookmark(for: item.fileURL)
+                } else {
+                    preparedBookmark = nil
+                }
                 persistedRetries[job.id] = .upload(
                     PersistedUploadRetry(
                         accountID: account.id,
@@ -543,7 +561,9 @@ final class TransferEngine {
                         objectKey: item.objectKey,
                         imagesOnly: plan.options.imagesOnly,
                         convertHEIC: plan.options.convertHEIC,
-                        playSound: playCompleteSound
+                        playSound: playCompleteSound,
+                        allowOverwrite: allowOverwrite,
+                        preparedBookmark: preparedBookmark
                     )
                 )
             }
@@ -562,7 +582,8 @@ final class TransferEngine {
         contentType: String,
         acl: ObjectACL,
         speedLimit: TransferSpeedLimit,
-        playSound: Bool
+        playSound: Bool,
+        allowOverwrite: Bool
     ) async {
         guard await waitForSlot(id: id, kind: .upload) else {
             if jobs.first(where: { $0.id == id })?.status == .cancelled {
@@ -586,6 +607,7 @@ final class TransferEngine {
                 fileURL: fileURL,
                 contentType: contentType,
                 acl: acl,
+                overwrite: allowOverwrite,
                 speedLimit: speedLimit,
                 checkpoint: suppliedCheckpoint,
                 onCheckpoint: { [weak self] checkpoint in
@@ -617,6 +639,16 @@ final class TransferEngine {
         } catch is CancellationError {
             await finishCancellation(id: id)
         } catch {
+            // Failed jobs are only retried from scratch (never resumed), so
+            // discard the checkpoint now: otherwise a failed multipart upload
+            // keeps its uploadID (and billed parts) on OSS forever, and a
+            // failed download leaves its .partial file behind.
+            let checkpoint = checkpoints[id]
+            let descriptor = retryDescriptors[id]
+            Task { [weak self] in
+                await self?.discardCheckpoint(checkpoint, descriptor: descriptor)
+            }
+            checkpoints[id] = nil
             mutate(id) { job in
                 job.status = .failed
                 job.errorMessage = error.localizedDescription
@@ -631,16 +663,7 @@ final class TransferEngine {
         switch descriptor {
         case .upload(let upload):
             tasks[id] = Task { [weak self] in
-                await self?.runUpload(
-                    id: id,
-                    client: upload.client,
-                    key: upload.objectKey,
-                    fileURL: upload.preparedFileURL,
-                    contentType: upload.contentType,
-                    acl: upload.acl,
-                    speedLimit: upload.speedLimit,
-                    playSound: upload.playSound
-                )
+                await self?.runPreparedUpload(id: id, upload: upload)
             }
         case .download(let download):
             tasks[id] = Task { [weak self] in
@@ -650,10 +673,64 @@ final class TransferEngine {
                     key: download.object.key,
                     destination: download.destination,
                     root: download.scopedRoot,
-                    speedLimit: download.speedLimit
+                    speedLimit: download.speedLimit,
+                    overwrite: download.allowOverwrite
                 )
             }
         }
+    }
+
+    private func runPreparedUpload(id: UUID, upload: UploadRetryDescriptor) async {
+        var fileURL = upload.preparedFileURL
+        var contentType = upload.contentType
+        if upload.needsPreparation {
+            do {
+                let prepared = try await Self.prepare(
+                    url: upload.sourceURL,
+                    convertHEIC: upload.options.convertHEIC
+                )
+                fileURL = prepared.fileURL
+                contentType = prepared.contentType
+                if prepared.fileURL != upload.sourceURL {
+                    resources[id] = TransferResource(cleanupURLs: [prepared.fileURL])
+                    if case .upload(var persisted) = persistedRetries[id] {
+                        persisted.preparedBookmark = try? bookmarks.makeBookmark(for: prepared.fileURL)
+                        persistedRetries[id] = .upload(persisted)
+                    }
+                }
+                var updated = upload
+                updated.preparedFileURL = fileURL
+                updated.contentType = contentType
+                updated.needsPreparation = false
+                retryDescriptors[id] = .upload(updated)
+                mutate(id) { job in
+                    job.total = prepared.size
+                }
+            } catch {
+                mutate(id) { job in
+                    job.status = .failed
+                    job.errorMessage = error.localizedDescription
+                    job.finishedAt = .now
+                }
+                finishResource(id)
+                pumpFinished()
+                if activeCount == 0, !jobs.contains(where: { $0.status == .paused }) {
+                    onAllFinished?()
+                }
+                return
+            }
+        }
+        await runUpload(
+            id: id,
+            client: upload.client,
+            key: upload.objectKey,
+            fileURL: fileURL,
+            contentType: contentType,
+            acl: upload.acl,
+            speedLimit: upload.speedLimit,
+            playSound: upload.playSound,
+            allowOverwrite: upload.allowOverwrite
+        )
     }
 
     private func finishCancellation(id: UUID) async {
@@ -703,7 +780,8 @@ final class TransferEngine {
         key: String,
         destination: URL,
         root: URL,
-        speedLimit: TransferSpeedLimit
+        speedLimit: TransferSpeedLimit,
+        overwrite: Bool
     ) async {
         guard await waitForSlot(id: id, kind: .download) else {
             if jobs.first(where: { $0.id == id })?.status == .cancelled {
@@ -728,6 +806,7 @@ final class TransferEngine {
                 to: destination,
                 within: root,
                 expectedSize: expectedSize,
+                overwrite: overwrite,
                 speedLimit: speedLimit,
                 checkpoint: suppliedCheckpoint,
                 onCheckpoint: { [weak self] checkpoint in
@@ -756,6 +835,14 @@ final class TransferEngine {
         } catch is CancellationError {
             await finishCancellation(id: id)
         } catch {
+            // See the upload path: a failed download must not keep its
+            // .partial file around for retries that start from scratch.
+            let checkpoint = checkpoints[id]
+            let descriptor = retryDescriptors[id]
+            Task { [weak self] in
+                await self?.discardCheckpoint(checkpoint, descriptor: descriptor)
+            }
+            checkpoints[id] = nil
             mutate(id) { job in
                 job.status = .failed
                 job.errorMessage = error.localizedDescription
@@ -793,7 +880,9 @@ final class TransferEngine {
             runningDownloads = max(0, runningDownloads - 1)
         }
         pumpFinished()
-        if activeCount == 0 {
+        // Paused jobs are deliberately not active; only fire "all finished"
+        // when nothing is running, queued, or paused.
+        if activeCount == 0, !jobs.contains(where: { $0.status == .paused }) {
             onAllFinished?()
         }
     }
@@ -861,6 +950,7 @@ final class TransferEngine {
     private func updateDockBadge() {
         let count = activeCount
         NSApp.dockTile.badgeLabel = count > 0 ? "\(count)" : nil
+        ProcessLifetime.setTransfersActive(count > 0)
     }
 
     private enum RetryDescriptor: Sendable {
@@ -880,6 +970,8 @@ final class TransferEngine {
         var options: UploadPreparationOptions
         var speedLimit: TransferSpeedLimit
         var playSound: Bool
+        var allowOverwrite: Bool
+        var needsPreparation: Bool = false
     }
 
     private struct DownloadRetryDescriptor: Sendable {
@@ -890,6 +982,7 @@ final class TransferEngine {
         var destination: URL
         var scopedRoot: URL
         var speedLimit: TransferSpeedLimit
+        var allowOverwrite: Bool = false
     }
 
     private func restore(
@@ -915,22 +1008,40 @@ final class TransferEngine {
                 unavailableRetryReasons[id] = "账号密钥不可用，请重新编辑账号后再重试。"
                 return
             }
+            let converted = upload.convertHEIC && Self.isConvertibleHEIC(source)
+            var prepared = source
+            var needsPreparation = false
+            if converted {
+                if let preparedBookmark = upload.preparedBookmark,
+                   let preparedURL = try? bookmarks.resolve(preparedBookmark),
+                   FileManager.default.fileExists(atPath: preparedURL.path) {
+                    prepared = preparedURL
+                    resources[id] = TransferResource(cleanupURLs: [preparedURL])
+                } else {
+                    needsPreparation = true
+                }
+            }
             retryDescriptors[id] = .upload(
                 UploadRetryDescriptor(
                     client: client,
                     account: account,
                     bucket: upload.bucket,
                     sourceURL: source,
-                    preparedFileURL: source,
+                    preparedFileURL: prepared,
                     objectKey: upload.objectKey,
-                    contentType: UTType(filenameExtension: source.pathExtension)?.preferredMIMEType ?? "application/octet-stream",
+                    contentType: converted
+                        ? "image/jpeg"
+                        : (UTType(filenameExtension: source.pathExtension)?.preferredMIMEType
+                            ?? "application/octet-stream"),
                     acl: account.defaultACL,
                     options: UploadPreparationOptions(
                         imagesOnly: upload.imagesOnly,
                         convertHEIC: upload.convertHEIC
                     ),
                     speedLimit: uploadSpeedLimit,
-                    playSound: upload.playSound
+                    playSound: upload.playSound,
+                    allowOverwrite: upload.allowOverwrite == true,
+                    needsPreparation: needsPreparation
                 )
             )
         case .download(let download):
@@ -958,10 +1069,37 @@ final class TransferEngine {
                     object: download.object,
                     destination: destination,
                     scopedRoot: root,
-                    speedLimit: downloadSpeedLimit
+                    speedLimit: downloadSpeedLimit,
+                    allowOverwrite: download.allowOverwrite == true
                 )
             )
         }
+    }
+
+    private func rehydrateJobURLs(_ id: UUID) {
+        guard let index = jobs.firstIndex(where: { $0.id == id }),
+              let descriptor = retryDescriptors[id]
+        else { return }
+        switch descriptor {
+        case .download(let download):
+            jobs[index].localURL = download.destination
+        case .upload(let upload):
+            if jobs[index].localURL == nil {
+                jobs[index].localURL = upload.sourceURL
+            }
+            if jobs[index].publicURL == nil {
+                jobs[index].publicURL = upload.account.publicURL(
+                    bucketName: upload.client.bucket ?? upload.bucket?.name ?? "",
+                    bucket: upload.bucket,
+                    key: upload.objectKey
+                )
+            }
+        }
+    }
+
+    nonisolated private static func isConvertibleHEIC(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return ext == "heic" || ext == "heif"
     }
 
     private func persistJournal() {
