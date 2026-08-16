@@ -21,7 +21,7 @@ case "install":
 case "uninstall":
     exitCode = await InstallCommand.run(arguments: Array(arguments.dropFirst()), uninstalling: true)
 case "--version", "-V":
-    print("lumen-mcp 1.0.0")
+    print("lumen-mcp 1.0.1")
     exitCode = 0
 case "--help", "-h":
     print("""

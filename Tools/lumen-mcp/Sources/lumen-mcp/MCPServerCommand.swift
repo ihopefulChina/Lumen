@@ -2,24 +2,40 @@ import Foundation
 import MCP
 
 enum MCPServerCommand {
-    static let serverInstructions = """
-    lumen-mcp 让你直接操作用户的阿里云 OSS（凭证已保存在 macOS 钥匙串，无需向用户索要）。
+    /// 默认 Bucket：来自环境变量 LUMEN_MCP_DEFAULT_BUCKET（由 MCP 客户端配置的 env 传入）。
+    /// 设置后所有工具的 bucket 参数变为可选，未传时自动回退到该值。
+    private static let defaultBucket: String? = {
+        guard let raw = ProcessInfo.processInfo.environment["LUMEN_MCP_DEFAULT_BUCKET"]?
+            .trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        return raw
+    }()
 
-    工具：list_buckets 列出 Bucket；list_objects 按文件夹层级浏览（delimiter 传空字符串可递归）；\
-    upload_file 上传本机文件；download_file 下载到本机；presign_url 生成私有 Bucket 的临时下载链接。
+    static var serverInstructions: String {
+        let defaultBucketLine = defaultBucket.map {
+            "- 用户未指定 Bucket 时，默认使用「\($0)」（来自环境变量 LUMEN_MCP_DEFAULT_BUCKET）。"
+        } ?? "- 未设置默认 Bucket：用户未指定 Bucket 时，先 list_buckets 再与用户确认目标。"
+        return """
+        lumen-mcp 让你直接操作用户的阿里云 OSS（凭证已保存在 macOS 钥匙串，无需向用户索要）。
 
-    约定：
-    - 先浏览确认再操作：不确定 Bucket 就先 list_buckets，不确定路径就用 list_objects 逐层看。
-    - 上传后报告 bucket、key 与 URL；私有 Bucket 分享用 presign_url 生成的临时链接。
-    - 下载不覆盖本地同名文件，遇到报错时与用户确认新路径。
-    - 删除、覆盖、批量操作前，先向用户复述范围并确认。
-    - GB 级大文件建议用户改用 Lumen App（分片上传、断点续传更完整）。
-    """
+        工具：list_buckets 列出 Bucket；list_objects 按文件夹层级浏览（delimiter 传空字符串可递归）；\
+        upload_file 上传本机文件；download_file 下载到本机；presign_url 生成私有 Bucket 的临时下载链接。
+
+        约定：
+        \(defaultBucketLine)
+        - 先浏览确认再操作：不确定路径就用 list_objects 逐层看。
+        - 上传后报告 bucket、key 与 URL；私有 Bucket 分享用 presign_url 生成的临时链接。
+        - 下载不覆盖本地同名文件，遇到报错时与用户确认新路径。
+        - 删除、覆盖、批量操作前，先向用户复述范围并确认。
+        - GB 级大文件建议用户改用 Lumen App（分片上传、断点续传更完整）。
+        """
+    }
 
     static func run() async -> Int32 {
         let server = Server(
             name: "lumen-mcp",
-            version: "1.0.0",
+            version: "1.0.1",
             instructions: serverInstructions,
             capabilities: .init(
                 prompts: .init(listChanged: false),
@@ -75,6 +91,18 @@ enum MCPServerCommand {
             ])
         }
 
+        // 设置了默认 Bucket 时，bucket 参数变为可选，并把实际默认值写进描述让 AI 直接可见。
+        let bucketRequired = defaultBucket == nil
+        func bucketProp(_ label: String) -> Value {
+            if let defaultBucket {
+                return stringProp("\(label)；不传时默认使用 \(defaultBucket)")
+            }
+            return stringProp(label)
+        }
+        func requiredBucket(_ others: [String]) -> [String] {
+            bucketRequired ? ["bucket"] + others : others
+        }
+
         return [
             Tool(
                 name: "list_buckets",
@@ -86,41 +114,41 @@ enum MCPServerCommand {
                 name: "list_objects",
                 description: "列出指定 Bucket 中的对象和子文件夹。默认按文件夹层级（delimiter=/）浏览；要递归列出所有对象时传 delimiter 为空字符串。",
                 inputSchema: schema([
-                    "bucket": stringProp("Bucket 名称"),
+                    "bucket": bucketProp("Bucket 名称"),
                     "prefix": stringProp("对象前缀（文件夹路径），可选"),
                     "delimiter": stringProp("分隔符，默认 '/'；空字符串表示递归列出"),
                     "max_keys": intProp("最多返回条数（1-1000），默认 200", 200),
-                ], required: ["bucket"]),
+                ], required: requiredBucket([])),
                 annotations: .init(readOnlyHint: true)
             ),
             Tool(
                 name: "upload_file",
                 description: "上传本机文件到 OSS。适合图片、文档等任意文件；大文件建议使用 Lumen App 获得分片续传。返回对象 URL。",
                 inputSchema: schema([
-                    "bucket": stringProp("目标 Bucket 名称"),
+                    "bucket": bucketProp("目标 Bucket 名称"),
                     "local_path": stringProp("本地文件的绝对路径"),
                     "key": stringProp("目标对象 Key（含路径），缺省使用本地文件名"),
                     "content_type": stringProp("Content-Type，缺省按扩展名推断"),
-                ], required: ["bucket", "local_path"]),
+                ], required: requiredBucket(["local_path"])),
                 annotations: .init(idempotentHint: true)
             ),
             Tool(
                 name: "download_file",
                 description: "从 OSS 下载对象到本机指定路径。",
                 inputSchema: schema([
-                    "bucket": stringProp("Bucket 名称"),
+                    "bucket": bucketProp("Bucket 名称"),
                     "key": stringProp("对象 Key"),
                     "local_path": stringProp("本地保存的绝对路径"),
-                ], required: ["bucket", "key", "local_path"])
+                ], required: requiredBucket(["key", "local_path"]))
             ),
             Tool(
                 name: "presign_url",
                 description: "为私有 Bucket 中的对象生成带签名的临时下载链接。",
                 inputSchema: schema([
-                    "bucket": stringProp("Bucket 名称"),
+                    "bucket": bucketProp("Bucket 名称"),
                     "key": stringProp("对象 Key"),
                     "expires_seconds": intProp("链接有效期（秒），默认 3600，最长 604800", 3600),
-                ], required: ["bucket", "key"]),
+                ], required: requiredBucket(["key"])),
                 annotations: .init(readOnlyHint: true)
             ),
         ]
@@ -162,6 +190,19 @@ enum MCPServerCommand {
 
     // MARK: - Tool implementations
 
+    /// bucket 解析：优先取调用参数，缺失时回退到环境变量配置的默认 Bucket。
+    private static func resolveBucket(_ arguments: [String: Value]) throws -> String {
+        if let bucket = arguments["bucket"]?.mcpString, !bucket.isEmpty {
+            return bucket
+        }
+        if let defaultBucket {
+            return defaultBucket
+        }
+        throw MissingArgumentError(
+            "bucket（未传 bucket 且未设置默认 Bucket；可在 MCP 客户端配置 env LUMEN_MCP_DEFAULT_BUCKET 指定默认值）"
+        )
+    }
+
     private static func listBuckets(_ client: MCPOSSClient) async throws -> CallTool.Result {
         let buckets = try await client.listBuckets()
         let formatter = ISO8601DateFormatter()
@@ -182,9 +223,7 @@ enum MCPServerCommand {
     }
 
     private static func listObjects(_ client: MCPOSSClient, _ arguments: [String: Value]) async throws -> CallTool.Result {
-        guard let bucket = arguments["bucket"]?.mcpString, !bucket.isEmpty else {
-            throw MissingArgumentError("bucket")
-        }
+        let bucket = try resolveBucket(arguments)
         let prefix = arguments["prefix"]?.mcpString
         let delimiterRaw = arguments["delimiter"]?.mcpString
         let delimiter: String?
@@ -232,9 +271,7 @@ enum MCPServerCommand {
     }
 
     private static func uploadFile(_ client: MCPOSSClient, _ arguments: [String: Value]) async throws -> CallTool.Result {
-        guard let bucket = arguments["bucket"]?.mcpString, !bucket.isEmpty else {
-            throw MissingArgumentError("bucket")
-        }
+        let bucket = try resolveBucket(arguments)
         guard let localPath = arguments["local_path"]?.mcpString, !localPath.isEmpty else {
             throw MissingArgumentError("local_path")
         }
@@ -268,9 +305,7 @@ enum MCPServerCommand {
     }
 
     private static func downloadFile(_ client: MCPOSSClient, _ arguments: [String: Value]) async throws -> CallTool.Result {
-        guard let bucket = arguments["bucket"]?.mcpString, !bucket.isEmpty else {
-            throw MissingArgumentError("bucket")
-        }
+        let bucket = try resolveBucket(arguments)
         guard let key = arguments["key"]?.mcpString, !key.isEmpty else {
             throw MissingArgumentError("key")
         }
@@ -288,9 +323,7 @@ enum MCPServerCommand {
     }
 
     private static func presignURL(_ client: MCPOSSClient, _ arguments: [String: Value]) async throws -> CallTool.Result {
-        guard let bucket = arguments["bucket"]?.mcpString, !bucket.isEmpty else {
-            throw MissingArgumentError("bucket")
-        }
+        let bucket = try resolveBucket(arguments)
         guard let key = arguments["key"]?.mcpString, !key.isEmpty else {
             throw MissingArgumentError("key")
         }

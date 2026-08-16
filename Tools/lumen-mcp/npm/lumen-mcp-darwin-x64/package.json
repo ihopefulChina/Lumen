@@ -1,6 +1,6 @@
 {
   "name": "lumen-mcp-darwin-x64",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "lumen-mcp 的 macOS x86_64 预编译二进制（由 lumen-mcp 主包按平台自动安装）",
   "license": "MIT",
   "os": [
@@ -10,6 +10,7 @@
     "x64"
   ],
   "files": [
-    "bin/"
+    "bin/",
+    "README.md"
   ]
 }

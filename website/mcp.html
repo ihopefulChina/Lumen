@@ -120,10 +120,12 @@
   <span class="c-cm">"mcpServers"</span>: {
     "lumen": {
       "command": "npx",
-      "args": ["-y", "lumen-mcp"]
+      "args": ["-y", "lumen-mcp"],
+      "env": { "LUMEN_MCP_DEFAULT_BUCKET": "my-bucket" }
     }
   }
 }</code></pre>
+        <p><code>env</code> 里的 <code>LUMEN_MCP_DEFAULT_BUCKET</code>（可选）设置默认 Bucket：设置后 <code>bucket</code> 参数对 AI 变为可选，桶名会直接出现在工具描述中，任何 AI 客户端都能看到；AI 仍可显式指定其他 Bucket。</p>
         <p>各客户端的配置文件位置与差异见 <a href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">GitHub 上的完整 MCP 文档</a>。JSON 配置合并写入并保留 <code>.bak</code> 备份，不影响其他 MCP 服务器。</p>
       </section>
 

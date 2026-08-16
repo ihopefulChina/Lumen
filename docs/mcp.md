@@ -98,6 +98,48 @@ npx lumen-mcp uninstall                # 移除注册
 | Cline | `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | `mcpServers` 键 |
 | Qoder | `~/.qoder/mcp.json` | `mcpServers` 键 |
 
+## 默认 Bucket（可选）
+
+日常主要用某一个 Bucket 时，可通过环境变量 `LUMEN_MCP_DEFAULT_BUCKET` 设置默认值。设置后：
+
+- 所有工具的 `bucket` 参数变为可选，AI 不传时自动使用默认 Bucket；
+- 默认桶名会直接写进工具描述和服务器说明，任何 AI 客户端一连上就能看到，无需额外解释。
+
+配置方式：在客户端的 MCP 服务条目里加 `env` 字段（各客户端通用）：
+
+```json
+{
+  "mcpServers": {
+    "lumen": {
+      "command": "npx",
+      "args": ["-y", "lumen-mcp"],
+      "env": {
+        "LUMEN_MCP_DEFAULT_BUCKET": "daniu-app-prod"
+      }
+    }
+  }
+}
+```
+
+Codex 的 TOML 格式写法：
+
+```toml
+[mcp_servers.lumen]
+command = "npx"
+args = ["-y", "lumen-mcp"]
+
+[mcp_servers.lumen.env]
+LUMEN_MCP_DEFAULT_BUCKET = "daniu-app-prod"
+```
+
+Claude Code 命令行注册时用：
+
+```bash
+claude mcp add --scope user lumen --env LUMEN_MCP_DEFAULT_BUCKET=daniu-app-prod -- npx -y lumen-mcp
+```
+
+修改后重启客户端生效。AI 仍可显式传 `bucket` 操作其他桶，两者不冲突。
+
 ## 安全说明
 
 - AccessKey Secret 与 STS Token 只保存在 macOS 钥匙串，AI 客户端接触不到凭证本身。
