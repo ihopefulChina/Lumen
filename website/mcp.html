@@ -38,39 +38,45 @@
   <main id="main" class="document-main">
     <article class="document-shell">
       <p class="document-path">lumen / ai / mcp</p>
-      <h1>让 AI 直接操作<br>你的 OSS</h1>
-      <p class="document-lead"><code>lumen-mcp</code> 是 Lumen 内置的 MCP（Model Context Protocol）服务器。注册到 Codex、Claude Desktop、Claude Code、Cursor、Trae 等 AI 客户端后，一句话就能浏览 Bucket、上传下载文件、生成临时下载链接。</p>
+      <h1 class="reveal" style="--reveal-delay: 0ms">让 AI 直接操作<br>你的 OSS</h1>
+      <p class="document-lead reveal" style="--reveal-delay: 90ms"><code>lumen-mcp</code> 是 Lumen 内置的 MCP（Model Context Protocol）服务器。注册到 Codex、Claude Desktop、Claude Code、Cursor、Trae 等 AI 客户端后，一句话就能浏览 Bucket、上传下载文件、生成临时下载链接。</p>
 
       <section aria-labelledby="quickstart">
         <h2 id="quickstart">三步接入</h2>
         <div class="mcp-steps">
-          <div class="mcp-step">
-            <span>1</span>
-            <h3>构建</h3>
-            <p>在 Terminal.app 中克隆仓库并编译（IDE 内置终端可能有沙箱限制）。</p>
-            <pre class="code-block" aria-label="构建命令"><code><span class="c-prompt">$</span> git clone https://github.com/ihopefulChina/Lumen.git
+          <div class="mcp-step reveal">
+            <span class="mcp-step-num" aria-hidden="true">1</span>
+            <div class="mcp-step-body">
+              <h3>构建</h3>
+              <p>在 Terminal.app 中克隆仓库并编译（IDE 内置终端可能有沙箱限制）。</p>
+              <pre class="code-block" aria-label="构建命令"><code><span class="c-prompt">$</span> git clone https://github.com/ihopefulChina/Lumen.git
 <span class="c-prompt">$</span> cd Lumen/Tools/lumen-mcp
 <span class="c-prompt">$</span> swift build -c release</code></pre>
+            </div>
           </div>
-          <div class="mcp-step">
-            <span>2</span>
-            <h3>配置凭证</h3>
-            <p>填入 RAM 子账号 AccessKey，凭证只保存在 macOS 钥匙串，不落明文文件。</p>
-            <pre class="code-block" aria-label="配置凭证命令"><code><span class="c-prompt">$</span> .build/release/lumen-mcp auth
+          <div class="mcp-step reveal" style="--reveal-delay: 90ms">
+            <span class="mcp-step-num" aria-hidden="true">2</span>
+            <div class="mcp-step-body">
+              <h3>配置凭证</h3>
+              <p>填入 RAM 子账号 AccessKey，凭证只保存在 macOS 钥匙串，不落明文文件。</p>
+              <pre class="code-block" aria-label="配置凭证命令"><code><span class="c-prompt">$</span> .build/release/lumen-mcp auth
 <span class="c-cm"># 支持多账号：--list / --use / --remove / --test</span></code></pre>
+            </div>
           </div>
-          <div class="mcp-step">
-            <span>3</span>
-            <h3>一键注册</h3>
-            <p>自动检测本机已安装的 AI 客户端并写入配置，重启客户端即可使用。</p>
-            <pre class="code-block" aria-label="一键注册命令"><code><span class="c-prompt">$</span> .build/release/lumen-mcp install
+          <div class="mcp-step reveal" style="--reveal-delay: 180ms">
+            <span class="mcp-step-num" aria-hidden="true">3</span>
+            <div class="mcp-step-body">
+              <h3>一键注册</h3>
+              <p>自动检测本机已安装的 AI 客户端并写入配置，重启客户端即可使用。</p>
+              <pre class="code-block" aria-label="一键注册命令"><code><span class="c-prompt">$</span> .build/release/lumen-mcp install
 <span class="c-cm"># 或指定客户端：install --client codex</span></code></pre>
+            </div>
           </div>
         </div>
-        <p>然后直接对话：「列出我的 OSS Bucket」「把桌面的 hero.png 上传到 lumen-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接」。</p>
+        <div class="mcp-try reveal">然后直接对话：<b>「列出我的 OSS Bucket」</b>、<b>「把桌面的 hero.png 上传到 lumen-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接」</b>。</div>
       </section>
 
-      <section aria-labelledby="tools">
+      <section aria-labelledby="tools" class="reveal">
         <h2 id="tools">提供的能力</h2>
         <table>
           <thead>
@@ -97,7 +103,7 @@
         <p>握手时服务器还会下发 Agent 使用说明（instructions），支持客户端会直接展示并用于约束 AI 行为。</p>
       </section>
 
-      <section aria-labelledby="clients">
+      <section aria-labelledby="clients" class="reveal">
         <h2 id="clients">支持的客户端</h2>
         <p>以下客户端可由 <code>lumen-mcp install</code> 自动检测并注册：</p>
         <ul class="client-list">
@@ -119,7 +125,7 @@
         <p>各客户端的配置文件位置与差异见 <a href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">GitHub 上的完整 MCP 文档</a>。JSON 配置合并写入并保留 <code>.bak</code> 备份，不影响其他 MCP 服务器。</p>
       </section>
 
-      <section aria-labelledby="safety">
+      <section aria-labelledby="safety" class="reveal">
         <h2 id="safety">安全边界</h2>
         <table>
           <tbody>
@@ -131,7 +137,7 @@
         </table>
       </section>
 
-      <section aria-labelledby="faq">
+      <section aria-labelledby="faq" class="reveal">
         <h2 id="faq">常见问题</h2>
         <table>
           <tbody>
@@ -160,5 +166,26 @@
       </nav>
     </div>
   </footer>
+
+  <script>
+    // Scroll reveal — each element fades in once, in order.
+    // Reduced-motion users get a plain cross-fade via CSS.
+    (() => {
+      const els = document.querySelectorAll('.reveal');
+      if (!('IntersectionObserver' in window)) {
+        els.forEach((el) => el.classList.add('is-visible'));
+        return;
+      }
+      const io = new IntersectionObserver((entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('is-visible');
+            io.unobserve(entry.target);
+          }
+        }
+      }, { threshold: 0.15, rootMargin: '0px 0px -48px 0px' });
+      els.forEach((el) => io.observe(el));
+    })();
+  </script>
 </body>
 </html>
