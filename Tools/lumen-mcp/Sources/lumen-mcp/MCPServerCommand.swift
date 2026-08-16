@@ -2,11 +2,29 @@ import Foundation
 import MCP
 
 enum MCPServerCommand {
+    static let serverInstructions = """
+    lumen-mcp 让你直接操作用户的阿里云 OSS（凭证已保存在 macOS 钥匙串，无需向用户索要）。
+
+    工具：list_buckets 列出 Bucket；list_objects 按文件夹层级浏览（delimiter 传空字符串可递归）；\
+    upload_file 上传本机文件；download_file 下载到本机；presign_url 生成私有 Bucket 的临时下载链接。
+
+    约定：
+    - 先浏览确认再操作：不确定 Bucket 就先 list_buckets，不确定路径就用 list_objects 逐层看。
+    - 上传后报告 bucket、key 与 URL；私有 Bucket 分享用 presign_url 生成的临时链接。
+    - 下载不覆盖本地同名文件，遇到报错时与用户确认新路径。
+    - 删除、覆盖、批量操作前，先向用户复述范围并确认。
+    - GB 级大文件建议用户改用 Lumen App（分片上传、断点续传更完整）。
+    """
+
     static func run() async -> Int32 {
         let server = Server(
             name: "lumen-mcp",
             version: "1.0.0",
-            capabilities: .init(tools: .init(listChanged: false))
+            instructions: serverInstructions,
+            capabilities: .init(
+                prompts: .init(listChanged: false),
+                tools: .init(listChanged: false)
+            )
         )
 
         await server.withMethodHandler(ListTools.self) { _ in
@@ -15,6 +33,14 @@ enum MCPServerCommand {
 
         await server.withMethodHandler(CallTool.self) { params in
             await Self.handleCall(params)
+        }
+
+        await server.withMethodHandler(ListPrompts.self) { _ in
+            ListPrompts.Result(prompts: Self.promptDefinitions())
+        }
+
+        await server.withMethodHandler(GetPrompt.self) { params in
+            try Self.handleGetPrompt(params)
         }
 
         let transport = StdioTransport()
@@ -319,6 +345,71 @@ enum MCPServerCommand {
             "zip": "application/zip",
         ]
         return table[ext.lowercased()]
+    }
+
+    // MARK: - Prompts
+
+    private static func promptDefinitions() -> [Prompt] {
+        [
+            Prompt(
+                name: "lumen-oss-expert",
+                title: "OSS 专家模式",
+                description: "把 Agent 定位为阿里云 OSS 操作专家，附安全使用规则"
+            ),
+            Prompt(
+                name: "oss-batch-upload",
+                title: "批量上传工作流",
+                description: "按步骤把一个本机目录批量上传到 OSS，保留目录结构",
+                arguments: [
+                    .init(
+                        name: "directory",
+                        title: "源目录",
+                        description: "待上传的本机目录绝对路径",
+                        required: false
+                    )
+                ]
+            )
+        ]
+    }
+
+    private static func handleGetPrompt(_ params: GetPrompt.Parameters) throws -> GetPrompt.Result {
+        let directory = params.arguments?["directory"]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let source = directory.isEmpty ? "（先向用户确认）" : directory
+
+        switch params.name {
+        case "lumen-oss-expert":
+            return GetPrompt.Result(
+                description: "OSS 专家模式",
+                messages: [
+                    .user(.text(text: """
+                    你现在是阿里云 OSS 操作专家，通过 lumen-mcp 的工具帮助用户管理 OSS 文件。
+
+                    工作规则：
+                    1. 先弄清目标再动手：不确定 Bucket 时先 list_buckets；不确定路径时用 list_objects 逐层浏览（delimiter 默认 '/'，传空可递归）。
+                    2. 上传后报告 bucket、key 和对象 URL；若 Bucket 为私有读，主动用 presign_url 生成临时链接再交给用户。
+                    3. 下载前确认保存路径；本地已有同名文件会报错，此时与用户确认新路径，不建议直接覆盖。
+                    4. 删除、覆盖、批量操作，先向用户复述范围并获得确认。
+                    5. GB 级大文件提醒用户改用 Lumen App（分片上传、断点续传更完整）。
+                    6. 回答简洁：给关键结果（key、URL、大小），不堆砌原始 JSON。
+                    """))
+                ]
+            )
+        case "oss-batch-upload":
+            return GetPrompt.Result(
+                description: "批量上传工作流",
+                messages: [
+                    .user(.text(text: """
+                    请把本机目录「\(source)」批量上传到 OSS，步骤：
+                    1. 与用户确认目标 Bucket 和 key 前缀；不确定 Bucket 时先 list_buckets。
+                    2. 列出目录下待上传文件（含子目录），展示清单与总大小。
+                    3. 逐个调用 upload_file，key = 「目标前缀 + 相对路径」，保持目录结构。
+                    4. 汇总成功/失败清单，失败的说明原因；私有 Bucket 再生成一条示例 presign_url。
+                    """))
+                ]
+            )
+        default:
+            throw MissingArgumentError("未知的提示词：\(params.name)")
+        }
     }
 }
 

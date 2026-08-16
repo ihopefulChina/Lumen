@@ -118,19 +118,20 @@ xcodebuild -project Lumen.xcodeproj \
 
 ## 让 AI 直接操作 OSS（lumen-mcp）
 
-仓库内置一个独立的 MCP 服务器 `lumen-mcp`，配置到 Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接：
+仓库内置一个独立的 MCP 服务器 `lumen-mcp`，配置到 Codex、Claude Desktop、Claude Code、Cursor、Trae 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接：
 
 > 把桌面上的 hero.png 上传到 lumen-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接。
 
-凭证保存在 macOS 钥匙串，与 Lumen App 账号相互独立；AI 只能执行浏览、上传、下载和签名链接四类操作。快速开始：
+服务器提供 5 个工具和 2 个提示词（OSS 专家模式、批量上传工作流），握手时自带 Agent 使用说明。凭证保存在 macOS 钥匙串，与 Lumen App 账号相互独立。快速开始：
 
 ```bash
 cd Tools/lumen-mcp
 swift build -c release
-.build/release/lumen-mcp auth   # 配置 OSS 凭证（钥匙串）
+.build/release/lumen-mcp auth     # 配置 OSS 凭证（钥匙串）
+.build/release/lumen-mcp install  # 一键注册到本机已安装的 AI 客户端
 ```
 
-安装与各 AI 客户端的配置方法见 [docs/mcp.md](docs/mcp.md)。
+支持 Claude Desktop、Claude Code、Cursor、Trae、Windsurf、Codex，详见 [docs/mcp.md](docs/mcp.md)。
 
 ## 参与与支持
 
