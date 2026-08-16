@@ -1,11 +1,13 @@
 import Foundation
 
 // lumen-mcp — standalone MCP server exposing Aliyun OSS operations to AI
-// clients (Claude Desktop, Trae, Cursor, …) over stdio.
+// clients (Claude Desktop, Trae, Cursor, Codex, …) over stdio.
 //
 // Usage:
 //   lumen-mcp            start the MCP server (stdio transport)
 //   lumen-mcp auth       manage OSS credentials (keychain, interactive)
+//   lumen-mcp install    register into local MCP clients (one command)
+//   lumen-mcp uninstall  remove registrations
 //   lumen-mcp --version  print version
 
 let arguments = Array(CommandLine.arguments.dropFirst())
@@ -14,6 +16,10 @@ let exitCode: Int32
 switch arguments.first {
 case "auth":
     exitCode = await AuthCommand.run(arguments: Array(arguments.dropFirst()))
+case "install":
+    exitCode = await InstallCommand.run(arguments: Array(arguments.dropFirst()), uninstalling: false)
+case "uninstall":
+    exitCode = await InstallCommand.run(arguments: Array(arguments.dropFirst()), uninstalling: true)
 case "--version", "-V":
     print("lumen-mcp 1.0.0")
     exitCode = 0
@@ -22,10 +28,14 @@ case "--help", "-h":
     lumen-mcp — Lumen 的 MCP 服务器，把阿里云 OSS 操作暴露给 AI 客户端（stdio）
 
     用法：
-      lumen-mcp              启动 MCP 服务器（由 AI 客户端拉起，无需手动运行）
-      lumen-mcp auth         配置/管理 OSS 凭证
-      lumen-mcp auth --help  查看凭证管理子命令
-      lumen-mcp --version    显示版本
+      lumen-mcp                启动 MCP 服务器（由 AI 客户端拉起，无需手动运行）
+      lumen-mcp install        一键注册到本机已安装的 AI 客户端
+      lumen-mcp uninstall      移除注册
+      lumen-mcp auth           配置/管理 OSS 凭证
+      lumen-mcp auth --help    查看凭证管理子命令
+      lumen-mcp --version      显示版本
+
+    支持的客户端：Claude Desktop、Claude Code、Cursor、Trae、Windsurf、Codex
     """)
     exitCode = 0
 default:

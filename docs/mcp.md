@@ -1,82 +1,14 @@
 # lumen-mcp — 让 AI 直接操作你的阿里云 OSS
 
-`lumen-mcp` 是 Lumen 附带的 MCP（Model Context Protocol）服务器。把它配置到 Claude Desktop、Claude Code、Cursor、Trae 等支持 MCP 的 AI 客户端里，AI 就能通过自然语言完成常见的 OSS 操作：
+`lumen-mcp` 是 Lumen 附带的 MCP（Model Context Protocol）服务器。配置到 Codex、Claude Desktop、Claude Code、Cursor、Trae 等支持 MCP 的 AI 客户端后，AI 就能用自然语言完成常见的 OSS 操作：
 
 - 「看看我有哪些 Bucket」
 - 「把这个截图上传到 lumen-assets 的 2026/08 文件夹」
 - 「给最新的发布包生成一个 24 小时有效的下载链接」
 
-服务器通过 stdio 与 AI 客户端通信，OSS 凭证保存在 macOS 钥匙串中，与 Lumen App 的账号相互独立。
+服务器通过 stdio 与 AI 客户端通信（由客户端按需拉起，无需保持运行），OSS 凭证保存在 macOS 钥匙串中，与 Lumen App 的账号相互独立。
 
-## 前置要求
-
-- macOS 13 或更高版本（与 Lumen App 本体一致）
-- Xcode 命令行工具（`xcode-select --install`）
-- 一个阿里云 RAM 子账号 AccessKey（建议只授予目标 Bucket 的必要权限）
-
-## 第一步：构建
-
-```bash
-git clone https://github.com/ihopefulChina/Lumen.git
-cd Lumen/Tools/lumen-mcp
-swift build -c release
-```
-
-构建产物在 `.build/release/lumen-mcp`。可以验证：
-
-```bash
-.build/release/lumen-mcp --version
-```
-
-> 提示：记下这个二进制的绝对路径，下一步配置 AI 客户端时要用。也可以把它复制到 `$PATH` 里的目录（如 `/usr/local/bin`）方便日常调用。
-
-## 第二步：配置凭证
-
-```bash
-.build/release/lumen-mcp auth
-```
-
-按提示填写地域、AccessKey ID / Secret（STS Token 可选）。凭证保存在当前用户的钥匙串，不会写入磁盘明文文件。
-
-支持多个配置档案（比如公司账号和个人账号）：
-
-| 命令 | 作用 |
-| --- | --- |
-| `lumen-mcp auth` | 交互式添加/更新配置档案 |
-| `lumen-mcp auth --list` | 列出所有配置档案（`●` 标记活动档案） |
-| `lumen-mcp auth --use <名称>` | 切换活动配置档案 |
-| `lumen-mcp auth --remove <名称>` | 删除配置档案 |
-| `lumen-mcp auth --test` | 验证当前凭证（调用 ListBuckets） |
-
-## 第三步：接入 AI 客户端
-
-### Claude Desktop
-
-编辑 `~/Library/Application Support/Claude/claude_desktop_config.json`：
-
-```json
-{
-  "mcpServers": {
-    "lumen": {
-      "command": "/absolute/path/to/Lumen/Tools/lumen-mcp/.build/release/lumen-mcp"
-    }
-  }
-}
-```
-
-重启 Claude Desktop 后，工具列表里会出现 Lumen 的 5 个工具。
-
-### Claude Code
-
-```bash
-claude mcp add lumen -- /absolute/path/to/Lumen/Tools/lumen-mcp/.build/release/lumen-mcp
-```
-
-### Cursor / 其他兼容客户端
-
-编辑 `~/.cursor/mcp.json`（或对应客户端的 MCP 配置文件），格式与 Claude Desktop 相同。
-
-## 提供的工具
+## 工具
 
 | 工具 | 说明 |
 | --- | --- |
@@ -86,11 +18,87 @@ claude mcp add lumen -- /absolute/path/to/Lumen/Tools/lumen-mcp/.build/release/l
 | `download_file` | 下载对象到本机指定路径；本地已有同名文件时不覆盖，会报错提示换路径 |
 | `presign_url` | 为私有 Bucket 的对象生成带签名的临时下载链接（默认 1 小时） |
 
-典型对话示例：
+## 提示词
 
-> 我：把桌面上的 hero.png 上传到 lumen-assets 的 assets/2026/ 目录，然后给我一个明天的临时链接
->
-> AI：（调用 `upload_file`）已上传。（调用 `presign_url`，`expires_seconds=86400`）临时链接：https://…
+除了工具，服务器还内置 2 个提示词（Agent 说明），可在客户端的 Prompts 面板一键使用：
+
+| 提示词 | 说明 |
+| --- | --- |
+| `lumen-oss-expert` | 把 Agent 定位为阿里云 OSS 操作专家，附安全使用规则（先浏览再操作、删除需确认、私有桶自动给临时链接等） |
+| `oss-batch-upload` | 批量上传工作流：确认目录 → 展示清单 → 逐个上传保留目录结构 → 汇总报告 |
+
+服务器握手时还会下发 `instructions`（Agent 使用说明），Claude Desktop 等客户端会直接展示并用于约束 AI 行为。
+
+## 安装
+
+### 第一步：构建
+
+```bash
+git clone https://github.com/ihopefulChina/Lumen.git
+cd Lumen/Tools/lumen-mcp
+swift build -c release
+```
+
+> 提示：在 Terminal.app 中执行（IDE 内置终端可能有沙箱限制）。
+
+### 第二步：配置凭证
+
+```bash
+.build/release/lumen-mcp auth
+```
+
+按提示填写地域、AccessKey ID / Secret（STS Token 可选）。凭证保存在当前用户的钥匙串，不会写入磁盘明文文件。支持多账号档案：
+
+| 命令 | 作用 |
+| --- | --- |
+| `lumen-mcp auth` | 交互式添加/更新配置档案 |
+| `lumen-mcp auth --list` | 列出所有配置档案（`●` 标记活动档案） |
+| `lumen-mcp auth --use <名称>` | 切换活动配置档案 |
+| `lumen-mcp auth --remove <名称>` | 删除配置档案 |
+| `lumen-mcp auth --test` | 验证当前凭证（调用 ListBuckets） |
+
+### 第三步：一键接入 AI 客户端
+
+```bash
+.build/release/lumen-mcp install
+```
+
+自动检测本机已安装的客户端（Claude Desktop、Claude Code、Cursor、Trae、Windsurf、Codex）并写入配置，重启客户端即可使用。支持：
+
+```bash
+lumen-mcp install --client codex     # 只注册指定客户端（可重复传）
+lumen-mcp install --all              # 注册全部支持的客户端
+lumen-mcp install --dry-run          # 只预览将要写入的内容
+lumen-mcp uninstall                  # 移除注册
+```
+
+JSON 配置采用合并写入并保留 `.bak` 备份，不影响其他 MCP 服务器。
+
+## 手动配置（可选）
+
+不想用一键安装时，可手动编辑各客户端配置。所有客户端使用相同的服务条目：
+
+```json
+{
+  "mcpServers": {
+    "lumen": {
+      "command": "/absolute/path/to/lumen-mcp"
+    }
+  }
+}
+```
+
+| 客户端 | 配置位置 | 说明 |
+| --- | --- | --- |
+| Claude Desktop | `~/Library/Application Support/Claude/claude_desktop_config.json` | `mcpServers` 键，重启 App |
+| Claude Code | `claude mcp add --scope user lumen -- /absolute/path/to/lumen-mcp` | 命令行注册 |
+| Cursor | `~/.cursor/mcp.json` | `mcpServers` 键 |
+| Trae | 设置 → MCP，或 `~/Library/Application Support/Trae/User/settings/mcp.json` | `mcpServers` 键 |
+| Windsurf | `~/.windsurf/mcp.json` | `mcpServers` 键 |
+| Codex | `~/.codex/config.toml` | TOML 格式：`[mcp_servers.lumen]` + `command = "…"` |
+| VS Code (Copilot) | 工作区 `.vscode/mcp.json` | 注意顶层键是 `servers` |
+| Cline | `~/Library/Application Support/Code/User/globalStorage/saoudrizwan.claude-dev/settings/cline_mcp_settings.json` | `mcpServers` 键 |
+| Qoder | `~/.qoder/mcp.json` | `mcpServers` 键 |
 
 ## 安全说明
 
