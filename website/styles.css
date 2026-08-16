@@ -1641,59 +1641,150 @@ summary {
    MCP — document page components (mcp.html)
    --------------------------------------------------------------- */
 
+/* Apple-style ease-out: critically damped, no overshoot */
+:root { --ease-apple: cubic-bezier(0.32, 0.72, 0, 1); }
+
+/* Scroll reveal — elements rise + fade in sequence (see mcp.html script) */
+.reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition:
+    opacity 0.65s var(--ease-apple),
+    transform 0.65s var(--ease-apple);
+  transition-delay: var(--reveal-delay, 0ms);
+}
+
+.reveal.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Steps read as a sequence: numbered nodes on a rail, top → down.
+   Each step enters on its own as it scrolls into view. */
 .mcp-steps {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 18px;
-  margin-top: 30px;
+  --node: 44px;
+  display: flex;
+  flex-direction: column;
+  margin-top: 34px;
 }
 
 .mcp-step {
-  padding: 22px 20px;
-  background: var(--paper);
-  border: 1px solid var(--hairline);
-  border-radius: var(--radius-medium);
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--node) minmax(0, 1fr);
+  gap: 0 22px;
+  padding-bottom: 44px;
 }
 
-.mcp-step > span {
-  width: 28px;
-  height: 28px;
+.mcp-step:last-child {
+  padding-bottom: 0;
+}
+
+/* Rail segment — grows downward after the node settles */
+.mcp-step::after {
+  content: "";
+  position: absolute;
+  left: calc(var(--node) / 2 - 1px);
+  top: calc(var(--node) + 10px);
+  bottom: 8px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--blue-soft);
+  opacity: 0.9;
+  transform: scaleY(0);
+  transform-origin: top;
+  transition: transform 0.7s var(--ease-apple) 0.28s;
+}
+
+.mcp-step.is-visible::after {
+  transform: scaleY(1);
+}
+
+.mcp-step:last-child::after {
+  display: none;
+}
+
+.mcp-step-num {
+  width: var(--node);
+  height: var(--node);
   display: grid;
   place-items: center;
   color: var(--blue-deep);
   background: var(--blue-soft);
   border-radius: 50%;
   font-family: ui-monospace, "SFMono-Regular", Menlo, monospace;
-  font-size: 11px;
+  font-size: 14px;
   font-weight: 700;
+  box-shadow: 0 0 0 6px var(--canvas);
+}
+
+.mcp-step-body {
+  padding-top: 2px;
 }
 
 .mcp-step h3 {
-  margin: 16px 0 6px;
-  font-size: 16px;
+  margin: 6px 0 6px;
+  font-size: 17px;
   letter-spacing: -0.02em;
 }
 
-.mcp-step > p {
+.mcp-step p {
   margin: 0;
   color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: 13.5px;
+  line-height: 1.65;
+  max-width: 56ch;
 }
 
+/* Try-it callout under the steps */
+.mcp-try {
+  margin: 30px 0 0;
+  padding: 15px 20px;
+  background: var(--paper);
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--blue);
+  border-radius: 12px;
+  color: var(--slate);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.mcp-try b {
+  color: var(--ink);
+  font-weight: 650;
+}
+
+/* Terminal window chrome — reads as a macOS window, fitting for a Mac tool */
 .code-block {
+  position: relative;
   overflow-x: auto;
-  margin: 16px 0 0;
-  padding: 14px 16px;
+  margin: 18px 0 0;
+  padding: 46px 18px 16px;
   color: #cfe0f5;
   background: #0d1320;
   border: 1px solid #232c3d;
   border-radius: 12px;
+  box-shadow: 0 14px 34px rgba(13, 19, 32, 0.16);
   font-family: ui-monospace, "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
   font-size: 12.5px;
   line-height: 1.75;
   white-space: pre;
   tab-size: 4;
+}
+
+.code-block::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 32px;
+  border-bottom: 1px solid #1c2637;
+  background:
+    radial-gradient(circle at 19px 16px, #ff5f57 0 4.5px, transparent 5px),
+    radial-gradient(circle at 38px 16px, #febc2e 0 4.5px, transparent 5px),
+    radial-gradient(circle at 57px 16px, #28c840 0 4.5px, transparent 5px),
+    linear-gradient(rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0));
 }
 
 .code-block .c-prompt { color: #5f739a; user-select: none; }
@@ -1766,17 +1857,23 @@ summary {
   border-radius: 999px;
   font-size: 13px;
   font-weight: 570;
+  transition:
+    transform 0.3s var(--ease-apple),
+    border-color 0.3s var(--ease-apple);
+}
+
+.client-list li:hover {
+  transform: translateY(-2px);
+  border-color: var(--blue);
+}
+
+.client-list li:active {
+  transform: scale(0.96);
 }
 
 .document-shell .text-link {
   color: var(--blue-deep);
   font-weight: 680;
-}
-
-@media (max-width: 980px) {
-  .mcp-steps {
-    grid-template-columns: 1fr;
-  }
 }
 
 @media (max-width: 700px) {
@@ -1789,7 +1886,50 @@ summary {
     font-size: 12.5px;
   }
 
+  .mcp-steps {
+    --node: 34px;
+    margin-top: 26px;
+  }
+
+  .mcp-step {
+    grid-template-columns: var(--node) minmax(0, 1fr);
+    gap: 0 16px;
+    padding-bottom: 34px;
+  }
+
+  .mcp-step-num {
+    box-shadow: 0 0 0 5px var(--canvas);
+  }
+
+  .code-block {
+    padding: 42px 14px 14px;
+    font-size: 12px;
+  }
+
   .document-shell td:first-child {
     white-space: normal;
+  }
+}
+
+/* Reduced motion — gentler equivalent: cross-fade only, no travel */
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    transform: none;
+    transition: opacity 0.2s ease;
+    transition-delay: 0ms;
+  }
+
+  .mcp-step::after {
+    transform: scaleY(1);
+    transition: none;
+  }
+
+  .client-list li {
+    transition: none;
+  }
+
+  .client-list li:hover,
+  .client-list li:active {
+    transform: none;
   }
 }
