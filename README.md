@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://ihopefulchina.github.io/Lumen/"><strong>官网</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.1.dmg"><strong>下载 Lumen 1.0.1</strong></a>
+  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.2.dmg"><strong>下载 Lumen 1.0.2</strong></a>
   &nbsp;·&nbsp;
   <a href="https://ihopefulchina.github.io/Lumen/support.html">使用支持</a>
   &nbsp;·&nbsp;
@@ -63,7 +63,7 @@ Lumen 是一个原生的 macOS OSS 客户端。它不打算把控制台搬进桌
 
 ## 安装
 
-1. [下载 Lumen 1.0.1](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.1.dmg)。
+1. [下载 Lumen 1.0.2](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.2.dmg)。
 2. 打开 DMG，把 Lumen 拖进「应用程序」。
 3. 添加权限最小化的 RAM 子账号，选择地域，然后打开 Bucket。
 

@@ -105,8 +105,17 @@ final class LumenAppDelegate: NSObject, NSApplicationDelegate {
         #endif
         MainActor.assumeIsolated {
             TransferNotifier.shared.prepare()
-            if AppServices.shared.settings.notifyWhenTransfersFinish {
-                TransferNotifier.shared.requestAuthorizationIfNeeded()
+            Task { @MainActor in
+                // Ensure the local preference stays in sync with the system
+                // authorization state — otherwise the switch in Settings
+                // could claim "on" while notifications are globally denied.
+                var notifyPref = AppServices.shared.settings.notifyWhenTransfersFinish
+                await TransferNotifier.shared.reconcilePreferenceWithSystem(pref: &notifyPref)
+                AppServices.shared.settings.notifyWhenTransfersFinish = notifyPref
+
+                if AppServices.shared.settings.notifyWhenTransfersFinish {
+                    TransferNotifier.shared.requestAuthorizationIfNeeded()
+                }
             }
             AppServices.shared.settings.appearance.apply()
         }

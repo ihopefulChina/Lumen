@@ -38,6 +38,39 @@ final class TransferNotifier: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().delegate = self
     }
 
+    /// Returns true when notifications are actually deliverable by the system.
+    func isCurrentlyEnabled() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional:
+            return true
+        case .denied, .notDetermined, .ephemeral:
+            return false
+        @unknown default:
+            return false
+        }
+    }
+
+    /// If the system has denied notifications but the local preference switch is still on,
+    /// flip the local switch off so the UI matches reality.
+    func reconcilePreferenceWithSystem(pref notifyPref: inout Bool) async {
+        let status = await UNUserNotificationCenter.current().notificationSettings().authorizationStatus
+        switch status {
+        case .authorized, .provisional:
+            break // keep pref as-is
+        case .denied:
+            notifyPref = false
+        case .notDetermined:
+            if notifyPref {
+                _ = try? await UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound])
+            }
+        case .ephemeral:
+            break
+        @unknown default:
+            break
+        }
+    }
+
     func requestAuthorizationIfNeeded() {
         Task {
             let center = UNUserNotificationCenter.current()
@@ -69,15 +102,22 @@ final class TransferNotifier: NSObject, UNUserNotificationCenterDelegate {
         if sound {
             content.sound = .default
         }
-        UNUserNotificationCenter.current().add(
-            UNNotificationRequest(identifier: UUID().uuidString, content: content, trigger: nil)
+        let request = UNNotificationRequest(
+            identifier: UUID().uuidString,
+            content: content,
+            trigger: nil
         )
+        UNUserNotificationCenter.current().add(request) { error in
+            if let error {
+                NSLog("TransferNotifier: failed to post completion notification — \(error.localizedDescription)")
+            }
+        }
     }
 
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification
     ) async -> UNNotificationPresentationOptions {
-        [.banner, .list, .sound]
+        [.banner, .list, .sound, .badge]
     }
 }

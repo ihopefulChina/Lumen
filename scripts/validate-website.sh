@@ -8,7 +8,7 @@ readme="$repo_root/README.md"
 index="$site_root/index.html"
 privacy="$site_root/privacy.html"
 support="$site_root/support.html"
-version="1.0.1"
+version="1.0.2"
 download_url="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-$version.dmg"
 
 required_files=(
