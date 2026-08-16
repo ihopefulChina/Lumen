@@ -66,7 +66,7 @@ final class FavoriteStore {
         for index in items.indices where
             items[index].accountID == accountID
                 && items[index].bucketName == bucketName
-                && (items[index].prefix == source || items[index].prefix.hasPrefix(source)) {
+                && Self.isWithin(items[index].prefix, folder: source) {
             let relative = String(items[index].prefix.dropFirst(source.count))
             items[index].prefix = destination + relative
             if items[index].prefix == destination {
@@ -78,6 +78,16 @@ final class FavoriteStore {
             items = items.uniqued(on: \FavoriteLocation.id)
             save()
         }
+    }
+
+    /// Matches only the folder itself and prefixes at a path-component
+    /// boundary, so renaming folder `a` never touches favorites under `ab/`.
+    private static func isWithin(_ prefix: String, folder source: String) -> Bool {
+        if prefix == source { return true }
+        if source.isEmpty { return true }
+        return source.hasSuffix("/")
+            ? prefix.hasPrefix(source)
+            : prefix.hasPrefix(source + "/")
     }
 
     private func save() {

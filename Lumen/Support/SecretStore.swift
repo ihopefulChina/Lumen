@@ -77,8 +77,10 @@ enum SecretStore {
     }
 
     private static var directory: URL {
-        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-            .appending(path: "studio.lumen.oss", directoryHint: .isDirectory)
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appending(path: "Library/Application Support", directoryHint: .isDirectory)
+        return base.appending(path: "studio.lumen.oss", directoryHint: .isDirectory)
     }
 
     private static var fileURL: URL {

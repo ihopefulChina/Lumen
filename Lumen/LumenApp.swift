@@ -30,7 +30,8 @@ struct LumenApp: App {
             TransferWindow()
                 .environment(AppModel.settingsSession)
         }
-        .defaultSize(width: 920, height: 560)
+        .defaultSize(width: 780, height: 520)
+        .windowToolbarStyle(.unified)
 
         MenuBarExtra(isInserted: menuBarBinding) {
             TransferMenu()
@@ -94,6 +95,23 @@ private struct ScreenshotActiveState: ViewModifier {
 }
 
 final class LumenAppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSWindow.allowsAutomaticWindowTabbing = false
+        #if DEBUG
+        if ScreenshotDemo.currentMode != nil {
+            ScreenshotDemo.applyAppearance()
+            return
+        }
+        #endif
+        MainActor.assumeIsolated {
+            TransferNotifier.shared.prepare()
+            if AppServices.shared.settings.notifyWhenTransfersFinish {
+                TransferNotifier.shared.requestAuthorizationIfNeeded()
+            }
+            AppServices.shared.settings.appearance.apply()
+        }
+    }
+
     func application(_ application: NSApplication, open urls: [URL]) {
         Task { @MainActor in
             AppServices.shared.routeIncoming(urls)
@@ -109,20 +127,48 @@ final class LumenAppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
-            guard AppServices.shared.transfers.activeCount > 0 else {
+            let transferring = AppServices.shared.transfers.activeCount > 0
+            let organizing = AppServices.shared.sessions.contains(where: \.isOrganizingCloud)
+            guard AppTermination.shouldConfirm(transferring: transferring, organizing: organizing) else {
                 return .terminateNow
             }
+            let prompt = AppTermination.prompt(transferring: transferring, organizing: organizing)
             let alert = NSAlert()
-            alert.messageText = "还有文件在传输"
-            alert.informativeText = "现在退出会中断未完成的上传或下载。"
+            alert.messageText = prompt.title
+            alert.informativeText = prompt.message
             alert.addButton(withTitle: "退出")
-            alert.addButton(withTitle: "继续传输")
+            alert.addButton(withTitle: organizing ? "继续整理" : "继续传输")
             if alert.runModal() == .alertFirstButtonReturn {
                 AppServices.shared.transfers.pauseAll()
                 return .terminateNow
             }
             return .terminateCancel
         }
+    }
+}
+
+enum AppTermination {
+    static func shouldConfirm(transferring: Bool, organizing: Bool) -> Bool {
+        transferring || organizing
+    }
+
+    static func prompt(transferring: Bool, organizing: Bool) -> (title: String, message: String) {
+        if organizing && transferring {
+            return (
+                "还有整理和传输未完成",
+                "现在退出会中断未完成的重命名、移动或复制，已复制的对象可能不会回滚；未完成的上传或下载也会中断。"
+            )
+        }
+        if organizing {
+            return (
+                "还有云端整理未完成",
+                "现在退出会中断未完成的重命名、移动或复制，已复制的对象可能不会回滚。"
+            )
+        }
+        return (
+            "还有文件在传输",
+            "现在退出会中断未完成的上传或下载。"
+        )
     }
 }
 
@@ -145,20 +191,37 @@ struct LumenCommands: Commands {
             .disabled(actions?.canUndo != true)
         }
         CommandGroup(replacing: .newItem) {
-            Button("新建窗口") { openWindow(id: "main") }
-                .keyboardShortcut("n", modifiers: [.command])
-            Divider()
-            Button("上传图片…") { actions?.upload() }
+            Button("上传") { actions?.upload() }
                 .keyboardShortcut("o", modifiers: [.command])
-            Button("从剪贴板上传") { actions?.paste() }
+            Button("从剪贴板上传") { actions?.pasteLocalFiles() }
                 .keyboardShortcut("v", modifiers: [.command, .shift])
             Button("添加账号…") { actions?.addAccount() }
                 .keyboardShortcut("a", modifiers: [.command, .shift])
             Divider()
-            Button("新建文件夹…") { actions?.newFolder() }
+            Button("新建文件夹") { actions?.newFolder() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
         }
-        CommandGroup(after: .pasteboard) {
+        CommandGroup(replacing: .pasteboard) {
+            Button("剪切") {
+                (actions?.cut ?? { AppServices.shared.focused?.cutCloudSelection() })()
+            }
+            .keyboardShortcut("x", modifiers: [.command])
+            .disabled(!(actions?.canCopy ?? AppServices.shared.focused?.canCopyCloudItems ?? false))
+            Button("复制") {
+                (actions?.copy ?? { AppServices.shared.focused?.copyCloudSelection() })()
+            }
+            .keyboardShortcut("c", modifiers: [.command])
+            .disabled(!(actions?.canCopy ?? AppServices.shared.focused?.canCopyCloudItems ?? false))
+            Button("粘贴") {
+                if let actions {
+                    actions.paste()
+                } else {
+                    AppServices.shared.focused?.paste()
+                }
+            }
+            .keyboardShortcut("v", modifiers: [.command])
+            .disabled(!(actions?.canPaste ?? AppServices.shared.focused?.canPaste ?? false))
+            Divider()
             Button("复制链接") { actions?.copyLink() }
                 .keyboardShortcut("c", modifiers: [.command, .shift])
             Button("复制 Markdown") { actions?.copyMarkdown() }
@@ -167,7 +230,6 @@ struct LumenCommands: Commands {
             Button("全选") { actions?.selectAll() }
                 .keyboardShortcut("a", modifiers: [.command])
             Button("取消全选") { actions?.deselectAll() }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
         }
         CommandGroup(after: .appInfo) {
             Button("检查更新…") {
@@ -225,9 +287,7 @@ struct LumenCommands: Commands {
             Button("显示信息") { actions?.showInformation() }
                 .keyboardShortcut("i", modifiers: [.command])
                 .disabled(actions?.canShowInformation != true)
-            Button("版本历史…") { actions?.showVersionHistory() }
-                .disabled(actions?.canActOnObject != true)
-            Button("对象属性…") { actions?.showObjectProperties() }
+            Button("对象属性") { actions?.showObjectProperties() }
                 .disabled(actions?.canActOnObject != true)
             Divider()
             Button("网格") { actions?.grid() }
@@ -243,7 +303,12 @@ struct LumenActions {
     var canUndo: Bool
     var undo: () -> Void
     var upload: () -> Void
+    var copy: () -> Void
+    var canCopy: Bool
+    var cut: () -> Void
     var paste: () -> Void
+    var canPaste: Bool
+    var pasteLocalFiles: () -> Void
     var addAccount: () -> Void
     var newFolder: () -> Void
     var copyLink: () -> Void
@@ -256,7 +321,6 @@ struct LumenActions {
     var canShowInformation: Bool
     var showInformation: () -> Void
     var canActOnObject: Bool
-    var showVersionHistory: () -> Void
     var showObjectProperties: () -> Void
     var grid: () -> Void
     var list: () -> Void
@@ -292,16 +356,7 @@ enum WindowActions {
 
     static func prepare(_ window: NSWindow) {
         window.identifier = workspaceID
-        window.tabbingMode = .automatic
-    }
-
-    static func notify(_ message: String, title: String = "Lumen") {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "好")
-        alert.runModal()
+        window.tabbingMode = .disallowed
     }
 }
 

@@ -5,7 +5,11 @@ import SwiftUI
 struct ThumbnailView: View {
     let object: OSSObject
     var style: OSSImageProcess = .grid
-    @Environment(AppModel.self) private var model
+    /// Client factory captured at the view's call site. Table rows render in
+    /// an AppKit cell context where `@Environment(AppModel.self)` is not
+    /// reliably available, so the model is never read from the environment
+    /// here.
+    var loadClient: () -> OSSClient?
     @State private var image: NSImage?
     @State private var failed = false
 
@@ -40,7 +44,7 @@ struct ThumbnailView: View {
 
     private func load() async {
         guard object.isImage, ImageKind.imgProcessable(key: object.key) else { return }
-        guard let client = model.makeClient() else {
+        guard let client = loadClient() else {
             failed = true
             return
         }
@@ -76,8 +80,7 @@ final class ThumbnailCache {
         let key = object.key
         let queries = style.queries(for: key)
         let maxPixel = style.maxPixel
-        let size = object.size
-        let allowOriginal = size < 256_000 && ImageKind.imgProcessable(key: key)
+        let allowOriginal = object.size < 256_000
         await waitForSlot()
         defer { finishSlot() }
 

@@ -22,7 +22,7 @@ struct HelpView: View {
                         .foregroundStyle(.secondary)
                         .accessibilityHidden(true)
                     Text(selected.title)
-                        .font(.system(size: 28, weight: .semibold, design: .rounded))
+                        .font(.title.weight(.semibold))
                     topicContent(selected)
                 }
                 .frame(maxWidth: 620, alignment: .leading)
@@ -49,7 +49,7 @@ struct HelpView: View {
         switch topic {
         case .gettingStarted:
             helpSection("连接 OSS") {
-                Text("先在阿里云创建只允许访问所需 Bucket 的 RAM 用户，再把 AccessKey ID 与 Secret 添加到 Lumen。新账号默认使用私有权限，密钥只保存在这台 Mac 的钥匙串中。")
+                Text("先在阿里云创建只允许访问所需 Bucket 的 RAM 用户，再把 AccessKey ID 与 Secret 添加到 Lumen。新账号默认继承存储空间权限；改为公共读或公共读写前会再次确认。密钥只保存在这台 Mac 的钥匙串中。")
                 Text("建议从只读或单 Bucket 读写权限开始，需要上传、删除或移动时再补充对应权限。不要使用主账号 AccessKey。")
             }
             helpSection("像访达一样浏览") {
@@ -69,12 +69,12 @@ struct HelpView: View {
             helpSection("撤销云端整理") {
                 Text("重命名和移动成功后，可以立即按 Command–Z 撤销。撤销只在原账号与原 Bucket 中生效。")
             }
-            helpSection("恢复删除") {
-                Text("在对象菜单打开“版本历史”，可把任一历史版本恢复为新的当前版本；侧边栏“已删除”可移除精确 delete marker 来恢复对象。Bucket 必须已在 OSS 启用版本控制。")
+            helpSection("撤销删除") {
+                Text("Bucket 已开启版本控制时，刚删除的项目可以立即按 Command–Z 撤销。未开启版本控制时，删除是永久的。")
             }
             helpSection("对象属性与跨 Bucket 整理") {
-                Text("“对象属性”可编辑 Content-Type、缓存行为、下载文件名、用户元数据和最多十个标签。无效或重复的键不会提交。")
-                Text("复制后切换到另一个 Bucket 再粘贴，会先显示来源、目标、数量、大小和传输方式。同账号同地域使用云端复制，其他情况经由这台 Mac；移动总是在全部复制成功后才删除来源。")
+                Text("“对象属性”写回 OSS 上的文件类型、缓存、下载文件名、自定义元数据和最多十个标签。保存后对这个对象立即生效；已开启版本控制的 Bucket 会因此产生一个新版本。")
+                Text("剪切后切换文件夹或 Bucket 再粘贴，即可移动。复制后粘贴则留下副本。跨 Bucket 时会先显示来源、目标、数量、大小和传输方式；同账号同地域走云端复制，其他情况经由这台 Mac。移动总是在全部复制成功后才删除来源。")
             }
             helpSection("账号配置恢复") {
                 Text("Lumen 会为可读取的账号配置保留上一份备份。主配置损坏时会自动恢复并保留损坏文件；若备份也不可读，请复制诊断信息并通过支持入口反馈。诊断信息不包含账号标识或密钥。")
@@ -86,8 +86,10 @@ struct HelpView: View {
             }
         case .shortcuts:
             Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 12) {
-                shortcut("Command–O", "上传图片")
-                shortcut("Command–N", "新建窗口；窗口可合并为标签页")
+                shortcut("Command–O", "上传")
+                shortcut("Command–X", "剪切，再粘贴即可移动")
+                shortcut("Command–C", "复制选中的对象或文件夹")
+                shortcut("Command–V", "粘贴；剪切后粘贴为移动")
                 shortcut("Shift–Command–A", "添加账号")
                 shortcut("Shift–Command–V", "从剪贴板上传")
                 shortcut("Shift–Command–N", "新建文件夹")

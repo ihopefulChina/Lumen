@@ -97,7 +97,7 @@ struct OSSAccount: Identifiable, Hashable, Codable, Sendable {
     }
 
     func apiHost(for bucket: OSSBucket?) -> String {
-        if useTransferAccelerate {
+        if useTransferAccelerate, bucket != nil {
             return "oss-accelerate.aliyuncs.com"
         }
         let override = endpointOverride.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -135,7 +135,14 @@ struct OSSAccount: Identifiable, Hashable, Codable, Sendable {
         components.scheme = endpoint.scheme
         components.host = host
         components.port = endpoint.port
-        components.percentEncodedPath = "/" + OSSSigner.uriEncode(key, encodeSlash: false)
+        if cdn.isEmpty, host == endpoint.host {
+            // Path-style endpoint (custom / OSS-compatible host): the bucket
+            // goes into the path instead of being silently dropped.
+            components.percentEncodedPath = "/" + OSSSigner.uriEncode(bucketName, encodeSlash: true)
+                + "/" + OSSSigner.uriEncode(key, encodeSlash: false)
+        } else {
+            components.percentEncodedPath = "/" + OSSSigner.uriEncode(key, encodeSlash: false)
+        }
         return components.url
     }
 
@@ -244,6 +251,7 @@ struct ObjectHead: Sendable {
     var cacheControl: String? = nil
     var contentDisposition: String? = nil
     var userMetadata: [String: String] = [:]
+    var versionID: String? = nil
 }
 
 struct OSSDeleteReceipt: Equatable, Sendable {

@@ -48,6 +48,13 @@ struct SettingsView: View {
         @Bindable var model = model
         return Form {
             Section("浏览") {
+                Picker("外观", selection: $model.settings.appearance) {
+                    ForEach(AppAppearance.allCases) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+
                 Picker("默认视图", selection: Binding(
                     get: { model.settings.preferredViewMode },
                     set: { model.applyPreferredViewModeToAllSessions($0) }
@@ -64,7 +71,7 @@ struct SettingsView: View {
                             session.browser.imagesOnly = value
                         }
                     }
-                Text("素材文件包括图片、GIF、WebP、SVG、JSON 和文本。")
+                Text("开启后只显示和选取素材。关闭后可浏览并上传任意文件。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -114,6 +121,9 @@ struct SettingsView: View {
                         Text(limit.title).tag(limit)
                     }
                 }
+                .onChange(of: model.settings.uploadSpeedLimit) { _, value in
+                    model.transfers.uploadSpeedLimit = value
+                }
                 Toggle("将 HEIC 转为 JPEG", isOn: $model.settings.convertHEIC)
             }
 
@@ -128,6 +138,9 @@ struct SettingsView: View {
                     ForEach(Self.speedLimits, id: \.self) { limit in
                         Text(limit.title).tag(limit)
                     }
+                }
+                .onChange(of: model.settings.downloadSpeedLimit) { _, value in
+                    model.transfers.downloadSpeedLimit = value
                 }
                 Picker("默认位置", selection: $model.settings.downloadLocation) {
                     ForEach(DownloadLocation.allCases) { location in
@@ -195,11 +208,8 @@ struct SettingsView: View {
         Form {
             Section("已保存的账号") {
                 if model.accounts.isEmpty {
-                    ContentUnavailableView(
-                        "还没有账号",
-                        systemImage: "person.crop.circle.badge.plus",
-                        description: Text("添加阿里云 OSS 账号后即可浏览存储空间。")
-                    )
+                    Text("还没有账号")
+                        .foregroundStyle(.secondary)
                 } else {
                     ForEach(model.accounts) { account in
                         accountRow(account)
@@ -246,6 +256,7 @@ struct SettingsView: View {
             Button("验证") {
                 check(account)
             }
+            .buttonStyle(.borderless)
             .disabled(accountChecks[account.id] == .checking)
 
             Menu {
@@ -302,9 +313,7 @@ struct SettingsView: View {
 
     private func requestNotificationPermission() {
         Task {
-            let granted = (try? await UNUserNotificationCenter.current()
-                .requestAuthorization(options: [.alert, .sound])) ?? false
-            model.settings.notifyWhenTransfersFinish = granted
+            model.settings.notifyWhenTransfersFinish = await TransferNotifier.shared.requestAuthorization()
         }
     }
 

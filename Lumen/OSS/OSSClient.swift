@@ -62,7 +62,7 @@ struct OSSClient: Sendable {
         if let token, !token.isEmpty { query.append(("continuation-token", token)) }
         let response = try await perform(method: "GET", bucket: bucket, key: nil, query: query)
         var listing = try OSSXML.listing(from: response.data)
-        listing.objects.removeAll { $0.key == prefix || $0.isFolderPlaceholder }
+        listing.objects.removeAll { $0.isFolderPlaceholder }
         return listing
     }
 
@@ -148,73 +148,16 @@ struct OSSClient: Sendable {
         }
     }
 
-    func listObjectVersions(
-        prefix: String,
-        keyMarker: String? = nil,
-        versionIDMarker: String? = nil
-    ) async throws -> OSSVersionPage {
-        guard let bucket else { throw Self.missingBucket }
-        var query = [("versions", ""), ("max-keys", "1000")]
-        if !prefix.isEmpty { query.append(("prefix", prefix)) }
-        if let keyMarker, let versionIDMarker {
-            query.append(("key-marker", keyMarker))
-            query.append(("version-id-marker", versionIDMarker))
-        }
-        let response = try await perform(method: "GET", bucket: bucket, key: nil, query: query)
-        return try OSSXML.versionPage(from: response.data)
-    }
-
-    func listAllVersions(prefix: String) async throws -> OSSVersionListing {
-        var versions: [OSSObjectVersion] = []
-        var markers: [OSSDeleteMarkerVersion] = []
-        var keyMarker: String?
-        var versionMarker: String?
-        var incomplete = false
-        var pages = 0
-        repeat {
-            let page = try await listObjectVersions(
-                prefix: prefix,
-                keyMarker: keyMarker,
-                versionIDMarker: versionMarker
-            )
-            pages += 1
-            versions.append(contentsOf: page.versions)
-            markers.append(contentsOf: page.deleteMarkers)
-            guard page.isTruncated else { break }
-            guard let nextKey = page.nextKeyMarker,
-                  let nextVersion = page.nextVersionIDMarker,
-                  nextKey != keyMarker || nextVersion != versionMarker,
-                  pages < Self.maxListPages
-            else {
-                incomplete = true
-                break
-            }
-            keyMarker = nextKey
-            versionMarker = nextVersion
-        } while true
-        return OSSVersionListing(versions: versions, deleteMarkers: markers, incomplete: incomplete)
-    }
-
-    func restoreVersion(key: String, versionID: String) async throws {
-        guard let bucket else { throw Self.missingBucket }
-        try await copyObject(
-            fromBucket: bucket,
-            sourceKey: key,
-            sourceVersionID: versionID,
-            to: key,
-            overwrite: true
-        )
-    }
-
     func head(key: String) async throws -> ObjectHead {
         guard let bucket else { throw Self.missingBucket }
         let response = try await perform(method: "HEAD", bucket: bucket, key: key)
         let headers = response.headers
-        let metadata = Dictionary(uniqueKeysWithValues: headers.compactMap { header -> (String, String)? in
-            let lower = header.key.lowercased()
-            guard lower.hasPrefix("x-oss-meta-") else { return nil }
-            return (String(lower.dropFirst("x-oss-meta-".count)), header.value)
-        })
+        var metadata: [String: String] = [:]
+        for (key, value) in headers {
+            let lower = key.lowercased()
+            guard lower.hasPrefix("x-oss-meta-") else { continue }
+            metadata[String(lower.dropFirst("x-oss-meta-".count))] = value
+        }
         return ObjectHead(
             contentType: headers.value("Content-Type"),
             contentLength: headers.value("Content-Length").flatMap(Int64.init),
@@ -225,7 +168,8 @@ struct OSSClient: Sendable {
             crc64: headers.value("x-oss-hash-crc64ecma").flatMap(UInt64.init),
             cacheControl: headers.value("Cache-Control"),
             contentDisposition: headers.value("Content-Disposition"),
-            userMetadata: metadata
+            userMetadata: metadata,
+            versionID: headers.value("x-oss-version-id")
         )
     }
 
@@ -284,6 +228,7 @@ struct OSSClient: Sendable {
         fileURL: URL,
         contentType: String,
         acl: ObjectACL,
+        overwrite: Bool = false,
         speedLimit: TransferSpeedLimit = .unlimited,
         checkpoint: MultipartUploadCheckpoint? = nil,
         onCheckpoint: (@Sendable (MultipartUploadCheckpoint?) -> Void)? = nil,
@@ -300,6 +245,7 @@ struct OSSClient: Sendable {
                 contentType: contentType,
                 acl: acl,
                 localCRC64: localCRC64,
+                overwrite: overwrite,
                 speedLimit: speedLimit,
                 checkpoint: checkpoint,
                 onCheckpoint: onCheckpoint,
@@ -312,25 +258,40 @@ struct OSSClient: Sendable {
         if acl != .default {
             headers["x-oss-object-acl"] = acl.rawValue
         }
+        if !overwrite {
+            headers["x-oss-forbid-overwrite"] = "true"
+        }
         let startedAt = Date()
-        let response = try await perform(
-            method: "PUT",
-            bucket: bucket,
-            key: key,
-            headers: headers,
-            fileURL: fileURL,
-            onProgress: onProgress
-        )
-        try await TransferThrottle.wait(bytes: size, startedAt: startedAt, limit: speedLimit)
-        return try Self.verifyCRC64(local: localCRC64, headers: response.headers)
+        do {
+            let response = try await perform(
+                method: "PUT",
+                bucket: bucket,
+                key: key,
+                headers: headers,
+                fileURL: fileURL,
+                onProgress: onProgress
+            )
+            try await TransferThrottle.wait(bytes: size, startedAt: startedAt, limit: speedLimit)
+            return try Self.verifyCRC64(local: localCRC64, headers: response.headers)
+        } catch let error as OSSServiceError where !overwrite && Self.isForbiddenOverwrite(error) {
+            return try await acceptExistingObject(
+                key: key,
+                size: size,
+                localCRC64: localCRC64,
+                requestId: error.requestId
+            )
+        }
     }
 
     @discardableResult
-    func putData(key: String, data: Data, contentType: String, acl: ObjectACL) async throws -> Bool {
+    func putData(key: String, data: Data, contentType: String, acl: ObjectACL, overwrite: Bool = false) async throws -> Bool {
         guard let bucket else { throw Self.missingBucket }
         var headers = ["Content-Type": contentType]
         if acl != .default {
             headers["x-oss-object-acl"] = acl.rawValue
+        }
+        if !overwrite {
+            headers["x-oss-forbid-overwrite"] = "true"
         }
         let response = try await perform(method: "PUT", bucket: bucket, key: key, headers: headers, body: data)
         return try Self.verifyCRC64(local: CRC64XZ.checksum(data), headers: response.headers)
@@ -353,31 +314,28 @@ struct OSSClient: Sendable {
         )
     }
 
-    func copyObject(from sourceKey: String, to destKey: String, overwrite: Bool = true) async throws {
+    @discardableResult
+    func copyObject(from sourceKey: String, to destKey: String, overwrite: Bool = true) async throws -> String? {
         guard let bucket else { throw Self.missingBucket }
-        try await copyObject(
+        return try await copyObject(
             fromBucket: bucket,
             sourceKey: sourceKey,
-            sourceVersionID: nil,
             to: destKey,
             overwrite: overwrite
         )
     }
 
+    @discardableResult
     func copyObject(
         fromBucket sourceBucket: String,
         sourceKey: String,
-        sourceVersionID: String? = nil,
         to destKey: String,
         overwrite: Bool = true,
         replacingMetadata headersToReplace: [String: String]? = nil
-    ) async throws {
+    ) async throws -> String? {
         guard let bucket else { throw Self.missingBucket }
-        var source = "/" + OSSSigner.uriEncode(sourceBucket, encodeSlash: true)
+        let source = "/" + OSSSigner.uriEncode(sourceBucket, encodeSlash: true)
             + "/" + OSSSigner.uriEncode(sourceKey, encodeSlash: false)
-        if let sourceVersionID {
-            source += "?versionId=" + OSSSigner.uriEncode(sourceVersionID, encodeSlash: true)
-        }
         var headers = ["x-oss-copy-source": source]
         if !overwrite {
             headers["x-oss-forbid-overwrite"] = "true"
@@ -386,17 +344,24 @@ struct OSSClient: Sendable {
             headers["x-oss-metadata-directive"] = "REPLACE"
             headers.merge(headersToReplace) { _, replacement in replacement }
         }
-        _ = try await perform(
+        let response = try await perform(
             method: "PUT",
             bucket: bucket,
             key: destKey,
             headers: headers
         )
+        return response.headers.value("x-oss-version-id")
     }
 
     func renameObject(from sourceKey: String, to destKey: String, overwrite: Bool) async throws {
         try await copyObject(from: sourceKey, to: destKey, overwrite: overwrite)
-        try await deleteObject(key: sourceKey)
+        do {
+            try await deleteObject(key: sourceKey)
+        } catch {
+            // The copy already committed; surface this as a partial failure so
+            // callers can refresh the listing instead of reporting a clean error.
+            throw CloudObjectOperationError.sourceCleanupFailed(sourceKey)
+        }
     }
 
     func copyPrefix(from sourcePrefix: String, to destinationPrefix: String) async throws {
@@ -439,28 +404,43 @@ struct OSSClient: Sendable {
         }
 
         var copied: [CloudObjectMapping] = []
+        var destinationVersions: [String: String] = [:]
         do {
             for mapping in mappings {
                 try Task.checkCancellation()
-                try await copyObject(
+                let versionID = try await copyObject(
                     from: mapping.sourceKey,
                     to: mapping.destinationKey,
                     overwrite: false
                 )
                 copied.append(mapping)
+                if let versionID, !versionID.isEmpty {
+                    destinationVersions[mapping.destinationKey] = versionID
+                }
             }
         } catch {
             for mapping in copied.reversed() {
-                _ = try? await deleteObject(key: mapping.destinationKey)
+                _ = try? await deleteObject(
+                    key: mapping.destinationKey,
+                    versionID: destinationVersions[mapping.destinationKey]
+                )
             }
             throw error
         }
 
         guard mode == .move else { return }
+        var removedSources: Set<String> = []
         for mapping in mappings.sorted(by: { $0.sourceKey.count > $1.sourceKey.count }) {
             do {
                 try await deleteObject(key: mapping.sourceKey)
+                removedSources.insert(mapping.sourceKey)
             } catch {
+                for leftover in mappings where !removedSources.contains(leftover.sourceKey) {
+                    _ = try? await deleteObject(
+                        key: leftover.destinationKey,
+                        versionID: destinationVersions[leftover.destinationKey]
+                    )
+                }
                 throw CloudObjectOperationError.sourceCleanupFailed(mapping.sourceKey)
             }
         }
@@ -497,7 +477,10 @@ struct OSSClient: Sendable {
             query: query,
             downloadTo: destination,
             downloadRoot: root,
-            onProgress: onProgress
+            onProgress: onProgress,
+            // The server's CRC64 header describes the ORIGINAL object, not the
+            // processed result, so integrity checks would always fail here.
+            verifyDownloadIntegrity: (process ?? "").isEmpty
         )
         return response.headers.value("x-oss-hash-crc64ecma") != nil
     }
@@ -508,6 +491,7 @@ struct OSSClient: Sendable {
         to destination: URL,
         within root: URL,
         expectedSize: Int64,
+        overwrite: Bool = false,
         speedLimit: TransferSpeedLimit = .unlimited,
         checkpoint suppliedCheckpoint: RangeDownloadCheckpoint? = nil,
         onCheckpoint: (@Sendable (RangeDownloadCheckpoint?) -> Void)? = nil,
@@ -515,7 +499,22 @@ struct OSSClient: Sendable {
     ) async throws -> Bool {
         guard let bucket else { throw Self.missingBucket }
         try FileSafety.validate(destination: destination, root: root)
-        guard !FileManager.default.fileExists(atPath: destination.path) else {
+        let destinationExists = FileManager.default.fileExists(atPath: destination.path)
+        // A download that already finished (file moved into place) but crashed
+        // before its checkpoint was cleared would otherwise resume into a
+        // confusing "LocalFileExists" failure. Treat it as already complete.
+        if destinationExists,
+           let suppliedCheckpoint,
+           suppliedCheckpoint.completedBytes > 0,
+           suppliedCheckpoint.completedBytes == suppliedCheckpoint.expectedSize {
+            let destSize = (try? destination.resourceValues(forKeys: [.fileSizeKey]).fileSize).map(Int64.init)
+            if destSize == suppliedCheckpoint.completedBytes {
+                onCheckpoint?(nil)
+                onProgress?(suppliedCheckpoint.completedBytes, suppliedCheckpoint.completedBytes)
+                return false
+            }
+        }
+        if destinationExists, !overwrite {
             throw OSSServiceError(
                 statusCode: 0,
                 code: "LocalFileExists",
@@ -556,6 +555,14 @@ struct OSSClient: Sendable {
            suppliedSize == suppliedCheckpoint.completedBytes {
             state = suppliedCheckpoint
         } else {
+            // The old checkpoint is unusable (etag/size changed, partial
+            // missing). Remove its stale .partial file so it doesn't leak
+            // next to the fresh one.
+            if let suppliedCheckpoint, Self.isOwnedPartialFileName(suppliedCheckpoint.partialFileName) {
+                try? FileManager.default.removeItem(
+                    at: partialDirectory.appending(path: suppliedCheckpoint.partialFileName)
+                )
+            }
             state = RangeDownloadCheckpoint(
                 bucketName: bucket,
                 objectKey: key,
@@ -610,19 +617,20 @@ struct OSSClient: Sendable {
         }
         try handle.close()
 
-        var verified = false
-        if let crc64 = remote.crc64 {
-            let local = try CRC64XZ.checksum(fileURL: partial)
-            guard local == crc64 else {
-                throw OSSIntegrityError(localCRC64: local, serverValue: String(crc64))
-            }
-            verified = true
-        }
+        let local = try CRC64XZ.checksum(fileURL: partial)
+        let verified = try Self.verifyCRC64(
+            local: local,
+            headers: remote.crc64.map { ["x-oss-hash-crc64ecma": String($0)] } ?? [:]
+        )
         try FileSafety.validate(destination: destination, root: root)
-        guard !FileManager.default.fileExists(atPath: destination.path) else {
-            throw OSSServiceError(statusCode: 0, code: "LocalFileExists", message: "本地已有同名文件，未覆盖", requestId: "")
+        if FileManager.default.fileExists(atPath: destination.path) {
+            guard overwrite else {
+                throw OSSServiceError(statusCode: 0, code: "LocalFileExists", message: "本地已有同名文件，未覆盖", requestId: "")
+            }
+            _ = try FileManager.default.replaceItemAt(destination, withItemAt: partial)
+        } else {
+            try FileManager.default.moveItem(at: partial, to: destination)
         }
-        try FileManager.default.moveItem(at: partial, to: destination)
         onCheckpoint?(nil)
         return verified
     }
@@ -647,7 +655,12 @@ struct OSSClient: Sendable {
             query.append(("x-oss-process", process))
         }
         let response = try await perform(method: "GET", bucket: bucket, key: key, query: query)
-        _ = try Self.verifyCRC64(local: CRC64XZ.checksum(response.data), headers: response.headers)
+        if process == nil {
+            _ = try Self.verifyCRC64(
+                local: CRC64XZ.checksum(response.data),
+                headers: response.headers
+            )
+        }
         return response.data
     }
 
@@ -689,6 +702,7 @@ struct OSSClient: Sendable {
         contentType: String,
         acl: ObjectACL,
         localCRC64: UInt64,
+        overwrite: Bool,
         speedLimit: TransferSpeedLimit,
         checkpoint suppliedCheckpoint: MultipartUploadCheckpoint?,
         onCheckpoint: (@Sendable (MultipartUploadCheckpoint?) -> Void)?,
@@ -711,30 +725,38 @@ struct OSSClient: Sendable {
            suppliedCheckpoint.completedParts.allSatisfy({ (1...totalParts).contains($0.number) && !$0.etag.isEmpty }) {
             state = suppliedCheckpoint
         } else {
-            var initiateHeaders = ["Content-Type": contentType]
-            if acl != .default {
-                initiateHeaders["x-oss-object-acl"] = acl.rawValue
+            // The checkpoint no longer matches the source file. Abort the old
+            // multipart upload best-effort so its parts don't linger on OSS.
+            if let suppliedCheckpoint, !suppliedCheckpoint.uploadID.isEmpty {
+                try? await abortMultipartUpload(suppliedCheckpoint)
             }
-            let initiated = try await perform(
-                method: "POST",
-                bucket: bucket,
-                key: key,
-                query: [("uploads", "")],
-                headers: initiateHeaders
-            )
-            state = MultipartUploadCheckpoint(
-                bucketName: bucket,
-                objectKey: key,
-                sourceSize: size,
-                sourceModifiedAt: modifiedAt,
-                partSize: Self.partSize,
-                uploadID: try OSSXML.uploadId(from: initiated.data),
-                completedParts: []
-            )
+            do {
+                state = try await initiateMultipartUpload(
+                    key: key,
+                    bucket: bucket,
+                    contentType: contentType,
+                    acl: acl,
+                    overwrite: overwrite,
+                    sourceSize: size,
+                    sourceModifiedAt: modifiedAt
+                )
+            } catch let error as OSSServiceError where !overwrite && Self.isForbiddenOverwrite(error) {
+                let verified = try await acceptExistingObject(
+                    key: key,
+                    size: size,
+                    localCRC64: localCRC64,
+                    requestId: error.requestId
+                )
+                onCheckpoint?(nil)
+                return verified
+            }
         }
         onCheckpoint?(state)
 
-        var parts = Dictionary(uniqueKeysWithValues: state.completedParts.map { ($0.number, $0) })
+        var parts: [Int: MultipartCompletedPart] = [:]
+        for part in state.completedParts {
+            parts[part.number] = part
+        }
         var transferred = parts.keys.reduce(Int64(0)) { result, number in
             let offset = Int64(number - 1) * Self.partSize
             return result + min(Self.partSize, max(0, size - offset))
@@ -742,7 +764,13 @@ struct OSSClient: Sendable {
         onProgress?(transferred, size)
         let handle = try FileHandle(forReadingFrom: fileURL)
         defer { try? handle.close() }
-        for partNumber in 1...totalParts where parts[partNumber] == nil {
+
+        var partNumber = 1
+        while partNumber <= totalParts {
+            if parts[partNumber] != nil {
+                partNumber += 1
+                continue
+            }
             try Task.checkCancellation()
             let offset = Int64(partNumber - 1) * Self.partSize
             let thisSize = min(Self.partSize, size - offset)
@@ -752,14 +780,48 @@ struct OSSClient: Sendable {
                 throw OSSServiceError(statusCode: 0, code: "ShortRead", message: "读取上传分片失败", requestId: "")
             }
             let startedAt = Date()
-            let response = try await perform(
-                method: "PUT",
-                bucket: bucket,
-                key: key,
-                query: [("partNumber", String(partNumber)), ("uploadId", state.uploadID)],
-                headers: ["Content-Type": contentType],
-                body: chunk
-            )
+            let response: HTTPResponse
+            do {
+                response = try await perform(
+                    method: "PUT",
+                    bucket: bucket,
+                    key: key,
+                    query: [("partNumber", String(partNumber)), ("uploadId", state.uploadID)],
+                    headers: ["Content-Type": contentType],
+                    body: chunk
+                )
+            } catch let error as OSSServiceError where Self.isMissingUpload(error) {
+                // The upload was aborted server-side (expired lifecycle, long
+                // offline). Restart from a fresh initiate instead of failing.
+                try? await abortMultipartUpload(state)
+                do {
+                    state = try await initiateMultipartUpload(
+                        key: key,
+                        bucket: bucket,
+                        contentType: contentType,
+                        acl: acl,
+                        overwrite: overwrite,
+                        sourceSize: size,
+                        sourceModifiedAt: modifiedAt
+                    )
+                } catch let initiateError as OSSServiceError where !overwrite && Self.isForbiddenOverwrite(initiateError) {
+                    // The previous run actually completed this upload.
+                    let verified = try await acceptExistingObject(
+                        key: key,
+                        size: size,
+                        localCRC64: localCRC64,
+                        requestId: initiateError.requestId
+                    )
+                    onCheckpoint?(nil)
+                    return verified
+                }
+                parts = [:]
+                transferred = 0
+                onCheckpoint?(state)
+                onProgress?(transferred, size)
+                partNumber = 1
+                continue
+            }
             try await TransferThrottle.wait(bytes: thisSize, startedAt: startedAt, limit: speedLimit)
             let etag = (response.headers.value("ETag") ?? "")
                 .trimmingCharacters(in: CharacterSet(charactersIn: "\""))
@@ -771,6 +833,7 @@ struct OSSClient: Sendable {
             onCheckpoint?(state)
             transferred += thisSize
             onProgress?(transferred, size)
+            partNumber += 1
         }
 
         let completed = try await perform(
@@ -798,6 +861,44 @@ struct OSSClient: Sendable {
             query: [("uploadId", checkpoint.uploadID)],
             checksCancellation: false
         )
+    }
+
+    private func initiateMultipartUpload(
+        key: String,
+        bucket: String,
+        contentType: String,
+        acl: ObjectACL,
+        overwrite: Bool,
+        sourceSize: Int64,
+        sourceModifiedAt: Date
+    ) async throws -> MultipartUploadCheckpoint {
+        var initiateHeaders = ["Content-Type": contentType]
+        if acl != .default {
+            initiateHeaders["x-oss-object-acl"] = acl.rawValue
+        }
+        if !overwrite {
+            initiateHeaders["x-oss-forbid-overwrite"] = "true"
+        }
+        let initiated = try await perform(
+            method: "POST",
+            bucket: bucket,
+            key: key,
+            query: [("uploads", "")],
+            headers: initiateHeaders
+        )
+        return MultipartUploadCheckpoint(
+            bucketName: bucket,
+            objectKey: key,
+            sourceSize: sourceSize,
+            sourceModifiedAt: sourceModifiedAt,
+            partSize: Self.partSize,
+            uploadID: try OSSXML.uploadId(from: initiated.data),
+            completedParts: []
+        )
+    }
+
+    private static func isMissingUpload(_ error: OSSServiceError) -> Bool {
+        error.statusCode == 404 || error.code == "NoSuchUpload"
     }
 
     private func completeXML(parts: [MultipartCompletedPart]) -> Data {
@@ -831,7 +932,8 @@ struct OSSClient: Sendable {
         downloadTo: URL? = nil,
         downloadRoot: URL? = nil,
         onProgress: (@Sendable (Int64, Int64) -> Void)? = nil,
-        checksCancellation: Bool = true
+        checksCancellation: Bool = true,
+        verifyDownloadIntegrity: Bool = true
     ) async throws -> HTTPResponse {
         guard let url = makeURL(bucket: bucket, key: key, query: query) else {
             throw OSSServiceError(statusCode: 0, code: "InvalidURL", message: "无法构造请求地址", requestId: "")
@@ -853,6 +955,7 @@ struct OSSClient: Sendable {
             }
             var request = URLRequest(url: url)
             request.httpMethod = method
+            request.cachePolicy = .reloadIgnoringLocalCacheData
             request.timeoutInterval = body != nil || fileURL != nil ? 60 * 30 : 60
             let signed = OSSSigner.signedHeaders(
                 method: method,
@@ -913,12 +1016,19 @@ struct OSSClient: Sendable {
                             )
                         }
                         let localCRC64 = try CRC64XZ.checksum(fileURL: temp)
-                        _ = try Self.verifyCRC64(local: localCRC64, headers: http.headers)
+                        if verifyDownloadIntegrity {
+                            _ = try Self.verifyCRC64(local: localCRC64, headers: http.headers)
+                        }
                         try FileManager.default.createDirectory(at: downloadTo.deletingLastPathComponent(), withIntermediateDirectories: true)
                         if let downloadRoot {
                             try FileSafety.validate(destination: downloadTo, root: downloadRoot)
                         }
-                        try FileManager.default.moveItem(at: temp, to: downloadTo)
+                        // The temp file lives on the system volume while the
+                        // destination can be on another one (external drive,
+                        // network share); moveItem would fail with EXDEV, so
+                        // copy and then delete instead.
+                        try FileManager.default.copyItem(at: temp, to: downloadTo)
+                        try? FileManager.default.removeItem(at: temp)
                     } catch {
                         try? FileManager.default.removeItem(at: temp)
                         throw error
@@ -936,7 +1046,10 @@ struct OSSClient: Sendable {
         }
     }
 
-    private static func verifyCRC64(local: UInt64, headers: [String: String]) throws -> Bool {
+    private static func verifyCRC64(
+        local: UInt64,
+        headers: [String: String]
+    ) throws -> Bool {
         guard let serverValue = headers.value("x-oss-hash-crc64ecma") else {
             return false
         }
@@ -944,6 +1057,56 @@ struct OSSClient: Sendable {
             throw OSSIntegrityError(localCRC64: local, serverValue: serverValue)
         }
         return true
+    }
+
+    private static func isForbiddenOverwrite(_ error: OSSServiceError) -> Bool {
+        error.statusCode == 409
+            || error.code == "FileAlreadyExists"
+            || error.code == "ObjectAlreadyExists"
+    }
+
+    private func acceptExistingObject(
+        key: String,
+        size: Int64,
+        localCRC64: UInt64,
+        requestId: String
+    ) async throws -> Bool {
+        switch try await identifyRemoteObject(key: key, size: size, localCRC64: localCRC64) {
+        case .matches(let verified):
+            return verified
+        case .different, .missing:
+            throw OSSServiceError(
+                statusCode: 409,
+                code: "ObjectAlreadyExists",
+                message: "目标已有同名对象，未覆盖",
+                requestId: requestId
+            )
+        }
+    }
+
+    private enum RemoteIdentity {
+        case missing
+        case matches(verified: Bool)
+        case different
+    }
+
+    private func identifyRemoteObject(
+        key: String,
+        size: Int64,
+        localCRC64: UInt64
+    ) async throws -> RemoteIdentity {
+        do {
+            let remote = try await head(key: key)
+            if let remoteSize = remote.contentLength, remoteSize != size {
+                return .different
+            }
+            if let remoteCRC = remote.crc64 {
+                return remoteCRC == localCRC64 ? .matches(verified: true) : .different
+            }
+            return remote.contentLength == size ? .matches(verified: false) : .different
+        } catch let error as OSSServiceError where error.statusCode == 404 {
+            return .missing
+        }
     }
 
     private func validated(_ response: HTTPResponse) throws -> HTTPResponse {
@@ -963,8 +1126,18 @@ struct OSSClient: Sendable {
         components.scheme = endpoint.scheme
         components.port = endpoint.port
         if let bucket, !bucket.isEmpty {
-            components.host = OSSEndpoint.objectHost(endpoint: endpoint.host, bucketName: bucket)
-            if let key, !key.isEmpty {
+            let host = OSSEndpoint.objectHost(endpoint: endpoint.host, bucketName: bucket)
+            components.host = host
+            if host == endpoint.host {
+                // Path-style endpoint (custom / OSS-compatible host): the
+                // bucket goes into the path instead of the host name.
+                let encodedBucket = OSSSigner.uriEncode(bucket, encodeSlash: true)
+                if let key, !key.isEmpty {
+                    components.percentEncodedPath = "/" + encodedBucket + "/" + OSSSigner.uriEncode(key, encodeSlash: false)
+                } else {
+                    components.percentEncodedPath = "/" + encodedBucket + "/"
+                }
+            } else if let key, !key.isEmpty {
                 components.percentEncodedPath = "/" + OSSSigner.uriEncode(key, encodeSlash: false)
             } else {
                 components.path = "/"

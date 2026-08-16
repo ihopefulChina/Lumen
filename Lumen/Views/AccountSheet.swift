@@ -111,6 +111,7 @@ struct AccountSheet: View {
                 Button(model.editingAccount == nil ? "连接" : "保存") {
                     Task { await save() }
                 }
+                .buttonStyle(.borderedProminent)
                 .disabled(!canSave || isTesting)
                 .keyboardShortcut(.defaultAction)
             }

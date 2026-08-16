@@ -40,15 +40,25 @@ struct RootView: View {
                 : "撤销编辑",
             canUndo: model.browser.renameSession != nil || model.canUndoCloudOperation,
             undo: {
-                if let undoManager = NSApp.keyWindow?.firstResponder?.undoManager,
-                   undoManager.canUndo {
-                    undoManager.undo()
-                } else {
+                switch WorkspaceUndo.resolve(
+                    isRenaming: model.browser.renameSession != nil,
+                    fieldCanUndo: NSApp.keyWindow?.firstResponder?.undoManager?.canUndo == true
+                ) {
+                case .field:
+                    NSApp.keyWindow?.firstResponder?.undoManager?.undo()
+                case .cancelRename:
+                    model.browser.cancelRenaming()
+                case .cloud:
                     Task { await model.undoLastCloudOperation() }
                 }
             },
             upload: { showFileImporter = true },
-            paste: { model.pasteFromClipboard() },
+            copy: { model.copyCloudSelection() },
+            canCopy: model.canCopyCloudItems,
+            cut: { model.cutCloudSelection() },
+            paste: { model.paste() },
+            canPaste: model.canPaste,
+            pasteLocalFiles: { model.pasteFromClipboard() },
             addAccount: { model.editingAccount = nil; model.showAccountSheet = true },
             newFolder: { showFolderPrompt = true },
             copyLink: { model.copyURLs(style: .plain) },
@@ -64,9 +74,6 @@ struct RootView: View {
             canShowInformation: model.canShowInformation,
             showInformation: { model.showInspector = true },
             canActOnObject: model.browser.primarySelection != nil && model.browser.selectedObjects.count == 1,
-            showVersionHistory: {
-                if let object = model.browser.primarySelection { model.presentVersionHistory(for: object) }
-            },
             showObjectProperties: {
                 if let object = model.browser.primarySelection { model.presentObjectProperties(for: object) }
             },
@@ -82,11 +89,29 @@ struct RootView: View {
     private func installKeyMonitor() {
         KeyMonitor.install { event in
             let flags = event.modifierFlags.intersection([.command, .shift, .option, .control])
-            if let responder = NSApp.keyWindow?.firstResponder, responder is NSTextView {
+            guard let model = AppServices.shared.focused ?? AppServices.shared.sessions.first else {
                 return event
             }
-            guard let model = AppServices.shared.focused else { return event }
+            let editingText = BrowserKeyEvent.isEditingText
+            if BrowserKeyEvent.isPaste(event, flags: flags) {
+                // While editing text (rename field, dialogs), ⌘V must paste text,
+                // never cloud items.
+                if !editingText, model.canPasteCloudItems || model.canPaste {
+                    DispatchQueue.main.async { model.paste() }
+                    return nil
+                }
+                return event
+            }
+            // All shortcuts below act on the browser. Do not hijack key events
+            // while a text field is being edited, a sheet/dialog is open, or a
+            // different window (help / transfers / settings) is key.
+            let keyWindow = NSApp.keyWindow
+            let isWorkspaceWindow = keyWindow?.identifier == WindowActions.workspaceID
+            guard !editingText, isWorkspaceWindow, keyWindow?.attachedSheet == nil else {
+                return event
+            }
             if event.keyCode == 51, flags.isEmpty, !model.browser.selectedKeys.isEmpty {
+                guard !model.isOrganizingCloud else { return event }
                 model.requestDeleteSelection()
                 return nil
             }
@@ -94,8 +119,14 @@ struct RootView: View {
                 model.browser.selectAllVisible()
                 return nil
             }
-            if event.keyCode == 0, flags == [.command, .shift] {
-                model.browser.clearSelection()
+            if BrowserKeyEvent.isCut(event, flags: flags) {
+                guard model.canCopyCloudItems else { return event }
+                model.cutCloudSelection()
+                return nil
+            }
+            if BrowserKeyEvent.isCopy(event, flags: flags) {
+                guard model.canCopyCloudItems else { return event }
+                model.copyCloudSelection()
                 return nil
             }
             if event.keyCode == 53, flags.isEmpty {
@@ -145,6 +176,50 @@ struct RootView: View {
     }
 }
 
+enum WorkspaceUndo {
+    enum Action: Equatable {
+        case field
+        case cancelRename
+        case cloud
+    }
+
+    static func resolve(isRenaming: Bool, fieldCanUndo: Bool) -> Action {
+        if isRenaming {
+            return fieldCanUndo ? .field : .cancelRename
+        }
+        return .cloud
+    }
+}
+
+enum BrowserKeyEvent {
+    static var isEditingText: Bool {
+        let responder = NSApp.keyWindow?.firstResponder
+        return responder is NSTextView || responder is NSTextField
+    }
+
+    static func isPaste(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        isCommandCharacter("v", keyCode: 9, event: event, flags: flags)
+    }
+
+    static func isCopy(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        isCommandCharacter("c", keyCode: 8, event: event, flags: flags)
+    }
+
+    static func isCut(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        isCommandCharacter("x", keyCode: 7, event: event, flags: flags)
+    }
+
+    static func isCommandCharacter(
+        _ character: String,
+        keyCode: UInt16,
+        event: NSEvent,
+        flags: NSEvent.ModifierFlags
+    ) -> Bool {
+        guard flags == .command else { return false }
+        return event.keyCode == keyCode || event.charactersIgnoringModifiers?.lowercased() == character
+    }
+}
+
 private enum KeyMonitor {
     nonisolated(unsafe) static var token: Any?
 
@@ -169,11 +244,6 @@ private struct RootPresentation: ViewModifier {
             .sheet(isPresented: $model.showInspector) {
                 InspectorView()
             }
-            .sheet(isPresented: $model.showVersionHistory) {
-                if let history = model.versionHistoryModel {
-                    VersionHistoryView(history: history)
-                }
-            }
             .sheet(isPresented: $model.showObjectProperties) {
                 if let properties = model.objectPropertiesModel {
                     ObjectPropertiesView(properties: properties)
@@ -189,7 +259,7 @@ private struct RootPresentation: ViewModifier {
             }
             .fileImporter(
                 isPresented: $showFileImporter,
-                allowedContentTypes: ImageKind.importTypes,
+                allowedContentTypes: ImageKind.pickerTypes(imagesOnly: model.settings.imagesOnly),
                 allowsMultipleSelection: true
             ) { result in
                 if case .success(let urls) = result {
@@ -217,7 +287,9 @@ private struct RootPresentation: ViewModifier {
                 Button("删除", role: .destructive) {
                     Task { await model.deleteSelection() }
                 }
-                Button("取消", role: .cancel) {}
+                Button("取消", role: .cancel) {
+                    model.cancelPendingDelete()
+                }
             } message: {
                 Text(model.deleteDialogMessage)
             }
@@ -299,7 +371,7 @@ private struct WorkspaceView: View {
                 } label: {
                     Label("上传", systemImage: "square.and.arrow.up")
                 }
-                .help("上传图片到当前文件夹")
+                .help(model.settings.imagesOnly ? "上传图片到当前文件夹" : "上传到当前文件夹")
 
                 Button {
                     showFolderPrompt = true

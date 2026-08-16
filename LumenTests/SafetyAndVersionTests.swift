@@ -164,6 +164,31 @@ struct SafetyAndVersionTests {
         }
     }
 
+    @Test func transferAccelerateIsOnlyUsedForObjectScopedHosts() {
+        let account = OSSAccount(
+            id: UUID(),
+            name: "Accel",
+            accessKeyId: "test",
+            regionID: "cn-hangzhou",
+            endpointOverride: "",
+            cdnDomain: "",
+            defaultACL: .default,
+            prefixTemplate: "",
+            useTransferAccelerate: true,
+            createdAt: .now
+        )
+        let bucket = OSSBucket(
+            name: "design-assets",
+            regionID: "cn-hangzhou",
+            location: "oss-cn-hangzhou",
+            extranetEndpoint: "oss-cn-hangzhou.aliyuncs.com",
+            createdAt: nil
+        )
+
+        #expect(account.apiHost(for: nil) == "oss-cn-hangzhou.aliyuncs.com")
+        #expect(account.apiHost(for: bucket) == "oss-accelerate.aliyuncs.com")
+    }
+
     @Test func objectURLPreservesExactKey() throws {
         let account = OSSAccount(
             id: UUID(),
@@ -388,5 +413,71 @@ private final class RecordingKeychainAccess: KeychainItemAccessing, @unchecked S
 
     private func key(_ account: String, modern: Bool) -> String {
         "\(modern ? "modern" : "legacy"):\(account)"
+    }
+}
+
+struct TransferFinishNoticeTests {
+    @Test func successfulUploadProducesACompletionNotice() {
+        let job = TransferJob(
+            id: UUID(),
+            kind: .upload,
+            status: .completed,
+            title: "封面.png",
+            objectKey: "封面.png",
+            transferred: 10,
+            total: 10,
+            finishedAt: .now
+        )
+
+        let notice = TransferFinishNotice.content(jobs: [job])
+
+        #expect(notice?.title == "传输完成")
+        #expect(notice?.body == "“封面.png”已上传")
+    }
+
+    @Test func cancelledQueueDoesNotNotify() {
+        let job = TransferJob(
+            id: UUID(),
+            kind: .download,
+            status: .cancelled,
+            title: "a.txt",
+            objectKey: "a.txt",
+            transferred: 0,
+            total: 10,
+            finishedAt: .now
+        )
+
+        #expect(TransferFinishNotice.content(jobs: [job]) == nil)
+    }
+
+    @Test func mixedResultsMentionFailures() {
+        let jobs = [
+            TransferJob(
+                id: UUID(),
+                kind: .upload,
+                status: .completed,
+                title: "a.txt",
+                objectKey: "a.txt",
+                transferred: 1,
+                total: 1,
+                finishedAt: .now
+            ),
+            TransferJob(
+                id: UUID(),
+                kind: .upload,
+                status: .failed,
+                title: "b.txt",
+                objectKey: "b.txt",
+                transferred: 0,
+                total: 1,
+                errorMessage: "denied",
+                finishedAt: .now
+            ),
+        ]
+
+        let notice = TransferFinishNotice.content(jobs: jobs)
+
+        #expect(notice?.title == "传输已结束")
+        #expect(notice?.body == "成功 1 项，失败 1 项")
     }
 }

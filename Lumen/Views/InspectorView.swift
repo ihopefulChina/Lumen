@@ -103,6 +103,7 @@ struct InspectorView: View {
                 Button("下载") { model.downloadSelection() }
                 Spacer()
                 Button("删除", role: .destructive) { model.requestDeleteSelection() }
+                    .disabled(model.isOrganizingCloud)
             }
         }
         .padding(20)
@@ -124,7 +125,7 @@ struct InspectorView: View {
                     .padding(8)
                     .background(Color(nsColor: .textBackgroundColor), in: RoundedRectangle(cornerRadius: 8, style: .continuous))
                 } else {
-                    ThumbnailView(object: object, style: .inspector)
+                    ThumbnailView(object: object, style: .inspector, loadClient: { model.makeClient() })
                         .frame(height: object.isImage ? 168 : 96)
                         .frame(maxWidth: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -183,6 +184,7 @@ struct InspectorView: View {
                     Button("删除", role: .destructive) {
                         model.requestDeleteSelection()
                     }
+                    .disabled(model.isOrganizingCloud)
                     .tint(.red)
                 }
                 .controlSize(.regular)
@@ -216,7 +218,7 @@ struct InspectorView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .padding(.top, 8)
-            Button("下载当前文件夹…") {
+            Button("下载当前文件夹") {
                 model.downloadCurrentPrefix()
             }
             .controlSize(.regular)

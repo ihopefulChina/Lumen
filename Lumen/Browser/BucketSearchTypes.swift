@@ -146,20 +146,4 @@ struct BucketSearchSnapshot: Equatable, Sendable {
     var isIncomplete: Bool
 }
 
-enum SmartLocation: String, CaseIterable, Identifiable, Sendable {
-    case recent
-    case large
-    case deleted
-    case failedTransfers
 
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .recent: "最近修改"
-        case .large: "大文件"
-        case .deleted: "已删除"
-        case .failedTransfers: "失败的传输"
-        }
-    }
-}

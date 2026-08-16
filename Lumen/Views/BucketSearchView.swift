@@ -5,67 +5,39 @@ struct BucketSearchView: View {
     @State private var selection: Set<String> = []
 
     var body: some View {
-        VStack(spacing: 0) {
-            searchBar
-            Divider()
-            content
+        // Table cells are hosted by AppKit; capture the model reference up
+        // front so cell closures never read @Environment.
+        let modelRef = model
+        return Group {
+            if let error = modelRef.searchController.errorMessage {
+                VStack(spacing: 8) {
+                    Text("无法完成搜索")
+                        .foregroundStyle(.secondary)
+                    Text(error)
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                        .lineLimit(2)
+                    Button("再试一次") { Task { await modelRef.runBucketSearch() } }
+                        .buttonStyle(.borderless)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if modelRef.searchController.results.isEmpty && !modelRef.searchController.isSearching {
+                Text("没有匹配的项目")
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                resultsTable(modelRef)
+            }
         }
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private var searchBar: some View {
-        HStack(spacing: 10) {
-            if model.searchController.isSearching {
-                ProgressView()
-                    .controlSize(.small)
-                Text("已扫描 \(model.searchController.progress.scanned) 项")
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-                Button("停止") { model.cancelBucketSearch() }
-                    .buttonStyle(.link)
-            } else {
-                Text(statusText)
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-
-            Spacer()
-
-            filterMenu
-        }
-        .font(.callout)
-        .padding(.horizontal, 12)
-        .frame(height: 38)
-        .background(.bar)
-    }
-
-    @ViewBuilder
-    private var content: some View {
-        if let error = model.searchController.errorMessage {
-            ContentUnavailableView {
-                Label("无法完成搜索", systemImage: "wifi.exclamationmark")
-            } description: {
-                Text(error)
-            } actions: {
-                Button("再试一次") { Task { await model.runBucketSearch() } }
-            }
-        } else if model.searchController.results.isEmpty && !model.searchController.isSearching {
-            ContentUnavailableView(
-                "没有找到项目",
-                systemImage: "magnifyingglass",
-                description: Text("尝试更短的关键词或减少筛选条件。")
-            )
-        } else {
-            resultsTable
-        }
-    }
-
-    private var resultsTable: some View {
+    private func resultsTable(_ modelRef: AppModel) -> some View {
         Table(of: OSSObject.self, selection: $selection) {
             TableColumn("名称") { object in
                 HStack(spacing: 6) {
                     if object.isImage {
-                        ThumbnailView(object: object, style: .row)
+                        ThumbnailView(object: object, style: .row, loadClient: { modelRef.makeClient() })
                             .frame(width: 18, height: 18)
                             .clipShape(RoundedRectangle(cornerRadius: 3, style: .continuous))
                     } else {
@@ -77,16 +49,16 @@ struct BucketSearchView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
                 .onTapGesture(count: 2) {
-                    Task { await model.openSearchResult(object) }
+                    Task { await modelRef.openSearchResult(object) }
                 }
             }
             TableColumn("位置") { object in
-                Text(location(of: object))
+                Text(location(modelRef, of: object))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
             TableColumn("大小") { object in
-                Text(ByteCountFormatter.string(fromByteCount: object.size, countStyle: .file))
+                Text(Formatters.bytes(object.size))
                     .foregroundStyle(.secondary)
                     .monospacedDigit()
             }
@@ -97,24 +69,36 @@ struct BucketSearchView: View {
             }
             .width(150)
         } rows: {
-            ForEach(model.searchController.results) { object in
+            ForEach(modelRef.searchController.results) { object in
                 TableRow(object)
                     .contextMenu {
-                        Button("快速查看") { Task { await model.quickLook(object) } }
-                        Button("显示所在文件夹") { Task { await model.openSearchResult(object) } }
+                        Button("快速查看") { Task { await modelRef.quickLook(object) } }
+                        Button("显示所在文件夹") { Task { await modelRef.openSearchResult(object) } }
                     }
             }
         }
     }
 
-    private var filterMenu: some View {
+    private func location(_ modelRef: AppModel, of object: OSSObject) -> String {
+        let prefix = PathTemplate.parentPrefix(object.key)
+        return prefix.isEmpty ? (modelRef.selectedBucketName ?? "/") : prefix
+    }
+}
+
+struct BucketSearchFilterMenu: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        // Menu content can be rendered in a separate hosting context; use the
+        // resolved reference instead of the environment.
+        let modelRef = model
         Menu {
             Section("类型") {
                 ForEach(BucketSearchKind.allCases) { kind in
                     Button {
-                        model.searchFilter.kind = kind
+                        modelRef.searchFilter.kind = kind
                     } label: {
-                        if model.searchFilter.kind == kind {
+                        if modelRef.searchFilter.kind == kind {
                             Label(kind.title, systemImage: "checkmark")
                         } else {
                             Text(kind.title)
@@ -170,18 +154,5 @@ struct BucketSearchView: View {
                 Text(title)
             }
         }
-    }
-
-    private var statusText: String {
-        let progress = model.searchController.progress
-        if model.searchController.snapshot?.isIncomplete == true {
-            return "找到 \(progress.matched) 项（结果可能不完整）"
-        }
-        return "找到 \(progress.matched) 项"
-    }
-
-    private func location(of object: OSSObject) -> String {
-        let prefix = PathTemplate.parentPrefix(object.key)
-        return prefix.isEmpty ? (model.selectedBucketName ?? "/") : prefix
     }
 }

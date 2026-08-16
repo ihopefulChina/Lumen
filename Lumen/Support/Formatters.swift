@@ -3,9 +3,12 @@ import UniformTypeIdentifiers
 
 enum Formatters {
     static func bytes(_ value: Int64) -> String {
+        if value == 0 { return "0 KB" }
         let formatter = ByteCountFormatter()
         formatter.countStyle = .file
-        formatter.allowedUnits = [.useKB, .useMB, .useGB]
+        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
+        formatter.includesUnit = true
+        formatter.isAdaptive = true
         return formatter.string(fromByteCount: value)
     }
 
@@ -19,8 +22,6 @@ enum Formatters {
 }
 
 enum ImageKind {
-    /// Formats OSS will store, and that we treat as 素材图片.
-    /// IMG 能出缩略图的见 `imgProcessable`.
     static let imageExtensions: Set<String> = [
         "jpg", "jpeg", "jpe", "jfif", "pjpeg", "pjp",
         "png", "apng",
@@ -62,15 +63,15 @@ enum ImageKind {
         case "png", "apng": "image/png"
         case "gif": "image/gif"
         case "webp": "image/webp"
-        case "heic": "image/heic"
+        case "heic", "heics": "image/heic"
         case "heif": "image/heif"
         case "tif", "tiff": "image/tiff"
-        case "bmp": "image/bmp"
+        case "bmp", "dib": "image/bmp"
         case "svg", "svgz": "image/svg+xml"
         case "avif": "image/avif"
         case "jxl": "image/jxl"
-        case "ico": "image/x-icon"
-        case "jp2": "image/jp2"
+        case "ico", "cur": "image/x-icon"
+        case "jp2", "j2k", "jpf", "jpx": "image/jp2"
         case "json": "application/json"
         case "txt", "text": "text/plain"
         case "pdf": "application/pdf"
@@ -126,5 +127,9 @@ enum ImageKind {
         if let svg = UTType("public.svg-image") { types.append(svg) }
         if let gif = UTType("com.compuserve.gif") { types.append(gif) }
         return types
+    }
+
+    static func pickerTypes(imagesOnly: Bool) -> [UTType] {
+        imagesOnly ? importTypes : [.item, .folder]
     }
 }

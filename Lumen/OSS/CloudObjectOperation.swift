@@ -1,3 +1,4 @@
+import AppKit
 import CoreTransferable
 import Foundation
 import UniformTypeIdentifiers
@@ -21,6 +22,61 @@ struct CloudDragPayload: Codable, Hashable, Transferable, Sendable {
 
     static var transferRepresentation: some TransferRepresentation {
         CodableRepresentation(contentType: .lumenCloudItems)
+    }
+
+    var itemCount: Int {
+        objectKeys.count + folderPrefixes.count
+    }
+
+    var isEmpty: Bool {
+        objectKeys.isEmpty && folderPrefixes.isEmpty
+    }
+}
+
+struct CloudClipboardItem: Codable, Equatable, Sendable {
+    var payload: CloudDragPayload
+    var mode: CloudOperationMode
+}
+
+enum CloudClipboard {
+    static var pasteboardType: NSPasteboard.PasteboardType {
+        NSPasteboard.PasteboardType(UTType.lumenCloudItems.identifier)
+    }
+
+    static func write(_ item: CloudClipboardItem, to pasteboard: NSPasteboard = .general) {
+        guard !item.payload.isEmpty, let data = try? JSONEncoder().encode(item) else { return }
+        let pasteboardItem = NSPasteboardItem()
+        pasteboardItem.setData(data, forType: pasteboardType)
+        pasteboard.clearContents()
+        pasteboard.writeObjects([pasteboardItem])
+    }
+
+    static func write(
+        _ payload: CloudDragPayload,
+        mode: CloudOperationMode = .copy,
+        to pasteboard: NSPasteboard = .general
+    ) {
+        write(CloudClipboardItem(payload: payload, mode: mode), to: pasteboard)
+    }
+
+    static func read(from pasteboard: NSPasteboard = .general) -> CloudClipboardItem? {
+        guard let data = pasteboard.data(forType: pasteboardType) else { return nil }
+        if let item = try? JSONDecoder().decode(CloudClipboardItem.self, from: data),
+           !item.payload.isEmpty
+        {
+            return item
+        }
+        if let payload = try? JSONDecoder().decode(CloudDragPayload.self, from: data),
+           !payload.isEmpty
+        {
+            return CloudClipboardItem(payload: payload, mode: .copy)
+        }
+        return nil
+    }
+
+    static func clear(from pasteboard: NSPasteboard = .general) {
+        guard read(from: pasteboard) != nil else { return }
+        pasteboard.clearContents()
     }
 }
 
@@ -91,6 +147,38 @@ enum CloudObjectOperation {
                 destinationKey: destination + relative
             )
         }
+    }
+
+    static func staysInPlace(
+        objectKeys: [String],
+        folderPrefixes: [String],
+        destinationPrefix: String
+    ) -> Bool {
+        let objectsStay = objectKeys.allSatisfy { key in
+            PathTemplate.join(destinationPrefix, key: PathTemplate.lastComponent(key)) == key
+        }
+        let foldersStay = folderPrefixes.allSatisfy { prefix in
+            PathTemplate.join(destinationPrefix, key: PathTemplate.lastComponent(prefix)) + "/" == prefix
+        }
+        return (!objectKeys.isEmpty || !folderPrefixes.isEmpty) && objectsStay && foldersStay
+    }
+
+    static func copyDestination(
+        source: String,
+        destinationPrefix: String,
+        isFolder: Bool,
+        reserved: Set<String>
+    ) -> String {
+        let leaf = PathTemplate.lastComponent(source)
+        var destination = PathTemplate.join(destinationPrefix, key: leaf)
+        if isFolder { destination += "/" }
+        if destination == source || reserved.contains(destination) {
+            return TransferConflictPlanner.availableKey(
+                for: destination,
+                existing: reserved.union([source])
+            )
+        }
+        return destination
     }
 
     static func validate(_ mappings: [CloudObjectMapping]) throws {

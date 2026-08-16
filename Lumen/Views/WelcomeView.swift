@@ -24,6 +24,8 @@ struct WelcomeView: View {
                 model.editingAccount = nil
                 model.showAccountSheet = true
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .keyboardShortcut(.defaultAction)
             .padding(.top, 8)
         }

@@ -10,6 +10,39 @@ struct BrowserModelTests {
         #expect(model.orderedVisibleKeys == ["folder/", "a.txt", "b.txt", "c.txt"])
     }
 
+    @Test func contextMenuSelectsAnUnselectedItem() {
+        let model = Self.model()
+        model.select(key: "a.txt", modifiers: [])
+
+        model.selectForContextMenu(key: "folder/")
+
+        #expect(model.selectedKeys == ["folder/"])
+        #expect(model.focusedKey == "folder/")
+        #expect(model.selectionAnchorKey == "folder/")
+    }
+
+    @Test func contextMenuKeepsAMultipleSelectionWhenTheClickedItemIsAlreadySelected() {
+        let model = Self.model()
+        model.replaceSelection(["a.txt", "c.txt"])
+        let epoch = model.selectionEpoch
+
+        model.selectForContextMenu(key: "c.txt")
+
+        #expect(model.selectedKeys == ["a.txt", "c.txt"])
+        #expect(model.focusedKey == "c.txt")
+        #expect(model.selectionEpoch > epoch)
+    }
+
+    @Test func contextMenuIgnoresKeysThatAreNotVisible() {
+        let model = Self.model()
+        model.select(key: "a.txt", modifiers: [])
+
+        model.selectForContextMenu(key: "missing.txt")
+
+        #expect(model.selectedKeys == ["a.txt"])
+        #expect(model.focusedKey == "a.txt")
+    }
+
     @Test func commandSelectionTogglesWithoutLosingOtherItems() {
         let model = Self.model()
 
@@ -517,6 +550,7 @@ struct BrowserModelTests {
             .response(status: 204, data: Data()),
             .response(status: 200, data: Self.listingXML(key: "new.txt")),
             .response(status: 404, data: Data()),
+            .response(status: 404, data: Data()),
             .response(status: 200, data: Data()),
             .response(status: 200, data: Self.listingXML(key: "copies/new.txt"))
         ])
@@ -535,7 +569,7 @@ struct BrowserModelTests {
 
         #expect(fixture.model.lastCloudUndoOperation == renameUndo)
         #expect(fixture.model.banner?.action == nil)
-        #expect(await transport.methods == ["PUT", "DELETE", "GET", "HEAD", "PUT", "GET"])
+        #expect(await transport.methods == ["PUT", "DELETE", "GET", "HEAD", "HEAD", "PUT", "GET"])
     }
 
     @Test func successfulUndoMovesTheObjectBackAndClearsTheRecord() async {
@@ -638,6 +672,108 @@ struct BrowserModelTests {
         #expect(fixture.model.banner?.action == .undoCloudOperation)
         #expect(fixture.model.banner?.text.contains("已删除 1 个对象") == true)
         #expect(await transport.methods == ["DELETE", "DELETE", "GET"])
+    }
+
+    @Test func failedDeleteKeepsThePreviousUndoRecord() async {
+        let transport = RenameResultTransport(steps: [
+            .response(status: 200, data: Data()),
+            .response(status: 204, data: Data()),
+            .response(status: 200, data: Self.listingXML(key: "new.txt")),
+            .response(status: 403, data: Data(
+                "<Error><Code>AccessDenied</Code><Message>Denied</Message><RequestId>delete</RequestId></Error>".utf8
+            ))
+        ])
+        let fixture = Self.renameModel(transport: transport)
+        #expect(await fixture.model.rename(fixture.object, to: "new.txt"))
+        let recorded = fixture.model.lastCloudUndoOperation
+        fixture.model.browser.replaceSelection(["new.txt"])
+
+        await fixture.model.deleteSelection()
+
+        #expect(fixture.model.lastCloudUndoOperation == recorded)
+        #expect(fixture.model.lastDeleteUndoOperation == nil)
+        #expect(fixture.model.canUndoCloudOperation)
+        #expect(fixture.model.banner?.isError == true)
+        #expect(await transport.methods == ["PUT", "DELETE", "GET", "DELETE"])
+    }
+
+    @Test func switchingAccountDuringOpenFavoriteDoesNotRemoveTheFavorite() async throws {
+        let accountA = OSSAccount(
+            id: UUID(),
+            name: "A",
+            accessKeyId: "a",
+            regionID: "cn-hangzhou",
+            endpointOverride: "",
+            cdnDomain: "",
+            defaultACL: .default,
+            prefixTemplate: "",
+            useTransferAccelerate: false,
+            createdAt: .now
+        )
+        let accountB = OSSAccount(
+            id: UUID(),
+            name: "B",
+            accessKeyId: "b",
+            regionID: "cn-hangzhou",
+            endpointOverride: "",
+            cdnDomain: "",
+            defaultACL: .default,
+            prefixTemplate: "",
+            useTransferAccelerate: false,
+            createdAt: .now
+        )
+        let transport = DelayedBrowserTransport()
+        let services = AppServices(
+            accounts: [accountA, accountB],
+            favorites: FavoriteStore(defaults: Self.defaults())
+        )
+        let model = AppModel(kind: .settings, services: services) { _, selectedBucket in
+            OSSClient(
+                credentials: OSSCredentials(
+                    accessKeyId: "test",
+                    accessKeySecret: "secret",
+                    securityToken: nil
+                ),
+                region: "cn-hangzhou",
+                endpointHost: "oss-cn-hangzhou.aliyuncs.com",
+                bucket: selectedBucket?.name,
+                transport: transport
+            )
+        }
+        model.selectedAccountID = accountA.id
+        model.buckets = []
+        let favorite = FavoriteLocation(
+            accountID: accountA.id,
+            bucketName: "photos",
+            prefix: "art/",
+            name: "艺术"
+        )
+        model.favorites.add(favorite)
+
+        model.openFavorite(favorite)
+        try await Self.waitForRequests(1, transport: transport)
+        model.selectedAccountID = accountB.id
+        model.buckets = [
+            OSSBucket(
+                name: "other",
+                regionID: "cn-hangzhou",
+                location: "oss-cn-hangzhou",
+                extranetEndpoint: "oss-cn-hangzhou.aliyuncs.com",
+                createdAt: nil
+            )
+        ]
+        await transport.resume(
+            index: 0,
+            data: Data("""
+            <ListAllMyBucketsResult><Buckets>
+              <Bucket><Name>photos</Name><Location>oss-cn-hangzhou</Location></Bucket>
+            </Buckets></ListAllMyBucketsResult>
+            """.utf8)
+        )
+        try await Task.sleep(for: .milliseconds(40))
+
+        #expect(model.favorites.items.contains(where: { $0.id == favorite.id }))
+        #expect(model.selectedAccountID == accountB.id)
     }
 
     @Test func undoConflictKeepsTheRecordAvailableForRetry() async {

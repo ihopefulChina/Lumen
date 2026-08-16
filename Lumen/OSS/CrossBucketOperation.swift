@@ -102,4 +102,15 @@ enum CrossBucketOperation {
             knownBytes: bytes
         )
     }
+
+    static func emptyResultMessage(hadMappings: Bool) -> String {
+        hadMappings ? "所有同名项目都已跳过" : "源文件夹为空，没有可复制的对象"
+    }
+
+    static func rollbackDestinations(
+        copied: [CrossBucketMapping],
+        removedSources: Set<String>
+    ) -> [CrossBucketMapping] {
+        copied.reversed().filter { !removedSources.contains($0.sourceKey) }
+    }
 }

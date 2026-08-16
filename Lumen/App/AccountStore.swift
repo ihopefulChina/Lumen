@@ -44,7 +44,9 @@ enum AccountStore {
     }
 
     private static var directory: URL {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.homeDirectoryForCurrentUser
+                .appending(path: "Library/Application Support", directoryHint: .isDirectory)
         return base.appending(path: "studio.lumen.oss", directoryHint: .isDirectory)
     }
 

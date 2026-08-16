@@ -14,7 +14,24 @@ enum TransferConflictPlanner {
         policy: TransferConflictPolicy
     ) -> [TransferConflictResolution] {
         var reserved = existing
+        var seenBatch = Set<String>()
         return keys.map { key in
+            if seenBatch.insert(key).inserted == false {
+                // The same key appears twice in one batch. Under .replace the
+                // first occurrence would be overwritten by the second, and
+                // under .keepBoth the user wants both files, so disambiguate;
+                // .ask keeps prompting and .skip keeps skipping.
+                switch policy {
+                case .replace, .keepBoth:
+                    let renamed = availableKey(for: key, existing: reserved)
+                    reserved.insert(renamed)
+                    return .renamed(renamed)
+                case .ask:
+                    return .ask
+                case .skip:
+                    return .skip
+                }
+            }
             guard reserved.contains(key) else {
                 reserved.insert(key)
                 return .useOriginal

@@ -78,7 +78,10 @@ enum OSSSigner {
             headers["x-oss-security-token"] = token
         }
 
-        let lowered = Dictionary(uniqueKeysWithValues: headers.map { ($0.key.lowercased(), $0.value.trimmingCharacters(in: .whitespacesAndNewlines)) })
+        var lowered: [String: String] = [:]
+        for (key, value) in headers {
+            lowered[key.lowercased()] = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
         let canonicalRequest = canonicalRequest(
             method: method.uppercased(),
             resourcePath: resourcePath(bucket: bucket, key: key),
@@ -137,6 +140,15 @@ enum OSSSigner {
         return query
     }
 
+    /// OSS V4 canonical request, per the official spec:
+    /// `Verb\nCanonicalURI\nCanonicalQueryString\nCanonicalHeaders\nAdditionalHeaders\nHashedPayload`.
+    ///
+    /// Each canonical header line already ends with "\n"; the `+ "\n"` after
+    /// them is the required blank separator, and the `+ "" + "\n"` is the
+    /// (empty) AdditionalHeaders line — this app signs only Content-Type,
+    /// Content-MD5 and x-oss-* headers, which are never "additional". Both
+    /// lines are mandatory: removing the empty one would invalidate every
+    /// signature. Byte-identical to SignerV4.cc / the Python SDK v2.
     static func canonicalRequest(
         method: String,
         resourcePath: String,

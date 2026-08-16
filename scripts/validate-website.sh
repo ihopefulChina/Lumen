@@ -8,7 +8,7 @@ readme="$repo_root/README.md"
 index="$site_root/index.html"
 privacy="$site_root/privacy.html"
 support="$site_root/support.html"
-version="0.0.9"
+version="1.0.0"
 download_url="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-$version.dmg"
 
 required_files=(
@@ -23,7 +23,9 @@ required_files=(
   "$site_root/assets/lumen-icon.png"
   "$site_root/assets/lumen-favicon.png"
   "$site_root/assets/browser.png"
+  "$site_root/assets/browser-dark.png"
   "$site_root/assets/account.png"
+  "$site_root/assets/account-dark.png"
 )
 
 for file in "${required_files[@]}"; do
@@ -47,8 +49,8 @@ required_html=(
   'id="start"'
   'id="faq"'
   '<details>'
-  'alt="Lumen 的对象浏览窗口"'
-  'alt="在 Lumen 中添加 OSS 账号"'
+  'alt="在 Lumen 中浏览阿里云 OSS"'
+  'alt="在 Lumen 中添加阿里云 OSS 账号"'
   "$download_url"
   'href="privacy.html"'
   'href="support.html"'

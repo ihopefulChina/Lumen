@@ -28,4 +28,38 @@ struct CrossBucketOperationTests {
         #expect(plan.knownBytes == 15)
         #expect(plan.method == .relay)
     }
+
+    @Test func placeholderOnlyFolderProducesNoMappings() throws {
+        let plan = try CrossBucketOperation.plan(
+            sourceAccountID: UUID(),
+            destinationAccountID: UUID(),
+            sourceRegion: "a",
+            destinationRegion: "b",
+            destinationPrefix: "archive/",
+            objectKeys: [],
+            folders: ["Empty/": [
+                OSSObject(key: "Empty/", size: 0, etag: "", lastModified: nil, storageClass: "Standard")
+            ]]
+        )
+
+        #expect(plan.mappings.isEmpty)
+        #expect(CrossBucketOperation.emptyResultMessage(hadMappings: false) == "源文件夹为空，没有可复制的对象")
+        #expect(CrossBucketOperation.emptyResultMessage(hadMappings: true) == "所有同名项目都已跳过")
+    }
+
+    @Test func moveRollbackKeepsDestinationsWhoseSourcesWereAlreadyDeleted() {
+        let copied = [
+            CrossBucketMapping(sourceKey: "a.txt", destinationKey: "dest/a.txt", expectedSize: 1),
+            CrossBucketMapping(sourceKey: "b.txt", destinationKey: "dest/b.txt", expectedSize: 1)
+        ]
+
+        #expect(
+            CrossBucketOperation.rollbackDestinations(copied: copied, removedSources: []).map(\.destinationKey)
+                == ["dest/b.txt", "dest/a.txt"]
+        )
+        #expect(
+            CrossBucketOperation.rollbackDestinations(copied: copied, removedSources: ["a.txt"]).map(\.destinationKey)
+                == ["dest/b.txt"]
+        )
+    }
 }

@@ -68,6 +68,8 @@ struct PersistedUploadRetry: Codable, Equatable, Sendable {
     var imagesOnly: Bool
     var convertHEIC: Bool
     var playSound: Bool
+    var allowOverwrite: Bool? = nil
+    var preparedBookmark: Data? = nil
 }
 
 struct PersistedDownloadRetry: Codable, Equatable, Sendable {
@@ -76,6 +78,7 @@ struct PersistedDownloadRetry: Codable, Equatable, Sendable {
     var rootBookmark: Data
     var object: OSSObject
     var relativeDestination: String
+    var allowOverwrite: Bool? = nil
 }
 
 protocol TransferBookmarking: Sendable {
