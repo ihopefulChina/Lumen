@@ -128,6 +128,16 @@ enum InstallCommand {
             binaryPath = resolved
         }
 
+        // How clients should invoke us. When launched through the npm
+        // launcher, LUMEN_MCP_INSTALLED_VIA tells us which stable command
+        // to register instead of an ephemeral npm-cache path.
+        let launch: LaunchMode
+        if let via = ProcessInfo.processInfo.environment["LUMEN_MCP_INSTALLED_VIA"], !uninstalling {
+            launch = via == "npx" ? .npx : .globalCommand
+        } else {
+            launch = .directBinary(binaryPath)
+        }
+
         guard !targets.isEmpty || !requested.isEmpty || isClaudeCodeInstalled() else {
             print("未检测到已安装的 MCP 客户端（Claude Desktop / Cursor / Trae / Windsurf / Codex）。")
             print("可运行 `lumen-mcp install --client <id>` 强制写入指定客户端的配置文件。")
@@ -142,7 +152,7 @@ enum InstallCommand {
             if isClaudeCodeInstalled() {
                 let ok = uninstalling
                     ? runCLIClaudeCode(["mcp", "remove", serverKey, "-s", "user"])
-                    : runCLIClaudeCode(["mcp", "add", "--scope", "user", serverKey, "--", binaryPath])
+                    : runCLIClaudeCode(["mcp", "add", "--scope", "user", serverKey, "--"] + launch.commandWords)
                 if ok {
                     print("✓ Claude Code 已\(uninstalling ? "移除" : "注册")（scope: user）")
                 } else {
@@ -158,12 +168,12 @@ enum InstallCommand {
             guard let url = client.configURL else { continue }
             do {
                 if dryRun {
-                    let preview = try buildNewContent(for: client, url: url, binaryPath: binaryPath, uninstalling: uninstalling)
+                    let preview = try buildNewContent(for: client, url: url, launch: launch, uninstalling: uninstalling)
                     print("[dry-run] \(client.displayName) → \(url.path)")
                     print(preview.isEmpty ? "（文件不存在，将新建）" : preview)
                     continue
                 }
-                try apply(client, url: url, binaryPath: binaryPath, uninstalling: uninstalling)
+                try apply(client, url: url, launch: launch, uninstalling: uninstalling)
                 print("✓ \(client.displayName) 已\(uninstalling ? "移除" : "注册")：\(url.path)")
             } catch {
                 fail("\(client.displayName) \(uninstalling ? "移除" : "注册")失败：\(error.localizedDescription)")
@@ -260,8 +270,8 @@ enum InstallCommand {
 
     // MARK: - Config writing
 
-    private static func apply(_ client: Client, url: URL, binaryPath: String, uninstalling: Bool) throws {
-        let newContent = try buildNewContent(for: client, url: url, binaryPath: binaryPath, uninstalling: uninstalling)
+    private static func apply(_ client: Client, url: URL, launch: LaunchMode, uninstalling: Bool) throws {
+        let newContent = try buildNewContent(for: client, url: url, launch: launch, uninstalling: uninstalling)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Keep a .bak copy of the previous version before touching the file.
         // Write via Data (atomic replace) instead of remove+copy so an
@@ -273,19 +283,19 @@ enum InstallCommand {
         try newContent.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    private static func buildNewContent(for client: Client, url: URL, binaryPath: String, uninstalling: Bool) throws -> String {
+    private static func buildNewContent(for client: Client, url: URL, launch: LaunchMode, uninstalling: Bool) throws -> String {
         switch client.format {
         case "json":
-            return try mergeJSON(url: url, binaryPath: binaryPath, uninstalling: uninstalling)
+            return try mergeJSON(url: url, launch: launch, uninstalling: uninstalling)
         case "toml":
             let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-            return upsertTOMLSection(existing, section: "mcp_servers.\(serverKey)", body: ["command = \(tomlString(binaryPath))"], removing: uninstalling)
+            return upsertTOMLSection(existing, section: "mcp_servers.\(serverKey)", body: launch.tomlLines, removing: uninstalling)
         default:
             throw InstallError.unsupportedFormat(client.format)
         }
     }
 
-    private static func mergeJSON(url: URL, binaryPath: String, uninstalling: Bool) throws -> String {
+    private static func mergeJSON(url: URL, launch: LaunchMode, uninstalling: Bool) throws -> String {
         var root: [String: Any] = [:]
         if let data = try? Data(contentsOf: url), !data.isEmpty {
             guard let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
@@ -297,7 +307,7 @@ enum InstallCommand {
         if uninstalling {
             servers.removeValue(forKey: serverKey)
         } else {
-            servers[serverKey] = ["command": binaryPath]
+            servers[serverKey] = launch.jsonEntry
         }
         if servers.isEmpty {
             root.removeValue(forKey: "mcpServers")
@@ -345,7 +355,7 @@ enum InstallCommand {
         return lines.joined(separator: "\n") + "\n"
     }
 
-    private static func tomlString(_ value: String) -> String {
+    fileprivate static func tomlString(_ value: String) -> String {
         let escaped = value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
@@ -360,6 +370,46 @@ enum InstallCommand {
         3. 若尚未配置 OSS 凭证，运行：lumen-mcp auth
         """)
         _ = binaryPath
+    }
+}
+
+/// 客户端配置里应写入的调用方式。
+enum LaunchMode {
+    /// 绝对路径直跑（开发者：swift build 产物）。
+    case directBinary(String)
+    /// PATH 上的 `lumen-mcp`（npm 全局安装）。
+    case globalCommand
+    /// `npx -y lumen-mcp`（npx 缓存调用，路径不稳定故用命令形式）。
+    case npx
+
+    /// 命令行词组，如 ["npx", "-y", "lumen-mcp"]。
+    var commandWords: [String] {
+        switch self {
+        case .directBinary(let path): return [path]
+        case .globalCommand: return ["lumen-mcp"]
+        case .npx: return ["npx", "-y", "lumen-mcp"]
+        }
+    }
+
+    /// JSON 客户端的 mcpServers 条目。
+    var jsonEntry: [String: Any] {
+        var entry: [String: Any] = ["command": commandWords[0]]
+        if commandWords.count > 1 {
+            entry["args"] = Array(commandWords.dropFirst())
+        }
+        return entry
+    }
+
+    /// Codex TOML 段内的属性行。
+    var tomlLines: [String] {
+        let quoted = commandWords.map { InstallCommand.tomlString($0) }
+        if quoted.count == 1 {
+            return ["command = \(quoted[0])"]
+        }
+        return [
+            "command = \(quoted[0])",
+            "args = [\(quoted.dropFirst().joined(separator: ", "))]",
+        ]
     }
 }
 

@@ -1,0 +1,35 @@
+{
+  "name": "lumen-mcp",
+  "version": "1.0.0",
+  "description": "Lumen 的 MCP 服务器 — 让 Codex、Claude、Cursor、Trae 等 AI 客户端直接操作阿里云 OSS（浏览、上传、下载、临时链接）",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ihopefulChina/Lumen.git",
+    "directory": "Tools/lumen-mcp"
+  },
+  "homepage": "https://ihopefulchina.github.io/Lumen/mcp.html",
+  "keywords": [
+    "mcp",
+    "oss",
+    "aliyun",
+    "alibaba-cloud",
+    "lumen",
+    "claude",
+    "model-context-protocol"
+  ],
+  "bin": {
+    "lumen-mcp": "bin/lumen-mcp.js"
+  },
+  "files": [
+    "bin/lumen-mcp.js",
+    "README.md"
+  ],
+  "optionalDependencies": {
+    "lumen-mcp-darwin-arm64": "1.0.0",
+    "lumen-mcp-darwin-x64": "1.0.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

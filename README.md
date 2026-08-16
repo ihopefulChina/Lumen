@@ -122,16 +122,14 @@ xcodebuild -project Lumen.xcodeproj \
 
 > 把桌面上的 hero.png 上传到 lumen-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接。
 
-服务器提供 5 个工具和 2 个提示词（OSS 专家模式、批量上传工作流），握手时自带 Agent 使用说明。凭证保存在 macOS 钥匙串，与 Lumen App 账号相互独立。快速开始：
+服务器提供 5 个工具和 2 个提示词（OSS 专家模式、批量上传工作流），握手时自带 Agent 使用说明。凭证保存在 macOS 钥匙串，与 Lumen App 账号相互独立。快速开始（需 Node ≥ 18）：
 
 ```bash
-cd Tools/lumen-mcp
-swift build -c release
-.build/release/lumen-mcp auth     # 配置 OSS 凭证（钥匙串）
-.build/release/lumen-mcp install  # 一键注册到本机已安装的 AI 客户端
+npx lumen-mcp auth     # 配置 OSS 凭证（钥匙串）
+npx lumen-mcp install  # 一键注册到本机已安装的 AI 客户端
 ```
 
-支持 Claude Desktop、Claude Code、Cursor、Trae、Windsurf、Codex，详见 [docs/mcp.md](docs/mcp.md) 与[网站上的 AI · MCP 页面](https://ihopefulchina.github.io/Lumen/mcp.html)。
+已发布到 npm（`lumen-mcp`，内置 macOS arm64/x64 预编译二进制）；也可从源码构建，详见 [docs/mcp.md](docs/mcp.md) 与[网站上的 AI · MCP 页面](https://ihopefulchina.github.io/Lumen/mcp.html)。
 
 ## 参与与支持
 

@@ -1,0 +1,3 @@
+# 平台二进制在发布时由 publish.sh 构建，不入库
+lumen-mcp-darwin-arm64/bin/
+lumen-mcp-darwin-x64/bin/
