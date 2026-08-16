@@ -8,7 +8,7 @@ readme="$repo_root/README.md"
 index="$site_root/index.html"
 privacy="$site_root/privacy.html"
 support="$site_root/support.html"
-version="1.0.0"
+version="1.0.1"
 download_url="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-$version.dmg"
 
 required_files=(
@@ -20,6 +20,7 @@ required_files=(
   "$site_root/sitemap.xml"
   "$site_root/robots.txt"
   "$site_root/.nojekyll"
+  "$site_root/appcast.xml"
   "$site_root/assets/lumen-icon.png"
   "$site_root/assets/lumen-favicon.png"
   "$site_root/assets/browser.png"

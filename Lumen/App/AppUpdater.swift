@@ -39,7 +39,7 @@ private final class SparkleUpdaterDriver: AppUpdaterDriving {
 @Observable
 final class AppUpdater {
     static let feedURL = URL(
-        string: "https://github.com/ihopefulChina/Lumen/releases/latest/download/appcast.xml"
+        string: "https://ihopefulchina.github.io/Lumen/appcast.xml"
     )!
 
     private var storedDriver: (any AppUpdaterDriving)?

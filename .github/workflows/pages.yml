@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "website/**"
+      - "appcast.xml"
       - "scripts/validate-website.sh"
       - ".github/workflows/pages.yml"
   workflow_dispatch:
@@ -22,6 +23,9 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Sync appcast.xml to website
+        run: cp appcast.xml website/appcast.xml
 
       - name: Validate website
         run: ./scripts/validate-website.sh

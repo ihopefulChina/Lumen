@@ -1,0 +1,151 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>Lumen</title>
+        <item>
+            <title>1.0.0</title>
+            <pubDate>Sun, 16 Aug 2026 16:10:55 +0800</pubDate>
+            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v1.0.0</link>
+            <sparkle:version>11</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Lumen 1.0.0
+
+这是第一个正式版本。相比 0.0.9，这一版把浏览和整理的手感打磨了一遍，也修掉了一批会影响日常使用的稳定问题。
+
+## 浏览和选择
+
+- 网格和列表共用同一套点击逻辑：按下即选中，支持 Command 多选、Shift 连选，双击打开文件夹或快速查看文件，点空白处取消选择。
+- 列表模式下点名称列终于能选中了；双击任意一列都可以打开项目。
+- 修掉了列表模式里连续进入几层文件夹、再点后退时卡住或崩溃的问题（表格行更新时环境丢失导致的崩溃）。
+- 编辑文本时按 Command–V 现在会正常粘贴文本，不会误触发云端粘贴；对话框打开时也不再抢 Esc、回车、空格和方向键。
+
+## 传输
+
+- 失败的上传会中止未完成的 multipart 上传，失败的下载会清理临时文件，不再在 OSS 和本地留下残留。
+- 暂停最后一个任务不再误报「全部完成」；取消排在队列里的任务也会正确结束。
+- 分片检查点改为按节拍写入，大文件传输时不再频繁整本重写日志。
+- 传输记录损坏或重复时也能正常恢复，不会崩溃。
+- 一批文件里有重名时，「覆盖」策略会改名而不是互相覆盖。
+- 拖到访达的导出遵守下载限速；清理旧导出缓存时单个损坏目录不会阻断新导出。
+- 下载到外置磁盘不再因为跨卷移动失败；已经下载完但没来得及清检查点的任务，续传时直接视为完成。
+- multipart 续传在服务端 uploadId 过期时会自动重新开始，而不是报错。
+
+## 整理和删除
+
+- 重命名或移动在「复制成功、删源失败」时，会刷新列表并明确提示，不再假装操作完全失败。
+- 拖拽移动时，已经在目标位置的项目会被跳过，不再拖累整批操作。
+- 删除确认框里的数量与实际删除范围一致。
+- 跨账号整理时，源 Bucket 从来源账号解析，不会再误用目标账号的同名 Bucket。
+- 剪贴板里只有图片时也可以「粘贴上传」；临时文件写失败不再留下悬空文件。
+
+## 其它
+
+- 首次传输后系统一直无法快速退出的问题（sudden termination 引用计数泄漏）。
+- 对象属性保存一半失败时，界面会如实反映已经写进去的部分。
+- Bucket 搜索的「停止」会真正取消请求；「最近 N 天」筛选不再命中过期缓存。
+- 重命名文件夹 `a` 不再误改 `ab/` 下的常用位置；只选中一个文件夹时按空格等于双击打开。
+- 小于 1 KB 的文件不再显示成「0 KB」；补全 heics、dib、cur、j2k 等内容类型。
+- 上传路径模板的 `{name}` / `{ext}` 按文件名计算，文件夹上传时不再把子路径拼进模板。
+- 自定义 Endpoint（路径式）会把 Bucket 放进 URL 路径；处理后的图片下载不再误报 CRC 校验失败。
+- 响应头大小写冲突、重复键等边界情况不再导致崩溃。
+- 设置里的并发数、外观等修复：Release 构建不再要求开发者团队（默认 ad-hoc 签名，发版流程使用自己的签名覆盖）。
+
+## 系统要求
+
+- macOS 15 或更高版本
+- Apple Silicon Mac
+
+> 目前安装包使用 ad-hoc 签名（暂未配置开发者证书）。首次打开如果被 macOS 拦下，在访达中右键 Lumen 选择「打开」即可；以后不会再提示。
+
+完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
+]]></description>
+            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v1.0.0/Lumen-1.0.0.dmg" length="4579627" type="application/octet-stream" sparkle:edSignature="9Xxtn89fdhtYWLNqc4dKChjBhvghKlJRhklS0918AEjrRDP/y5WQjlyvYOkJKDYdPwxVecw6Ri0dU2EWR3ZNAA=="/>
+        </item>
+        <item>
+            <title>0.0.9</title>
+            <pubDate>Sat, 15 Aug 2026 10:15:49 +0800</pubDate>
+            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.9</link>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>0.0.9</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Lumen 0.0.9
+
+这一版补齐了一套更完整的 Finder 工作流：从整个 Bucket 找到对象，可靠地传输和整理，再在需要时恢复历史内容。
+
+## 查找
+
+- 搜索可在「当前文件夹」与「当前 Bucket」之间切换。
+- Bucket 搜索支持类型、大小和修改时间筛选，显示分页扫描进度，也可以随时停止。
+- 侧边栏新增最近修改、大文件、已删除对象和失败传输。
+
+## 传输
+
+- 新增独立传输中心，可暂停、继续、重试、调整队列顺序，并显示速度和剩余时间。
+- multipart 上传与 Range 下载会保存检查点；暂停或重新打开 Lumen 后可继续。
+- 新增上传/下载独立并发数、方向限速、默认下载位置、冲突策略和完成通知。
+- 同名项目可选择询问、替换、跳过或按访达方式保留两者。
+
+## 恢复
+
+- 对象菜单新增版本历史，可将历史版本恢复为新的当前版本。
+- 「已删除」位置可以恢复精确的 delete marker。
+- 新增对象属性编辑，可修改 Web 属性、用户元数据和最多十个 OSS 标签。
+
+## 整理
+
+- OSS 文件或文件夹可以直接拖到访达；多选会保留在「Lumen 下载」目录中。
+- 复制后切换 Bucket 再粘贴，可安全地跨 Bucket 复制或移动。
+- 同账号同地域使用云端复制；跨地域或跨账号会在确认后经由这台 Mac 中转。
+- 跨 Bucket 移动只在全部复制成功后删除来源。
+
+## Mac 体验
+
+- 支持原生窗口标签页，`Command–N` 新建窗口，`Option–Command–L` 打开传输中心。
+- 更新了帮助、README、官网与完全虚拟的产品截图。
+
+## 系统要求
+
+- macOS 15 或更高版本
+- Apple Silicon Mac
+
+完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
+]]></description>
+            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.9/Lumen-0.0.9.dmg" length="4559737" type="application/octet-stream" sparkle:edSignature="/m7hQyIJy285lIbSvbveUmblth4Ihf3rNXS7hDt+xbBUSL9aGhlfWEKSl80jLXipuxCDT6VXezJCinGdfwsxDQ=="/>
+        </item>
+        <item>
+            <title>0.0.8</title>
+            <pubDate>Sat, 15 Aug 2026 08:48:30 +0800</pubDate>
+            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v0.0.8</link>
+            <sparkle:version>8</sparkle:version>
+            <sparkle:shortVersionString>0.0.8</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <description sparkle:format="markdown"><![CDATA[# Lumen 0.0.8
+
+这一版继续收紧 Lumen 的 macOS 交互：浏览窗口把空间还给内容，账号与设置也改成更接近系统应用的表达。
+
+## 新变化
+
+- 移除常驻右侧信息栏。工具栏的信息按钮或 `⌘I` 会按需打开当前文件夹、所选对象或多选项目的信息窗口。
+- 信息窗口仍可快速查看、下载、复制链接和删除；关闭后不会挤压浏览区域。
+- 添加与编辑账号改用原生 macOS 分组 Sheet，操作按钮、连接状态和钥匙串说明更清楚。
+- 新账号的对象权限默认改为「继承存储空间」，上传时沿用目标 Bucket 的 ACL；已有账号的设置不会被自动改写。
+- 修复「继承存储空间」被错误显示为公开权限警告的问题。只有明确选择公共读或公共读写时才会提示风险。
+- 设置扩展为「通用 / 传输 / 账号」三页，可选择默认网格或列表视图、清除已结束的传输记录，并验证账号连接。
+- 设置中的添加、编辑和删除账号入口现在会在当前设置窗口中正确显示和完成。
+- 自动更新继续支持在应用内安装；完成后 Lumen 会自动重新打开。
+
+## 系统要求
+
+- macOS 15 或更高版本
+- Apple 芯片 Mac
+
+完整使用说明与问题反馈入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
+]]></description>
+            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v0.0.8/Lumen-0.0.8.dmg" length="4068213" type="application/octet-stream" sparkle:edSignature="jcQ4VRhHc0yjeATbsZl2P8w6Sbn3hSOKtM5k+hfl+QVEzSD5HpLQVHzRBXaSjyO9ICkg28aqTFRzeTPFhZjhCQ=="/>
+        </item>
+    </channel>
+</rss>

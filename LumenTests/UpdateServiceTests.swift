@@ -7,7 +7,7 @@ struct UpdateServiceTests {
     @Test func updateFeedIsPinnedToTheLatestLumenReleaseAsset() {
         #expect(
             AppUpdater.feedURL.absoluteString
-                == "https://github.com/ihopefulChina/Lumen/releases/latest/download/appcast.xml"
+                == "https://ihopefulchina.github.io/Lumen/appcast.xml"
         )
     }
 
