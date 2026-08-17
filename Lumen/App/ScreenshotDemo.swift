@@ -129,8 +129,15 @@ enum ScreenshotDemo {
             guard let window = NSApp.windows.first(where: { $0.canBecomeKey }) else { return }
             applyAppearance()
             window.appearance = NSApp.appearance
-            window.setFrame(NSRect(origin: .zero, size: NSSize(width: 1240, height: 800)), display: true)
-            window.center()
+            let size = NSSize(width: 1240, height: 800)
+            let visible = (NSScreen.main ?? NSScreen.screens.first)?.visibleFrame ?? NSRect(origin: .zero, size: size)
+            window.setFrame(
+                NSRect(
+                    origin: CGPoint(x: visible.midX - size.width / 2, y: visible.midY - size.height / 2),
+                    size: size
+                ),
+                display: true
+            )
             window.makeKeyAndOrderFront(nil)
             NSApp.activate(ignoringOtherApps: true)
         }

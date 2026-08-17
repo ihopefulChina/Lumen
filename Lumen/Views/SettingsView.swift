@@ -71,7 +71,7 @@ struct SettingsView: View {
                             session.browser.imagesOnly = value
                         }
                     }
-                Text("开启后只显示和选取素材。关闭后可浏览并上传任意文件。")
+                Text("开启后列表只显示素材文件（图片、视频、音频、设计稿、文档、压缩包等）。上传始终支持任意类型文件。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

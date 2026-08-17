@@ -1,6 +1,7 @@
 import AppKit
 import QuickLook
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
@@ -235,6 +236,9 @@ private struct RootPresentation: ViewModifier {
     @Binding var showFolderPrompt: Bool
     @Binding var folderName: String
 
+    /// 上传不限制文件类型（OSS 支持任意文件）。
+    private static let uploadPickerTypes: [UTType] = [.item, .folder]
+
     func body(content: Content) -> some View {
         @Bindable var model = model
         content
@@ -259,7 +263,7 @@ private struct RootPresentation: ViewModifier {
             }
             .fileImporter(
                 isPresented: $showFileImporter,
-                allowedContentTypes: ImageKind.pickerTypes(imagesOnly: model.settings.imagesOnly),
+                allowedContentTypes: Self.uploadPickerTypes,
                 allowsMultipleSelection: true
             ) { result in
                 if case .success(let urls) = result {
@@ -371,7 +375,7 @@ private struct WorkspaceView: View {
                 } label: {
                     Label("上传", systemImage: "square.and.arrow.up")
                 }
-                .help(model.settings.imagesOnly ? "上传图片到当前文件夹" : "上传到当前文件夹")
+                .help("上传任意类型文件到当前文件夹")
 
                 Button {
                     showFolderPrompt = true

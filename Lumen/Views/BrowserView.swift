@@ -16,97 +16,102 @@ struct BrowserView: View {
         // `@Environment(AppModel.self)` can trap ("No Observable object of
         // type AppModel found"), so they must use this captured reference.
         let modelRef = model
-        content
-            .navigationTitle(title)
-            .navigationSubtitle(subtitle)
-            .searchable(text: $model.browser.searchText, placement: .toolbar, prompt: searchPrompt)
-            .toolbar {
-                ToolbarItemGroup(placement: .navigation) {
-                    Button {
-                        modelRef.goBack()
-                    } label: {
-                        Label("后退", systemImage: "chevron.left")
-                    }
-                    .disabled(!modelRef.browser.canGoBack)
-                    .help("后退")
+        // The scope bar and path bar are stacked in a VStack instead of
+        // safeAreaInset: insets placed on the detail column stopped rendering
+        // with the SwiftUI runtime shipped in Xcode 26 on macOS 15.
+        VStack(spacing: 0) {
+            if showsSearchChrome {
+                searchScopeBar
+            }
+            content
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            if modelRef.selectedBucket != nil {
+                PathBar(showFileImporter: $showFileImporter)
+            }
+            Text("FOOTER-TEST-123")
+                .foregroundStyle(.red)
+                .frame(height: 18)
+        }
+        .navigationTitle(title)
+        .navigationSubtitle(subtitle)
+        .searchable(text: $model.browser.searchText, placement: .toolbar, prompt: searchPrompt)
+        .toolbar {
+            ToolbarItemGroup(placement: .navigation) {
+                Button {
+                    modelRef.goBack()
+                } label: {
+                    Label("后退", systemImage: "chevron.left")
+                }
+                .disabled(!modelRef.browser.canGoBack)
+                .help("后退")
 
-                    Button {
-                        modelRef.goForward()
-                    } label: {
-                        Label("前进", systemImage: "chevron.right")
-                    }
-                    .disabled(!modelRef.browser.canGoForward)
-                    .help("前进")
+                Button {
+                    modelRef.goForward()
+                } label: {
+                    Label("前进", systemImage: "chevron.right")
                 }
+                .disabled(!modelRef.browser.canGoForward)
+                .help("前进")
             }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if showsSearchChrome {
-                    searchScopeBar
+        }
+        .onChange(of: model.searchScope) { _, scope in
+            if scope == .folder {
+                modelRef.searchFilter = .all
+            }
+        }
+        .overlay {
+            if let prefix = modelRef.browser.activeDropPrefix, prefix == modelRef.browser.prefix {
+                dropScrim(title: "放到当前文件夹")
+            }
+        }
+        .dropDestination(for: URL.self) { urls, _ in
+            modelRef.upload(urls: urls, to: modelRef.browser.prefix, applyTemplate: modelRef.browser.prefix.isEmpty)
+            return true
+        } isTargeted: { targeted in
+            modelRef.browser.setDropTarget(modelRef.browser.prefix, active: targeted)
+        }
+        .dropDestination(for: CloudDragPayload.self) { payloads, _ in
+            guard let payload = payloads.first else { return false }
+            modelRef.moveCloudItems(payload, to: modelRef.browser.prefix)
+            return true
+        } isTargeted: { targeted in
+            modelRef.browser.setDropTarget(modelRef.browser.prefix, active: targeted)
+        }
+        .onPasteCommand(of: [UTType.lumenCloudItems, .image, .fileURL, .gif, .webP, .png, .jpeg]) { _ in
+            modelRef.paste()
+        }
+        .onChange(of: photos) { _, items in
+            Task { await importPhotos(modelRef, items: items) }
+        }
+        .task(id: searchRequest) {
+            #if DEBUG
+            if ScreenshotDemo.currentMode == .browser { return }
+            #endif
+            guard isBucketSearchPresented else {
+                modelRef.searchController.clear()
+                return
+            }
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+                try Task.checkCancellation()
+                await modelRef.runBucketSearch()
+            } catch {
+                modelRef.cancelBucketSearch()
+            }
+        }
+        .overlay(alignment: .top) {
+            if modelRef.isOrganizingCloud {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("正在整理云端项目…")
                 }
+                .font(.callout.weight(.medium))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 7)
+                .background(.bar, in: Capsule())
+                .padding(.top, 8)
             }
-            .safeAreaInset(edge: .bottom, spacing: 0) {
-                if modelRef.selectedBucket != nil {
-                    PathBar(showFileImporter: $showFileImporter)
-                }
-            }
-            .onChange(of: model.searchScope) { _, scope in
-                if scope == .folder {
-                    modelRef.searchFilter = .all
-                }
-            }
-            .overlay {
-                if let prefix = modelRef.browser.activeDropPrefix, prefix == modelRef.browser.prefix {
-                    dropScrim(title: "放到当前文件夹")
-                }
-            }
-            .dropDestination(for: URL.self) { urls, _ in
-                modelRef.upload(urls: urls, to: modelRef.browser.prefix, applyTemplate: modelRef.browser.prefix.isEmpty)
-                return true
-            } isTargeted: { targeted in
-                modelRef.browser.setDropTarget(modelRef.browser.prefix, active: targeted)
-            }
-            .dropDestination(for: CloudDragPayload.self) { payloads, _ in
-                guard let payload = payloads.first else { return false }
-                modelRef.moveCloudItems(payload, to: modelRef.browser.prefix)
-                return true
-            } isTargeted: { targeted in
-                modelRef.browser.setDropTarget(modelRef.browser.prefix, active: targeted)
-            }
-            .onPasteCommand(of: [UTType.lumenCloudItems, .image, .fileURL, .gif, .webP, .png, .jpeg]) { _ in
-                modelRef.paste()
-            }
-            .onChange(of: photos) { _, items in
-                Task { await importPhotos(modelRef, items: items) }
-            }
-            .task(id: searchRequest) {
-                #if DEBUG
-                if ScreenshotDemo.currentMode == .browser { return }
-                #endif
-                guard isBucketSearchPresented else {
-                    modelRef.searchController.clear()
-                    return
-                }
-                do {
-                    try await Task.sleep(for: .milliseconds(250))
-                    try Task.checkCancellation()
-                    await modelRef.runBucketSearch()
-                } catch {
-                    modelRef.cancelBucketSearch()
-                }
-            }
-            .overlay(alignment: .top) {
-                if modelRef.isOrganizingCloud {
-                    HStack(spacing: 8) {
-                        ProgressView().controlSize(.small)
-                        Text("正在整理云端项目…")
-                    }
-                    .font(.callout.weight(.medium))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .background(.bar, in: Capsule())
-                    .padding(.top, 8)
-                }
-            }
+        }
     }
 
     @ViewBuilder

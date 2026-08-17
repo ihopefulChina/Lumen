@@ -117,14 +117,14 @@ struct BrowserModelTests {
         let model = Self.model()
         model.objects.append(
             OSSObject(
-                key: "archive.zip",
+                key: "runtime.bin",
                 size: 1,
-                etag: "zip",
+                etag: "bin",
                 lastModified: nil,
                 storageClass: "Standard"
             )
         )
-        model.select(key: "archive.zip", modifiers: [])
+        model.select(key: "runtime.bin", modifiers: [])
 
         model.imagesOnly = true
 

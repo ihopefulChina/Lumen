@@ -1,6 +1,6 @@
 # lumen-mcp — 让 AI 直接操作你的阿里云 OSS
 
-`lumen-mcp` 是 Lumen 附带的 MCP（Model Context Protocol）服务器。配置到 Codex、Claude Desktop、Claude Code、Cursor、Trae 等支持 MCP 的 AI 客户端后，AI 就能用自然语言完成常见的 OSS 操作：
+`lumen-mcp` 是 Lumen 附带的 MCP（Model Context Protocol）服务器。配置到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言完成常见的 OSS 操作：
 
 - 「看看我有哪些 Bucket」
 - 「把这个截图上传到 lumen-assets 的 2026/08 文件夹」
@@ -55,7 +55,7 @@ npx lumen-mcp auth
 npx lumen-mcp install
 ```
 
-自动检测本机已安装的客户端（Claude Desktop、Claude Code、Cursor、Trae、Windsurf、Codex）并写入配置，重启客户端即可使用。支持：
+自动检测本机已安装的客户端（Claude Desktop、Claude Code、Cursor、Windsurf、Codex）并写入配置，重启客户端即可使用。支持：
 
 ```bash
 npx lumen-mcp install --client codex   # 只注册指定客户端（可重复传）

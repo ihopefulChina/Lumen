@@ -5,8 +5,8 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>隐私说明 — Lumen</title>
   <meta name="description" content="Lumen 是阿里云 OSS 的 Mac 客户端。说明本机保存哪些数据、如何连接 OSS，以及诊断信息包含什么。">
-  <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#10141b" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101013" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://ihopefulchina.github.io/Lumen/privacy.html">
   <link rel="icon" type="image/png" href="assets/lumen-favicon.png">
   <link rel="stylesheet" href="styles.css">
@@ -25,56 +25,58 @@
         <a href="support.html">支持</a>
         <a href="privacy.html" aria-current="page">隐私</a>
       </nav>
-      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.2.dmg">下载 Lumen 1.0.2</a>
+      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.2.dmg">下载</a>
     </div>
   </header>
 
   <main id="main" class="document-main">
-    <article class="document-shell">
-      <p class="document-path">lumen / policy / privacy</p>
-      <h1>隐私说明</h1>
-      <p class="document-lead">Lumen 不做分析追踪，也没有自己的账号系统。它只保存连接阿里云 OSS、完成文件操作所需的本机数据。</p>
-      <p class="document-updated">更新日期：2026 年 8 月 15 日</p>
+    <header class="document-hero">
+      <p class="document-eyebrow" data-load style="--d: 40ms">隐私</p>
+      <h1 data-load style="--d: 140ms">隐私说明</h1>
+      <p class="document-lead" data-load style="--d: 260ms">Lumen 不做分析追踪，也没有自己的账号系统。它只保存连接阿里云 OSS、完成文件操作所需的本机数据。</p>
+      <p class="document-updated" data-load style="--d: 360ms">更新日期：2026 年 8 月 15 日</p>
+    </header>
 
-      <section>
+    <div class="document-body">
+      <section data-reveal>
         <h2>保存在这台 Mac 上的数据</h2>
         <p>AccessKey Secret 与 STS Token 保存在 macOS 钥匙串。账号显示设置、地域、Endpoint、CDN 域名、默认权限、收藏位置、界面偏好与经过清理的传输历史保存在应用的本地容器或 Application Support 中。</p>
         <p>传输历史不会保存 OSS 客户端实例、请求授权头、Secret、Token 或带签名的公开链接。为重新访问用户选择的文件或目录，系统安全作用域书签可能包含由 macOS 管理的本地文件引用。</p>
       </section>
 
-      <section>
+      <section data-reveal>
         <h2>网络连接</h2>
         <p>Lumen 直接连接你选择或配置的阿里云 OSS Endpoint，以列出、上传、下载和整理对象。请求会包含 OSS 验证所需的 AccessKey ID、签名以及可选 STS Token。</p>
         <p>软件更新会访问 GitHub Pages 获取更新源（appcast），并从 GitHub Releases 下载安装包。Lumen 不包含广告 SDK、行为分析、崩溃上报或自建遥测服务。</p>
       </section>
 
-      <section>
+      <section data-reveal>
         <h2>诊断信息</h2>
         <p>“帮助 → 复制诊断信息”只生成版本、构建号、macOS、架构、更新域名、账号与传输数量，以及非敏感功能设置。它不包含账号名、AccessKey ID、Bucket、对象键、本地路径、URL、请求 ID、Secret 或 Token。</p>
         <p>诊断摘要只会复制到剪贴板，不会自动发送。是否粘贴到 Issue 或其他位置由你决定。</p>
       </section>
 
-      <section>
+      <section data-reveal>
         <h2>删除与保留</h2>
         <p>在 Lumen 中删除账号会移除这台 Mac 上对应的账号配置与钥匙串凭证，不会删除云端 Bucket 或对象。卸载应用前，可先在设置中删除账号；界面偏好和传输历史可在系统的应用数据目录中移除。</p>
       </section>
 
-      <section>
+      <section data-reveal>
         <h2>系统隐私清单</h2>
         <p>仓库中的 <a href="https://github.com/ihopefulChina/Lumen/blob/main/Lumen/PrivacyInfo.xcprivacy" rel="noopener">PrivacyInfo.xcprivacy</a> 声明 Lumen 不追踪用户、不收集数据，并仅以应用功能目的访问 UserDefaults 类 API。</p>
       </section>
 
-      <section>
+      <section data-reveal>
         <h2>联系</h2>
         <p>一般问题请查看<a href="support.html">支持页面</a>。尚未公开的安全问题请使用 GitHub 的<a href="https://github.com/ihopefulChina/Lumen/security/advisories/new" rel="noopener">私密安全报告</a>，不要把真实凭证或存储路径放进公开 Issue。</p>
       </section>
-    </article>
+    </div>
   </main>
 
   <footer class="site-footer">
-    <div class="container footer-inner">
+    <div class="footer-inner">
       <div class="footer-brand"><img src="assets/lumen-favicon.png" width="64" height="64" alt=""><span>Lumen</span></div>
-      <p>为 Mac 打造的阿里云 OSS 客户端</p>
+      <p>为 Mac 打造的阿里云 OSS 客户端 · 独立开源，非阿里云官方产品</p>
       <nav aria-label="页脚导航">
         <a href="index.html">首页</a>
         <a href="support.html">支持</a>

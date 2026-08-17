@@ -117,7 +117,7 @@ final class TransferEngine {
         options: UploadPreparationOptions
     ) async -> UploadPlan {
         let rootLeases = urls.compactMap(SecurityScopeLease.init(url:))
-        let expansion = expand(urls, imagesOnly: options.imagesOnly)
+        let expansion = expand(urls)
         var items: [PlannedUpload] = []
         for entry in expansion.files {
             let url = entry.url
@@ -1143,9 +1143,8 @@ final class TransferEngine {
         case cancel
     }
 
-    nonisolated private static func expand(_ urls: [URL], imagesOnly: Bool) -> Expansion {
+    nonisolated private static func expand(_ urls: [URL]) -> Expansion {
         var result: [ExpandedFile] = []
-        var skipped = 0
         let fm = FileManager.default
         for url in urls {
             var isDir: ObjCBool = false
@@ -1158,10 +1157,6 @@ final class TransferEngine {
                     for case let file as URL in enumerator {
                         let values = try? file.resourceValues(forKeys: [.isRegularFileKey])
                         if values?.isRegularFile == false { continue }
-                        if imagesOnly && !ImageKind.isSupported(key: file.lastPathComponent) {
-                            skipped += 1
-                            continue
-                        }
                         let relative = PathTemplate.nestedRelative(
                             rootName: url.lastPathComponent,
                             rootPath: url.path,
@@ -1171,14 +1166,10 @@ final class TransferEngine {
                     }
                 }
             } else {
-                if imagesOnly && !ImageKind.isSupported(key: url.lastPathComponent) {
-                    skipped += 1
-                    continue
-                }
                 result.append(ExpandedFile(url: url, relativePath: url.lastPathComponent))
             }
         }
-        return Expansion(files: result, skipped: skipped)
+        return Expansion(files: result, skipped: 0)
     }
 
     nonisolated private static func prepare(url: URL, convertHEIC: Bool) async throws -> PreparedUpload {

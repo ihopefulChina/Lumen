@@ -118,7 +118,7 @@ xcodebuild -project Lumen.xcodeproj \
 
 ## 让 AI 直接操作 OSS（lumen-mcp）
 
-仓库内置一个独立的 MCP 服务器 `lumen-mcp`，配置到 Codex、Claude Desktop、Claude Code、Cursor、Trae 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接：
+仓库内置一个独立的 MCP 服务器 `lumen-mcp`，配置到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接：
 
 > 把桌面上的 hero.png 上传到 lumen-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接。
 

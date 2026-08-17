@@ -1,6 +1,6 @@
 # lumen-mcp
 
-[Lumen](https://ihopefulchina.github.io/Lumen/)（macOS 阿里云 OSS 客户端）附带的 MCP 服务器。注册到 Codex、Claude Desktop、Claude Code、Cursor、Trae 等 AI 客户端后，AI 可以用自然语言浏览 Bucket、上传下载文件、生成带签名的临时下载链接。
+[Lumen](https://ihopefulchina.github.io/Lumen/)（macOS 阿里云 OSS 客户端）附带的 MCP 服务器。注册到 Codex、Claude Desktop、Claude Code、Cursor 等 AI 客户端后，AI 可以用自然语言浏览 Bucket、上传下载文件、生成带签名的临时下载链接。
 
 ```bash
 npx lumen-mcp auth     # 1. 配置 OSS 凭证（保存在 macOS 钥匙串）
@@ -29,7 +29,7 @@ npx lumen-mcp install  # 2. 一键注册到本机已安装的 AI 客户端
 
 ## 支持的客户端
 
-`install` 自动检测并注册：Codex、Claude Desktop、Claude Code、Cursor、Trae、Windsurf。其他 stdio 客户端（VS Code Copilot、Cline、Qoder 等）手动配置：
+`install` 自动检测并注册：Codex、Claude Desktop、Claude Code、Cursor、Windsurf。其他 stdio 客户端（VS Code Copilot、Cline、Qoder 等）手动配置：
 
 ```json
 {

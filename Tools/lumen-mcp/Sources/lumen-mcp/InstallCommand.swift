@@ -27,7 +27,8 @@ enum InstallCommand {
         } else {
             home = FileManager.default.homeDirectoryForCurrentUser
         }
-        let appSupport = home.appendingPathComponent("Library/Application Support", isDirectory: true)
+        let appSupport = home.appendingPathComponent(
+            "Library/Application Support", isDirectory: true)
         func exists(_ path: String) -> Bool {
             @Sendable func fileExists(_ path: String) -> Bool {
                 FileManager.default.fileExists(atPath: path)
@@ -84,7 +85,9 @@ enum InstallCommand {
             case "--client":
                 index += 1
                 guard index < arguments.count, !arguments[index].isEmpty else {
-                    fail("用法：lumen-mcp \(uninstalling ? "uninstall" : "install") --client <\(clientIDs())>")
+                    fail(
+                        "用法：lumen-mcp \(uninstalling ? "uninstall" : "install") --client <\(clientIDs())>"
+                    )
                     return 64
                 }
                 requested.append(arguments[index])
@@ -119,7 +122,7 @@ enum InstallCommand {
 
         let binaryPath: String
         if uninstalling {
-            binaryPath = "" // not needed for removal
+            binaryPath = ""  // not needed for removal
         } else {
             guard let resolved = currentBinaryPath() else {
                 fail("无法定位 lumen-mcp 可执行文件（argv0=\(CommandLine.arguments.first ?? "")）。请用绝对路径运行。")
@@ -147,12 +150,15 @@ enum InstallCommand {
         var failures = 0
 
         // Claude Code via its own CLI (keeps ~/.claude.json internals consistent).
-        let wantClaudeCode = requested.isEmpty ? isClaudeCodeInstalled() : requested.contains("claude-code")
+        let wantClaudeCode =
+            requested.isEmpty ? isClaudeCodeInstalled() : requested.contains("claude-code")
         if wantClaudeCode {
             if isClaudeCodeInstalled() {
-                let ok = uninstalling
+                let ok =
+                    uninstalling
                     ? runCLIClaudeCode(["mcp", "remove", serverKey, "-s", "user"])
-                    : runCLIClaudeCode(["mcp", "add", "--scope", "user", serverKey, "--"] + launch.commandWords)
+                    : runCLIClaudeCode(
+                        ["mcp", "add", "--scope", "user", serverKey, "--"] + launch.commandWords)
                 if ok {
                     print("✓ Claude Code 已\(uninstalling ? "移除" : "注册")（scope: user）")
                 } else {
@@ -168,7 +174,8 @@ enum InstallCommand {
             guard let url = client.configURL else { continue }
             do {
                 if dryRun {
-                    let preview = try buildNewContent(for: client, url: url, launch: launch, uninstalling: uninstalling)
+                    let preview = try buildNewContent(
+                        for: client, url: url, launch: launch, uninstalling: uninstalling)
                     print("[dry-run] \(client.displayName) → \(url.path)")
                     print(preview.isEmpty ? "（文件不存在，将新建）" : preview)
                     continue
@@ -176,7 +183,9 @@ enum InstallCommand {
                 try apply(client, url: url, launch: launch, uninstalling: uninstalling)
                 print("✓ \(client.displayName) 已\(uninstalling ? "移除" : "注册")：\(url.path)")
             } catch {
-                fail("\(client.displayName) \(uninstalling ? "移除" : "注册")失败：\(error.localizedDescription)")
+                fail(
+                    "\(client.displayName) \(uninstalling ? "移除" : "注册")失败：\(error.localizedDescription)"
+                )
                 failures += 1
             }
         }
@@ -196,18 +205,19 @@ enum InstallCommand {
     }
 
     private static func printHelp(uninstalling: Bool) {
-        print("""
-        lumen-mcp \(uninstalling ? "uninstall" : "install") — 把 lumen-mcp \(uninstalling ? "从" : "注册到")本机 MCP 客户端
+        print(
+            """
+            lumen-mcp \(uninstalling ? "uninstall" : "install") — 把 lumen-mcp \(uninstalling ? "从" : "注册到")本机 MCP 客户端
 
-        用法：
-          lumen-mcp \(uninstalling ? "uninstall" : "install")                    自动检测已安装的客户端并\(uninstalling ? "移除" : "注册")
-          lumen-mcp \(uninstalling ? "uninstall" : "install") --client cursor   只处理指定客户端（可重复传）
-          lumen-mcp \(uninstalling ? "uninstall" : "install") --all             处理全部支持的客户端
-          lumen-mcp \(uninstalling ? "uninstall" : "install") --dry-run         只预览将要写入的内容
+            用法：
+              lumen-mcp \(uninstalling ? "uninstall" : "install")                    自动检测已安装的客户端并\(uninstalling ? "移除" : "注册")
+              lumen-mcp \(uninstalling ? "uninstall" : "install") --client cursor   只处理指定客户端（可重复传）
+              lumen-mcp \(uninstalling ? "uninstall" : "install") --all             处理全部支持的客户端
+              lumen-mcp \(uninstalling ? "uninstall" : "install") --dry-run         只预览将要写入的内容
 
-        支持的客户端：claude-desktop、claude-code、cursor、trae、windsurf、codex
-        JSON 配置采用合并写入并保留 .bak 备份，不影响其他 MCP 服务器。
-        """)
+            支持的客户端：claude-desktop、claude-code、cursor、windsurf、codex
+            JSON 配置采用合并写入并保留 .bak 备份，不影响其他 MCP 服务器。
+            """)
     }
 
     private static func fail(_ message: String) {
@@ -238,7 +248,10 @@ enum InstallCommand {
 
     /// Returns true on success. Prints claude CLI output on failure for diagnosis.
     private static func runCLIClaudeCode(_ arguments: [String]) -> Bool {
-        guard let (code, output) = runProcess("/usr/bin/env", ["claude"] + arguments, printOutput: false) else {
+        guard
+            let (code, output) = runProcess(
+                "/usr/bin/env", ["claude"] + arguments, printOutput: false)
+        else {
             fail("无法启动 claude 命令。")
             return false
         }
@@ -249,7 +262,9 @@ enum InstallCommand {
     }
 
     @discardableResult
-    private static func runProcess(_ executable: String, _ arguments: [String], printOutput: Bool) -> (Int32, String)? {
+    private static func runProcess(_ executable: String, _ arguments: [String], printOutput: Bool)
+        -> (Int32, String)?
+    {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: executable)
         process.arguments = arguments
@@ -270,9 +285,13 @@ enum InstallCommand {
 
     // MARK: - Config writing
 
-    private static func apply(_ client: Client, url: URL, launch: LaunchMode, uninstalling: Bool) throws {
-        let newContent = try buildNewContent(for: client, url: url, launch: launch, uninstalling: uninstalling)
-        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+    private static func apply(_ client: Client, url: URL, launch: LaunchMode, uninstalling: Bool)
+        throws
+    {
+        let newContent = try buildNewContent(
+            for: client, url: url, launch: launch, uninstalling: uninstalling)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         // Keep a .bak copy of the previous version before touching the file.
         // Write via Data (atomic replace) instead of remove+copy so an
         // existing .bak never breaks the run.
@@ -283,22 +302,28 @@ enum InstallCommand {
         try newContent.write(to: url, atomically: true, encoding: .utf8)
     }
 
-    private static func buildNewContent(for client: Client, url: URL, launch: LaunchMode, uninstalling: Bool) throws -> String {
+    private static func buildNewContent(
+        for client: Client, url: URL, launch: LaunchMode, uninstalling: Bool
+    ) throws -> String {
         switch client.format {
         case "json":
             return try mergeJSON(url: url, launch: launch, uninstalling: uninstalling)
         case "toml":
             let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
-            return upsertTOMLSection(existing, section: "mcp_servers.\(serverKey)", body: launch.tomlLines, removing: uninstalling)
+            return upsertTOMLSection(
+                existing, section: "mcp_servers.\(serverKey)", body: launch.tomlLines,
+                removing: uninstalling)
         default:
             throw InstallError.unsupportedFormat(client.format)
         }
     }
 
-    private static func mergeJSON(url: URL, launch: LaunchMode, uninstalling: Bool) throws -> String {
+    private static func mergeJSON(url: URL, launch: LaunchMode, uninstalling: Bool) throws -> String
+    {
         var root: [String: Any] = [:]
         if let data = try? Data(contentsOf: url), !data.isEmpty {
-            guard let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            guard let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
                 throw InstallError.invalidJSON(url.path)
             }
             root = existing
@@ -314,7 +339,8 @@ enum InstallCommand {
         } else {
             root["mcpServers"] = servers
         }
-        let data = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
+        let data = try JSONSerialization.data(
+            withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
         guard let text = String(data: data, encoding: .utf8) else {
             throw InstallError.invalidJSON(url.path)
         }
@@ -323,7 +349,9 @@ enum InstallCommand {
 
     /// Line-based upsert/removal of a `[section]` block in a TOML file.
     /// The section spans from its header to the next top-level `[` header or EOF.
-    private static func upsertTOMLSection(_ source: String, section: String, body: [String], removing: Bool) -> String {
+    private static func upsertTOMLSection(
+        _ source: String, section: String, body: [String], removing: Bool
+    ) -> String {
         var lines = source.components(separatedBy: "\n")
         let header = "[\(section)]"
         var index = 0
@@ -356,19 +384,21 @@ enum InstallCommand {
     }
 
     fileprivate static func tomlString(_ value: String) -> String {
-        let escaped = value
+        let escaped =
+            value
             .replacingOccurrences(of: "\\", with: "\\\\")
             .replacingOccurrences(of: "\"", with: "\\\"")
         return "\"\(escaped)\""
     }
 
     private static func printNextSteps(binaryPath: String) {
-        print("""
-        下一步：
-        1. 重启对应的 AI 客户端使配置生效。
-        2. 首次调用时 macOS 可能弹钥匙串授权窗，点「始终允许」。
-        3. 若尚未配置 OSS 凭证，运行：lumen-mcp auth
-        """)
+        print(
+            """
+            下一步：
+            1. 重启对应的 AI 客户端使配置生效。
+            2. 首次调用时 macOS 可能弹钥匙串授权窗，点「始终允许」。
+            3. 若尚未配置 OSS 凭证，运行：lumen-mcp auth
+            """)
         _ = binaryPath
     }
 }

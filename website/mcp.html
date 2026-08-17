@@ -4,16 +4,16 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AI 集成（MCP）— Lumen</title>
-  <meta name="description" content="lumen-mcp 是 Lumen 内置的 MCP 服务器。一条命令注册到 Codex、Claude Desktop、Cursor、Trae 等 AI 客户端，用一句话浏览 Bucket、上传下载文件、生成临时下载链接。凭证留在 macOS 钥匙串。">
-  <meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
-  <meta name="theme-color" content="#10141b" media="(prefers-color-scheme: dark)">
+  <meta name="description" content="lumen-mcp 是 Lumen 内置的 MCP 服务器。两行命令注册到 Codex、Claude Desktop、Cursor、Trae 等 AI 客户端，用一句话浏览 Bucket、上传下载文件、生成临时下载链接。凭证留在 macOS 钥匙串。">
+  <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#101013" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://ihopefulchina.github.io/Lumen/mcp.html">
   <link rel="icon" type="image/png" href="assets/lumen-favicon.png">
   <link rel="stylesheet" href="styles.css">
 
   <meta property="og:type" content="website">
   <meta property="og:title" content="AI 集成（MCP）— Lumen">
-  <meta property="og:description" content="一条命令，让 Codex、Claude、Cursor 等 AI 直接操作你的阿里云 OSS。">
+  <meta property="og:description" content="两行命令，让 Codex、Claude、Cursor 等 AI 直接操作你的阿里云 OSS。">
   <meta property="og:url" content="https://ihopefulchina.github.io/Lumen/mcp.html">
   <meta property="og:locale" content="zh_CN">
 </head>
@@ -31,92 +31,137 @@
         <a href="support.html">支持</a>
         <a href="privacy.html">隐私</a>
       </nav>
-      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.2.dmg">下载 Lumen 1.0.2</a>
+      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.2.dmg">下载</a>
     </div>
   </header>
 
   <main id="main" class="document-main">
-    <article class="document-shell">
-      <p class="document-path">lumen / ai / mcp</p>
-      <h1 class="reveal" style="--reveal-delay: 0ms">让 AI 直接操作<br>你的 OSS</h1>
-      <p class="document-lead reveal" style="--reveal-delay: 90ms"><code>lumen-mcp</code> 是 Lumen 内置的 MCP（Model Context Protocol）服务器。注册到 Codex、Claude Desktop、Claude Code、Cursor、Trae 等 AI 客户端后，一句话就能浏览 Bucket、上传下载文件、生成临时下载链接。</p>
+    <!-- ============ 首屏：一行注册 + 一次配置 ============ -->
+    <section class="mcp-hero" aria-labelledby="mcp-hero-title">
+      <p class="document-eyebrow" data-load style="--d: 40ms">AI · MCP</p>
+      <h1 id="mcp-hero-title" data-load style="--d: 140ms">两行命令，<br>AI 接管你的 OSS。</h1>
+      <p class="document-lead" data-load style="--d: 260ms"><code>lumen-mcp</code> 是 Lumen 内置的 MCP（Model Context Protocol）服务器。注册之后，对你的 AI 助手说一句话，就能浏览 Bucket、上传下载文件、生成临时下载链接。</p>
 
-      <section aria-labelledby="quickstart">
-        <h2 id="quickstart">三步接入</h2>
-        <div class="mcp-steps">
-          <div class="mcp-step reveal">
-            <span class="mcp-step-num" aria-hidden="true">1</span>
-            <div class="mcp-step-body">
-              <h3>准备 Node</h3>
-              <p>需要 macOS 与 Node ≥ 18。终端里 <code>node -v</code> 检查；没有的话用 Homebrew 一行装好。</p>
-              <pre class="code-block" aria-label="安装 Node 命令"><code><span class="c-prompt">$</span> node -v
-<span class="c-cm"># 没有输出 v18+ 就执行：</span>
-<span class="c-prompt">$</span> brew install node</code></pre>
-            </div>
+      <pre class="code-block" aria-label="安装 lumen-mcp 的两条命令" data-load style="--d: 380ms"><code><span class="c-prompt">$</span> npx lumen-mcp install
+<span class="c-cm"># 检测到 Codex · Claude Desktop · Cursor · Trae — 已注册 ✓</span>
+
+<span class="c-prompt">$</span> npx lumen-mcp auth
+<span class="c-cm"># 一次性配置 AccessKey — 只存进 macOS 钥匙串</span></code></pre>
+
+      <p class="mcp-hero-meta" data-load style="--d: 480ms">
+        <span>需要 macOS 与 Node ≥ 18</span>
+        <span>凭证不经过 AI 客户端</span>
+        <a href="#advanced">没有 Node？从源码构建</a>
+      </p>
+    </section>
+
+    <!-- ============ 工作原理（黑色叙事带） ============ -->
+    <section class="section on-dark" id="how" aria-labelledby="how-title">
+      <div class="inner">
+        <p class="kicker" data-reveal>工作原理</p>
+        <h2 class="section-title" id="how-title" data-reveal>AI + lumen-mcp <br>就是你的 OSS 助手。</h2>
+        <p class="section-lead" data-reveal>MCP 是 AI 客户端与外部工具之间的开放协议。lumen-mcp 把你的阿里云 OSS 变成 AI 的标准工具集：AI 发起指令，lumen-mcp 用钥匙串里的凭证调用 OSS，再把结果交回给 AI。</p>
+
+        <div class="flow" data-reveal>
+          <div class="flow-node">
+            <small>你正在用的</small>
+            <strong>AI 客户端</strong>
+            <span>Codex · Claude Desktop · Claude Code · Cursor · Trae · Windsurf</span>
           </div>
-          <div class="mcp-step reveal" style="--reveal-delay: 90ms">
-            <span class="mcp-step-num" aria-hidden="true">2</span>
-            <div class="mcp-step-body">
-              <h3>配置凭证</h3>
-              <p>npx 按需下载 lumen-mcp（内置 macOS 双架构二进制，无需编译）。填入 RAM 子账号 AccessKey，凭证只保存在 macOS 钥匙串。</p>
-              <pre class="code-block" aria-label="配置凭证命令"><code><span class="c-prompt">$</span> npx lumen-mcp auth
-<span class="c-cm"># 支持多账号：--list / --use / --remove / --test</span></code></pre>
-            </div>
+          <div class="flow-link" aria-hidden="true"><small>MCP · stdio</small></div>
+          <div class="flow-node core">
+            <small>钥匙串凭证 · 本机运行</small>
+            <strong>lumen-mcp</strong>
+            <span>浏览 · 上传 · 下载 · 签名链接 · OSS 专家提示词</span>
           </div>
-          <div class="mcp-step reveal" style="--reveal-delay: 180ms">
-            <span class="mcp-step-num" aria-hidden="true">3</span>
-            <div class="mcp-step-body">
-              <h3>一键注册</h3>
-              <p>自动检测本机已安装的 AI 客户端并写入 <code>npx -y lumen-mcp</code>，重启客户端即可使用。</p>
-              <pre class="code-block" aria-label="一键注册命令"><code><span class="c-prompt">$</span> npx lumen-mcp install
-<span class="c-cm"># 或指定客户端：install --client codex</span></code></pre>
-            </div>
+          <div class="flow-link" aria-hidden="true"><small>HTTPS</small></div>
+          <div class="flow-node">
+            <small>你的数据</small>
+            <strong>阿里云 OSS</strong>
+            <span>Bucket · 对象 · RAM 权限，一切保持原样</span>
           </div>
         </div>
-        <div class="mcp-try reveal">然后直接对话：<b>「列出我的 OSS Bucket」</b>、<b>「把桌面的 hero.png 上传到 lumen-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接」</b>。</div>
-        <p>没有 Node？也可以<a class="text-link" href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">从源码构建</a>（克隆仓库后 <code>swift build -c release</code>，用二进制绝对路径运行）。</p>
-      </section>
+      </div>
+    </section>
 
-      <section aria-labelledby="tools" class="reveal">
-        <h2 id="tools">提供的能力</h2>
-        <table>
-          <thead>
-            <tr><th scope="col">工具</th><th scope="col">说明</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>list_buckets</td><td>列出账号下所有 Bucket（名称、地域、创建时间）</td></tr>
-            <tr><td>list_objects</td><td>按文件夹层级浏览对象；<code>delimiter</code> 传空字符串可递归列举</td></tr>
-            <tr><td>upload_file</td><td>上传本机文件到 OSS，返回对象 URL；Content-Type 按扩展名推断</td></tr>
-            <tr><td>download_file</td><td>下载对象到本机；本地已有同名文件时不覆盖，报错提示换路径</td></tr>
-            <tr><td>presign_url</td><td>为私有 Bucket 的对象生成带签名的临时下载链接（默认 1 小时）</td></tr>
-          </tbody>
-        </table>
-        <p>除工具外，服务器还内置 2 个提示词，可在客户端的 Prompts 面板一键使用：</p>
-        <table>
-          <thead>
-            <tr><th scope="col">提示词</th><th scope="col">说明</th></tr>
-          </thead>
-          <tbody>
-            <tr><td>lumen-oss-expert</td><td>把 Agent 定位为 OSS 操作专家：先浏览再操作、删除前确认、私有桶自动给临时链接</td></tr>
-            <tr><td>oss-batch-upload</td><td>批量上传工作流：确认目录 → 展示清单 → 逐个上传保留目录结构 → 汇总报告</td></tr>
-          </tbody>
-        </table>
-        <p>握手时服务器还会下发 Agent 使用说明（instructions），支持客户端会直接展示并用于约束 AI 行为。</p>
-      </section>
+    <!-- ============ 说一句话 ============ -->
+    <section class="section" id="say" aria-labelledby="say-title">
+      <div class="inner">
+        <p class="kicker" data-reveal>说一句话</p>
+        <h2 class="section-title" id="say-title" data-reveal>剩下的，交给 AI。</h2>
 
-      <section aria-labelledby="clients" class="reveal">
-        <h2 id="clients">支持的客户端</h2>
-        <p>以下客户端可由 <code>lumen-mcp install</code> 自动检测并注册：</p>
-        <ul class="client-list">
-          <li>Codex</li>
-          <li>Claude Desktop</li>
-          <li>Claude Code</li>
-          <li>Cursor</li>
-          <li>Trae</li>
-          <li>Windsurf</li>
-        </ul>
-        <p>其他支持 stdio 传输的客户端（VS Code Copilot、Cline、Qoder 等）可手动配置：</p>
-        <pre class="code-block" aria-label="手动配置 JSON"><code>{
+        <div class="say-grid" data-reveal-stagger>
+          <article class="say-card">
+            <p class="say-prompt">「列出 lumen-assets 里所有超过 100 MB 的视频。」</p>
+            <div class="say-tools"><code>list_buckets</code><code>list_objects</code></div>
+            <p class="say-note">分页扫遍整个 Bucket，按类型、大小、时间筛选，再报给你。</p>
+          </article>
+          <article class="say-card">
+            <p class="say-prompt">「把桌面的 hero.png 传到 assets/2026/，再给我一个 24 小时有效的链接。」</p>
+            <div class="say-tools"><code>upload_file</code><code>presign_url</code></div>
+            <p class="say-note">上传完成即返回对象 URL；私有 Bucket 自动生成带签名的临时链接。</p>
+          </article>
+          <article class="say-card">
+            <p class="say-prompt">「把这个月导出的报表，都下载到 ~/Reports。」</p>
+            <div class="say-tools"><code>list_objects</code><code>download_file</code></div>
+            <p class="say-note">本地已有同名文件时不覆盖，报错提示换路径，与 App 行为一致。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 提供的能力 ============ -->
+    <section class="section on-light-alt" id="tools" aria-labelledby="tools-title">
+      <div class="inner">
+        <p class="kicker" data-reveal>提供的能力</p>
+        <h2 class="section-title" id="tools-title" data-reveal>五个工具，两个提示词。</h2>
+
+        <div class="mcp-prose" data-reveal>
+          <table>
+            <thead>
+              <tr><th scope="col">工具</th><th scope="col">说明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>list_buckets</td><td>列出账号下所有 Bucket（名称、地域、创建时间）</td></tr>
+              <tr><td>list_objects</td><td>按文件夹层级浏览对象；<code>delimiter</code> 传空字符串可递归列举</td></tr>
+              <tr><td>upload_file</td><td>上传本机文件到 OSS，返回对象 URL；Content-Type 按扩展名推断</td></tr>
+              <tr><td>download_file</td><td>下载对象到本机；本地已有同名文件时不覆盖，报错提示换路径</td></tr>
+              <tr><td>presign_url</td><td>为私有 Bucket 的对象生成带签名的临时下载链接（默认 1 小时）</td></tr>
+            </tbody>
+          </table>
+          <p>除工具外，服务器还内置 2 个提示词，可在客户端的 Prompts 面板一键使用：</p>
+          <table>
+            <thead>
+              <tr><th scope="col">提示词</th><th scope="col">说明</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>lumen-oss-expert</td><td>把 Agent 定位为 OSS 操作专家：先浏览再操作、删除前确认、私有桶自动给临时链接</td></tr>
+              <tr><td>oss-batch-upload</td><td>批量上传工作流：确认目录 → 展示清单 → 逐个上传保留目录结构 → 汇总报告</td></tr>
+            </tbody>
+          </table>
+          <p>连接建立时，服务器还会下发 Agent 使用说明（instructions），支持的客户端会直接展示，用于约束 AI 行为。</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 支持的客户端 ============ -->
+    <section class="section" id="clients" aria-labelledby="clients-title">
+      <div class="inner">
+        <p class="kicker" data-reveal>支持的客户端</p>
+        <h2 class="section-title" id="clients-title" data-reveal>主流客户端，<br>自动检测注册。</h2>
+
+        <div class="mcp-prose" data-reveal>
+          <p>以下客户端可由 <code>npx lumen-mcp install</code> 自动检测并注册：</p>
+          <ul class="client-list">
+            <li>Codex</li>
+            <li>Claude Desktop</li>
+            <li>Claude Code</li>
+            <li>Cursor</li>
+            <li>Trae</li>
+            <li>Windsurf</li>
+          </ul>
+          <p>其他支持 stdio 传输的客户端（VS Code Copilot、Cline、Qoder 等）可手动配置：</p>
+          <pre class="code-block" aria-label="手动配置 JSON"><code>{
   <span class="c-cm">"mcpServers"</span>: {
     "lumen": {
       "command": "npx",
@@ -125,42 +170,107 @@
     }
   }
 }</code></pre>
-        <p><code>env</code> 里的 <code>LUMEN_MCP_DEFAULT_BUCKET</code>（可选）设置默认 Bucket：设置后 <code>bucket</code> 参数对 AI 变为可选，桶名会直接出现在工具描述中，任何 AI 客户端都能看到；AI 仍可显式指定其他 Bucket。</p>
-        <p>各客户端的配置文件位置与差异见 <a href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">GitHub 上的完整 MCP 文档</a>。JSON 配置合并写入并保留 <code>.bak</code> 备份，不影响其他 MCP 服务器。</p>
-      </section>
+          <p><code>env</code> 里的 <code>LUMEN_MCP_DEFAULT_BUCKET</code>（可选）设置默认 Bucket：设置后 <code>bucket</code> 参数对 AI 变为可选，桶名会直接出现在工具描述中，任何 AI 客户端都能看到；AI 仍可显式指定其他 Bucket。</p>
+          <p>各客户端的配置文件位置与差异见 <a href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">GitHub 上的完整 MCP 文档</a>。JSON 配置合并写入并保留 <code>.bak</code> 备份，不影响其他 MCP 服务器。</p>
+        </div>
+      </div>
+    </section>
 
-      <section aria-labelledby="safety" class="reveal">
-        <h2 id="safety">安全边界</h2>
-        <table>
-          <tbody>
-            <tr><td>凭证隔离</td><td>AccessKey Secret 与 STS Token 只存 macOS 钥匙串，AI 客户端接触不到凭证本身，与 Lumen App 账号相互独立</td></tr>
-            <tr><td>最小权限</td><td>建议使用只授予目标 Bucket 必要动作的 RAM 子账号</td></tr>
-            <tr><td>操作范围</td><td>AI 只能执行浏览、上传、下载和签名链接；删除、覆盖、批量操作前会先向用户复述范围并确认</td></tr>
-            <tr><td>不覆盖</td><td>下载遇到本地同名文件会报错而不是覆盖，与 App 的安全边界一致</td></tr>
-          </tbody>
-        </table>
-      </section>
+    <!-- ============ 进阶用法 ============ -->
+    <section class="section on-light-alt" id="advanced" aria-labelledby="advanced-title">
+      <div class="inner">
+        <p class="kicker" data-reveal>进阶用法</p>
+        <h2 class="section-title" id="advanced-title" data-reveal>按需，再多走一步。</h2>
 
-      <section aria-labelledby="faq" class="reveal">
-        <h2 id="faq">常见问题</h2>
-        <table>
-          <tbody>
-            <tr><td>连接失败</td><td>检查客户端配置里的二进制路径是否为绝对路径、文件是否有执行权限</td></tr>
-            <tr><td>弹钥匙串授权窗</td><td>重新编译后二进制签名变化所致，属正常现象，点一次「始终允许」即可</td></tr>
-            <tr><td>上传报签名错误</td><td>运行 <code>lumen-mcp auth --test</code> 验证凭证与地域是否匹配</td></tr>
-            <tr><td>想换账号</td><td><code>lumen-mcp auth --use &lt;名称&gt;</code> 切换活动档案后重启 AI 客户端</td></tr>
-            <tr><td>移除注册</td><td><code>lumen-mcp uninstall</code>，或加 <code>--client</code> 指定客户端</td></tr>
-          </tbody>
-        </table>
-        <p>更多细节与故障排查见 <a href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">docs/mcp.md</a>；问题反馈请到 <a href="https://github.com/ihopefulChina/Lumen/issues" rel="noopener">GitHub Issues</a>。</p>
-      </section>
-    </article>
+        <div class="adv-grid" data-reveal-stagger>
+          <div class="adv-card">
+            <h3>准备 Node</h3>
+            <p>需要 macOS 与 Node ≥ 18。终端里检查版本，没有的话用 Homebrew 一行装好。</p>
+            <pre class="code-block" aria-label="检查并安装 Node"><code><span class="c-prompt">$</span> node -v
+<span class="c-cm"># 没有输出 v18+ 就执行：</span>
+<span class="c-prompt">$</span> brew install node</code></pre>
+          </div>
+          <div class="adv-card">
+            <h3>多账号管理</h3>
+            <p>支持多个配置档案：列出、切换、删除、验证，适合同时管理多套凭证。</p>
+            <pre class="code-block" aria-label="多账号命令"><code><span class="c-prompt">$</span> npx lumen-mcp auth --list
+<span class="c-cm"># --use &lt;名称&gt; 切换 / --remove 删除</span>
+<span class="c-prompt">$</span> npx lumen-mcp auth --test</code></pre>
+          </div>
+          <div class="adv-card">
+            <h3>卸载与源码构建</h3>
+            <p>移除注册一行命令。没有 Node 时，也可以克隆仓库用 Swift 构建（在 Terminal.app 中执行）。</p>
+            <pre class="code-block" aria-label="卸载与源码构建命令"><code><span class="c-prompt">$</span> npx lumen-mcp uninstall
+<span class="c-cm"># 源码构建：</span>
+<span class="c-prompt">$</span> git clone https://github.com/ihopefulChina/Lumen
+<span class="c-prompt">$</span> cd Tools/lumen-mcp &amp;&amp; swift build -c release</code></pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 安全边界（黑色叙事带） ============ -->
+    <section class="section on-dark" id="safety" aria-labelledby="safety-title">
+      <div class="inner">
+        <p class="kicker" data-reveal>安全边界</p>
+        <h2 class="section-title" id="safety-title" data-reveal>放心的前提，<br>是边界清晰。</h2>
+
+        <div class="safety-grid" data-reveal-stagger>
+          <article class="safety-card">
+            <h3>凭证隔离</h3>
+            <p>AccessKey Secret 与 STS Token 只存 macOS 钥匙串，AI 客户端接触不到凭证本身，与 Lumen App 账号相互独立。</p>
+          </article>
+          <article class="safety-card">
+            <h3>最小权限</h3>
+            <p>建议使用只授予目标 Bucket 必要动作的 RAM 子账号，权限范围自己说了算。</p>
+          </article>
+          <article class="safety-card">
+            <h3>先确认，再执行</h3>
+            <p>AI 只能浏览、上传、下载和生成签名链接；删除、覆盖、批量操作前会先向你复述范围并确认。</p>
+          </article>
+          <article class="safety-card">
+            <h3>永不静默覆盖</h3>
+            <p>下载遇到本地同名文件会报错而不是覆盖，与 Lumen App 的安全边界完全一致。</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 常见问题 ============ -->
+    <section class="section" id="faq" aria-labelledby="faq-title">
+      <div class="inner">
+        <p class="kicker" data-reveal>常见问题</p>
+        <h2 class="section-title" id="faq-title" data-reveal>遇到问题，<br>先看这里。</h2>
+
+        <div class="mcp-prose" data-reveal>
+          <table>
+            <tbody>
+              <tr><td>AI 提示「找不到配置档案」</td><td>先运行 <code>npx lumen-mcp auth</code> 完成凭证配置</td></tr>
+              <tr><td>连接失败</td><td>确认配置里 command 为 <code>npx</code>、args 包含 <code>-y lumen-mcp</code>；从源码运行时，检查二进制绝对路径与执行权限</td></tr>
+              <tr><td>弹出钥匙串授权窗口</td><td>重新编译后二进制签名变化所致，属正常现象，点一次「始终允许」即可</td></tr>
+              <tr><td>上传报签名错误</td><td>运行 <code>npx lumen-mcp auth --test</code> 验证凭证与地域是否匹配</td></tr>
+              <tr><td>想换账号</td><td><code>npx lumen-mcp auth --use &lt;名称&gt;</code> 切换活动档案后重启 AI 客户端</td></tr>
+              <tr><td>移除注册</td><td><code>npx lumen-mcp uninstall</code>，或加 <code>--client</code> 指定客户端</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ============ 收尾 ============ -->
+    <section class="mcp-final" aria-labelledby="mcp-final-title">
+      <h2 id="mcp-final-title" data-reveal>现在，<br>让 AI 试一下。</h2>
+      <div class="mcp-final-links" data-reveal>
+        <a class="link-arrow" href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">完整 MCP 文档</a>
+        <a class="link-arrow" href="https://github.com/ihopefulChina/Lumen/issues" rel="noopener">问题反馈</a>
+      </div>
+    </section>
   </main>
 
   <footer class="site-footer">
-    <div class="container footer-inner">
+    <div class="footer-inner">
       <div class="footer-brand"><img src="assets/lumen-favicon.png" width="64" height="64" alt=""><span>Lumen</span></div>
-      <p>为 Mac 打造的阿里云 OSS 客户端</p>
+      <p>为 Mac 打造的阿里云 OSS 客户端 · 独立开源，非阿里云官方产品</p>
       <nav aria-label="页脚导航">
         <a href="index.html">首页</a>
         <a href="mcp.html">AI · MCP</a>
@@ -170,26 +280,5 @@
       </nav>
     </div>
   </footer>
-
-  <script>
-    // Scroll reveal — each element fades in once, in order.
-    // Reduced-motion users get a plain cross-fade via CSS.
-    (() => {
-      const els = document.querySelectorAll('.reveal');
-      if (!('IntersectionObserver' in window)) {
-        els.forEach((el) => el.classList.add('is-visible'));
-        return;
-      }
-      const io = new IntersectionObserver((entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            entry.target.classList.add('is-visible');
-            io.unobserve(entry.target);
-          }
-        }
-      }, { threshold: 0.15, rootMargin: '0px 0px -48px 0px' });
-      els.forEach((el) => io.observe(el));
-    })();
-  </script>
 </body>
 </html>
