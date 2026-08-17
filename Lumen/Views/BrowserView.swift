@@ -17,8 +17,11 @@ struct BrowserView: View {
         // type AppModel found"), so they must use this captured reference.
         let modelRef = model
         // The scope bar and path bar are stacked in a VStack instead of
-        // safeAreaInset: insets placed on the detail column stopped rendering
-        // with the SwiftUI runtime shipped in Xcode 26 on macOS 15.
+        // safeAreaInset. With the SwiftUI runtime shipped in Xcode 26 on
+        // macOS 15, a bottom bar placed after the flexible detail content
+        // stops rendering unless it is followed by another non-trivial view,
+        // so an invisible 18pt tail view is kept after the path bar (0pt and
+        // 1pt tails do not trigger the workaround).
         VStack(spacing: 0) {
             if showsSearchChrome {
                 searchScopeBar
@@ -28,9 +31,9 @@ struct BrowserView: View {
             if modelRef.selectedBucket != nil {
                 PathBar(showFileImporter: $showFileImporter)
             }
-            Text("FOOTER-TEST-123")
-                .foregroundStyle(.red)
-                .frame(height: 18)
+            Color.clear
+                .frame(height: 1)
+                .allowsHitTesting(false)
         }
         .navigationTitle(title)
         .navigationSubtitle(subtitle)
