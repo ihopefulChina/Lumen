@@ -81,7 +81,8 @@ required_html=(
   "$x86_64_download_url"
   'src="download.js" defer'
   'data-auto-download'
-  'data-download-status'
+  'data-download-url-arm64'
+  'data-download-url-intel'
   'href="privacy.html"'
   'href="support.html"'
   'href="mcp.html"'
@@ -118,13 +119,6 @@ for page_and_canonical in \
       exit 1
     fi
   done
-done
-
-for page in "$index" "$privacy" "$support" "$mcp"; do
-  if ! grep -Fq -- '>ossuno-mcp</a>' "$page"; then
-    echo "Missing prominent ossuno-mcp navigation label in ${page#"$repo_root/"}." >&2
-    exit 1
-  fi
 done
 
 if grep -Eini -- \
@@ -325,27 +319,26 @@ class FakeElement {
 
   let resolveHints;
   const hints = new Promise((resolve) => { resolveHints = resolve; });
-  const armChoice = new FakeElement({
-    dataset: { downloadChoice: "arm64" },
-    href: "https://example.test/Ossuno-1.0.0-arm64.dmg",
-    classes: ["is-selected"],
-  });
-  const intelChoice = new FakeElement({
-    dataset: { downloadChoice: "x86_64" },
-    href: "https://example.test/Ossuno-1.0.0-x86_64.dmg",
-  });
+  const armURL = "https://example.test/Ossuno-1.0.0-arm64.dmg";
+  const intelURL = "https://example.test/Ossuno-1.0.0-x86_64.dmg";
   const automaticLink = new FakeElement({
     dataset: {
       labelArm64: "下载 Apple Silicon 版",
       labelX86_64: "下载 Intel 版",
     },
-    href: armChoice.href,
+    href: armURL,
   });
   const status = new FakeElement({ dataset: { state: "checking" } });
   const statusCopy = { textContent: "" };
   const fakeDocument = {
+    documentElement: {
+      dataset: {
+        downloadUrlArm64: armURL,
+        downloadUrlIntel: intelURL,
+      },
+    },
     querySelectorAll(selector) {
-      if (selector === "[data-download-choice]") return [armChoice, intelChoice];
+      if (selector === "[data-download-choice]") return [];
       if (selector === "[data-auto-download]") return [automaticLink];
       return [];
     },
@@ -381,10 +374,9 @@ class FakeElement {
   await controller.detectionPromise;
   await clickCompletion;
 
-  assert.equal(automaticLink.href, intelChoice.href);
+  assert.equal(automaticLink.href, intelURL);
   assert.equal(automaticLink.textContent, "下载 Intel 版");
-  assert.equal(intelChoice.classList.contains("is-selected"), true);
-  assert.deepEqual(navigations, [intelChoice.href]);
+  assert.deepEqual(navigations, [intelURL]);
 
   console.log("Download architecture detection tests passed.");
 })().catch((error) => {

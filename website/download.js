@@ -92,16 +92,27 @@
     const automaticLinks = Array.from(documentValue.querySelectorAll("[data-auto-download]"));
     const status = documentValue.querySelector("[data-download-status]");
     const statusCopy = documentValue.querySelector("[data-download-status-copy]");
+    const rootDataset = (documentValue.documentElement && documentValue.documentElement.dataset) || {};
     let detectionSettled = false;
     let navigationQueued = false;
 
     const choicesByArchitecture = new Map(
       choices.map((choice) => [choice.dataset.downloadChoice, choice])
     );
+    const urlsByArchitecture = new Map([
+      ["arm64", rootDataset.downloadUrlArm64],
+      ["x86_64", rootDataset.downloadUrlIntel],
+    ]);
+    for (const [architecture, choice] of choicesByArchitecture) {
+      if (!urlsByArchitecture.get(architecture)) {
+        urlsByArchitecture.set(architecture, choice.href);
+      }
+    }
 
     function selectArchitecture(architecture, state) {
       const selectedChoice = choicesByArchitecture.get(architecture);
-      if (!selectedChoice) {
+      const selectedURL = urlsByArchitecture.get(architecture);
+      if (!selectedURL) {
         return;
       }
 
@@ -121,7 +132,7 @@
       }
 
       for (const link of automaticLinks) {
-        link.href = selectedChoice.href;
+        link.href = selectedURL;
         const label = link.dataset[
           architecture === "arm64" ? "labelArm64" : "labelX86_64"
         ];
