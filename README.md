@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://ihopefulchina.github.io/Ossuno/"><strong>官网</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg"><strong>下载 Ossuno 1.0.0</strong></a>
+  <a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg"><strong>下载 Ossuno</strong></a>
   &nbsp;·&nbsp;
   <a href="https://www.npmjs.com/package/ossuno-mcp"><strong>使用 ossuno-mcp</strong></a>
   &nbsp;·&nbsp;
@@ -30,7 +30,7 @@ Ossuno 是一个原生的 macOS OSS 客户端。它不打算把控制台搬进�
 
 ## 让 AI 直接操作 OSS（ossuno-mcp）
 
-[`ossuno-mcp` 1.0.0](https://www.npmjs.com/package/ossuno-mcp) 已发布到 npm。它是一个可独立使用的 MCP 服务器：配置到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接。
+[`ossuno-mcp`](https://www.npmjs.com/package/ossuno-mcp) 已发布到 npm。它是一个可独立使用的 MCP 服务器：配置到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接。
 
 ```bash
 npx ossuno-mcp auth     # 配置 OSS 凭证，只保存到 macOS 钥匙串
@@ -80,7 +80,7 @@ npx ossuno-mcp install  # 一键注册到本机已安装的 AI 客户端
 
 ## 安装
 
-1. [下载 Ossuno 1.0.0](https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg)。
+1. [下载 Ossuno](https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg)。
 2. 打开 DMG，把 Ossuno 拖进「应用程序」。
 3. 添加权限最小化的 RAM 子账号，选择地域，然后打开 Bucket。
 
@@ -90,7 +90,7 @@ npx ossuno-mcp install  # 一键注册到本机已安装的 AI 客户端
 
 ### RAM 权限提示
 
-Ossuno 1.0.0 在复制、移动、覆盖和撤销前会读取 Bucket 版本控制状态与对象 ACL，并在版本控制 Bucket 中按具体版本执行复制或清理。已有的自定义 RAM 策略除了列举、读取、上传、复制和删除对象等基础动作，还需要按使用场景加入：
+Ossuno 在复制、移动、覆盖和撤销前会读取 Bucket 版本控制状态与对象 ACL，并在版本控制 Bucket 中按具体版本执行复制或清理。已有的自定义 RAM 策略除了列举、读取、上传、复制和删除对象等基础动作，还需要按使用场景加入：
 
 - `oss:GetBucketVersioning`：确认 Bucket 是否能安全执行禁止覆盖、替换或删除；查询失败时 Ossuno 会安全取消相关操作。
 - `oss:GetObjectAcl`：复制或移动时读取并保留对象 ACL。RAM 动作名以 `Acl` 结尾，不是 API 名 `GetObjectACL` 的全大写写法。
