@@ -250,9 +250,52 @@ h3 {
   color: var(--ink);
 }
 
+.header-actions {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.header-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  color: var(--ink-2);
+  border-radius: 50%;
+  transition: color 0.18s ease, background 0.18s ease, transform 0.2s var(--ease-apple);
+}
+
+.header-icon:hover {
+  color: var(--ink);
+  background: var(--accent-soft);
+}
+
+.header-icon:active {
+  transform: scale(0.94);
+}
+
+.header-icon svg,
+.header-icon img {
+  display: block;
+  width: 18px;
+  height: 18px;
+}
+
+.header-icon img {
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.header-icon:focus-visible,
+.header-download:focus-visible {
+  border-radius: 999px;
+}
+
 /* 导航下载胶囊 */
 .header-download {
-  justify-self: end;
   display: inline-flex;
   align-items: center;
   min-height: 40px;
@@ -522,7 +565,7 @@ h3 {
 .hero-shot::before {
   content: "";
   position: absolute;
-  inset: -90px -18% -160px;
+  inset: -76px -18% -160px;
   z-index: -1;
   background:
     radial-gradient(46% 60% at 34% 42%, rgba(0, 113, 227, 0.16), transparent 68%),
@@ -2640,3 +2683,5 @@ h3 {
     color: var(--ink);
   }
 }
+
+
