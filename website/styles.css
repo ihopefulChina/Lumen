@@ -455,6 +455,41 @@ h3 {
   text-underline-offset: 3px;
 }
 
+.distribution-summary {
+  max-width: 660px;
+  margin: 14px auto 0;
+  padding: 10px 14px;
+  color: var(--ink-2);
+  background: rgba(215, 122, 0, 0.08);
+  border: 1px solid rgba(215, 122, 0, 0.22);
+  border-radius: 12px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.distribution-summary strong {
+  color: #b86400;
+  font-weight: 680;
+}
+
+.distribution-summary a {
+  color: var(--accent-ink);
+  font-weight: 590;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .distribution-summary {
+    background: rgba(255, 159, 10, 0.1);
+    border-color: rgba(255, 159, 10, 0.24);
+  }
+
+  .distribution-summary strong {
+    color: #ffb340;
+  }
+}
+
 .architecture-links {
   display: flex;
   flex-wrap: wrap;

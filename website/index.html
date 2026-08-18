@@ -74,7 +74,8 @@
           <a class="btn btn-primary" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg" data-auto-download data-label-arm64="下载 Apple Silicon 版" data-label-x86_64="下载 Intel 版">下载 Apple Silicon 版</a>
           <a class="btn btn-ghost" href="mcp.html">使用 ossuno-mcp</a>
         </div>
-        <p class="hero-meta" data-load style="--d: 560ms">App · macOS 15+ · 手动下载：<a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg">Apple Silicon</a><span aria-hidden="true"> / </span><a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-x86_64.dmg">Intel</a></p>
+        <p class="hero-meta" id="download" data-load style="--d: 560ms">App · macOS 15+ · 手动下载：<a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg">Apple Silicon</a><span aria-hidden="true"> / </span><a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-x86_64.dmg">Intel</a></p>
+        <p class="distribution-summary" data-load style="--d: 620ms"><strong>ad-hoc 分发</strong> · 不是 Developer ID 签名，未经 Apple 公证；首次打开可能被 macOS 拦截。<a href="support.html#first-open">查看安全打开步骤</a></p>
       </div>
 
       <figure class="hero-shot" data-load style="--d: 700ms">
@@ -268,8 +269,8 @@
           </article>
           <article>
             <span class="num">04</span>
-            <h3>更新先验签</h3>
-            <p>软件内更新经 Ed25519 验证安装包后再安装，安装完成自动退出并重新打开。</p>
+            <h3>更新先校验</h3>
+            <p>软件内更新先做 Sparkle Ed25519 完整性校验；它不代表 Developer ID 签名或 Apple 公证。</p>
           </article>
         </div>
       </div>
@@ -287,7 +288,7 @@
                 <span class="step-num" aria-hidden="true">1</span>
                 <div class="step-body">
                   <h3>下载并安装</h3>
-                  <p>打开 DMG，把 Ossuno 拖进「应用程序」。</p>
+                  <p>打开 DMG，把 Ossuno 拖进「应用程序」。若首次运行被拦截，按<a href="support.html#first-open">安全打开步骤</a>放行。</p>
                 </div>
               </li>
               <li class="step">
@@ -337,12 +338,16 @@
               <p>Ossuno 1.0.0 同时提供 Apple Silicon（M 系列）和 Intel（x86_64）安装包，都需要 macOS 15 或更高版本。首页会在浏览器可靠报告芯片时自动推荐；无法识别时可手动选择。</p>
             </details>
             <details>
+              <summary>为什么首次打开会被 macOS 拦截？<span class="faq-toggle" aria-hidden="true"></span></summary>
+              <p>1.0.0 的两个 DMG 都是 ad-hoc 分发，不是 Developer ID 签名，也未经 Apple 公证。请先尝试打开一次，再前往「系统设置 → 隐私与安全」点击「仍要打开」；完整步骤和风险说明见<a href="support.html#first-open">支持页面</a>。</p>
+            </details>
+            <details>
               <summary>账号凭证保存在哪里？<span class="faq-toggle" aria-hidden="true"></span></summary>
               <p>AccessKey Secret 和 STS Token 保存到 macOS 钥匙串。账号名称、地域等非敏感设置保存在本机偏好设置中。</p>
             </details>
             <details>
               <summary>软件会自动更新吗？<span class="faq-toggle" aria-hidden="true"></span></summary>
-              <p>会。在「Ossuno → 检查更新…」中可以立即检查；发现新版本后，点击安装即可完成签名验证、替换并自动重新打开。</p>
+              <p>会。在「Ossuno → 检查更新…」中可以立即检查；发现新版本后，点击安装会先完成 Sparkle Ed25519 完整性校验，再替换并自动重新打开。这项校验不代表 Developer ID 签名或 Apple 公证。</p>
             </details>
             <details>
               <summary>删除后可以撤销吗？<span class="faq-toggle" aria-hidden="true"></span></summary>

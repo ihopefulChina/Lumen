@@ -15,8 +15,9 @@ tracked_appcast_path="$repo_dir/appcast.xml"
 release_notes_path="$repo_dir/docs/releases/$version.md"
 
 usage() {
-    print -u2 "Usage: scripts/package-dmg.sh <development|adhoc|release> [all|arm64|x86_64]"
-    print -u2 "       adhoc and release must package all architectures together."
+    print -u2 "Usage: scripts/package-dmg.sh <development|adhoc|adhoc-release|release> [all|arm64|x86_64]"
+    print -u2 "       adhoc, adhoc-release, and release must package all architectures together."
+    print -u2 "       adhoc-release also requires OSSUNO_ALLOW_ADHOC_RELEASE=1."
     exit 64
 }
 
@@ -25,7 +26,7 @@ fail() {
     exit 1
 }
 
-[[ "$mode" == "development" || "$mode" == "adhoc" || "$mode" == "release" ]] || usage
+[[ "$mode" == "development" || "$mode" == "adhoc" || "$mode" == "adhoc-release" || "$mode" == "release" ]] || usage
 [[ "$architecture_selection" == "all" || "$architecture_selection" == "arm64" || "$architecture_selection" == "x86_64" ]] || usage
 if [[ "$mode" != "development" && "$architecture_selection" != "all" ]]; then
     fail "$mode packaging requires both arm64 and x86_64 so Sparkle can generate one complete feed"
@@ -100,6 +101,16 @@ developer_identity="${OSSUNO_DEVELOPER_ID_APPLICATION:-}"
 development_team="${OSSUNO_DEVELOPMENT_TEAM:-}"
 notary_profile="${OSSUNO_NOTARY_PROFILE:-}"
 
+if [[ "$mode" == "adhoc-release" ]]; then
+    [[ "${OSSUNO_ALLOW_ADHOC_RELEASE:-0}" == "1" ]] \
+        || fail "adhoc-release requires the explicit OSSUNO_ALLOW_ADHOC_RELEASE=1 acknowledgement"
+    if grep -Eiq '(使用 Developer ID 签名|通过 Apple 公证|Gatekeeper 正常验证|Developer ID signed|Apple notarized)' "$release_notes_path"; then
+        fail "release notes must not claim Developer ID signing, notarization, or normal Gatekeeper verification for adhoc-release"
+    fi
+    grep -Eiq '(ad.?hoc|未公证|未经.*公证|右键.*打开)' "$release_notes_path" \
+        || fail "release notes must explicitly disclose the ad-hoc, non-notarized distribution"
+fi
+
 # Release requirements are checked before the build or tracked file changes.
 # Ad-hoc mode intentionally skips them and must never be presented as a
 # Gatekeeper-ready public release.
@@ -151,7 +162,7 @@ build_architecture() {
         ONLY_ACTIVE_ARCH=YES
         "CURRENT_PROJECT_VERSION=$build_number"
     )
-    if [[ "$mode" == "development" || "$mode" == "adhoc" ]]; then
+    if [[ "$mode" == "development" || "$mode" == "adhoc" || "$mode" == "adhoc-release" ]]; then
         build_settings+=(
             CODE_SIGN_IDENTITY=-
             DEVELOPMENT_TEAM=
@@ -191,7 +202,7 @@ build_architecture() {
     ditto --arch "$architecture" "$built_app_path" "$packaged_app_path"
     assert_thin_macho_tree "$packaged_app_path" "$architecture"
 
-    if [[ "$mode" == "development" || "$mode" == "adhoc" ]]; then
+    if [[ "$mode" == "development" || "$mode" == "adhoc" || "$mode" == "adhoc-release" ]]; then
         codesign --force --deep --sign - "$packaged_app_path"
         codesign --verify --deep --strict --verbose=2 "$packaged_app_path"
     else
@@ -277,7 +288,7 @@ ditto "$arm64_temp_dmg" "$appcast_dir/$arm64_artifact_name"
 ditto "$x86_64_temp_dmg" "$appcast_dir/$x86_64_artifact_name"
 ditto "$release_notes_path" "$appcast_dir/${arm64_artifact_name:r}.md"
 ditto "$release_notes_path" "$appcast_dir/${x86_64_artifact_name:r}.md"
-if [[ -f "$tracked_appcast_path" ]]; then
+if [[ "$mode" != "adhoc-release" && -f "$tracked_appcast_path" ]]; then
     ditto "$tracked_appcast_path" "$appcast_dir/appcast.xml"
 fi
 
@@ -293,13 +304,21 @@ fi
     --maximum-deltas 0 \
     "$appcast_dir"
 
+if [[ "$mode" == "adhoc-release" ]]; then
+    all_item_count="$(xmllint --xpath "count(//*[local-name()='item'])" "$appcast_dir/appcast.xml")"
+    x86_64_item_count="$(xmllint --xpath "count(//*[local-name()='item' and *[local-name()='version' and text()='$x86_64_build_number']])" "$appcast_dir/appcast.xml")"
+    arm64_item_count="$(xmllint --xpath "count(//*[local-name()='item' and *[local-name()='version' and text()='$arm64_build_number']])" "$appcast_dir/appcast.xml")"
+    [[ "$all_item_count" == "2" && "$x86_64_item_count" == "1" && "$arm64_item_count" == "1" ]] \
+        || fail "adhoc-release appcast must contain exactly builds $x86_64_build_number and $arm64_build_number, with no historical items"
+fi
+
 for architecture in x86_64 arm64; do
     artifact_name="$(artifact_name_for_architecture "$architecture")"
     build_number="$(build_number_for_architecture "$architecture")"
     OSSUNO_SPARKLE_SIGN_UPDATE="$sign_update" \
     OSSUNO_SPARKLE_KEY_FILE="$private_key_path" \
     OSSUNO_DEVELOPMENT_TEAM="$development_team" \
-    OSSUNO_ADHOC="$([[ "$mode" == "adhoc" ]] && print 1 || print 0)" \
+    OSSUNO_ADHOC="$([[ "$mode" == "adhoc" || "$mode" == "adhoc-release" ]] && print 1 || print 0)" \
         "$script_dir/verify-release.sh" \
         "$stage_dir/$artifact_name" \
         "$version" \
@@ -316,6 +335,8 @@ for architecture in x86_64 arm64; do
     mv "$stage_dir/$artifact_name" "$output_path"
     if [[ "$mode" == "adhoc" ]]; then
         print "Created local-only ad-hoc $architecture artifact (DO NOT PUBLISH): $output_path"
+    elif [[ "$mode" == "adhoc-release" ]]; then
+        print "Created formal ad-hoc $architecture artifact (NOT Developer ID signed; NOT notarized): $output_path"
     else
         print "Created verified $architecture release artifact: $output_path"
     fi
@@ -335,6 +356,11 @@ ditto "$appcast_dir/appcast.xml" "$repo_dir/website/appcast.xml"
 shasum -a 256 "$dist_dir/appcast.xml"
 
 print
+if [[ "$mode" == "adhoc-release" ]]; then
+    print "AD-HOC DISTRIBUTION WARNING: these artifacts are ad-hoc signed, not Developer ID signed, and not notarized."
+    print "Gatekeeper may block normal double-click launch; do not describe them as Apple-verified artifacts."
+    print
+fi
 print "Publishing checklist:"
 print "  1. Upload both uniquely named DMGs before publishing any link or feed:"
 print "       - $arm64_artifact_name"

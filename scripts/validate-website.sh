@@ -160,8 +160,28 @@ if grep -RhoE --include='*.html' 'https://github\.com/ihopefulChina/Ossuno/relea
   exit 1
 fi
 
-if grep -Eiq '(ad.?hoc|notari[sz]|Gatekeeper|Developer ID)' "$index"; then
-  echo "Website contains obsolete distribution copy." >&2
+for distribution_file in "$readme" "$repo_root/docs/releases/1.0.0.md" "$index" "$support"; do
+  for distribution_marker in 'ad-hoc' '不是 Developer ID 签名' '未经 Apple 公证'; do
+    if ! grep -Fq -- "$distribution_marker" "$distribution_file"; then
+      echo "Missing distribution disclosure in ${distribution_file#"$repo_root/"}: $distribution_marker" >&2
+      exit 1
+    fi
+  done
+done
+
+for opening_guide in "$readme" "$repo_root/docs/releases/1.0.0.md" "$support"; do
+  for opening_marker in '系统设置 → 隐私与安全' '仍要打开'; do
+    if ! grep -Fq -- "$opening_marker" "$opening_guide"; then
+      echo "Missing first-open guidance in ${opening_guide#"$repo_root/"}: $opening_marker" >&2
+      exit 1
+    fi
+  done
+done
+
+if grep -Eini -- \
+  '使用 Developer ID 签名并通过 Apple 公证|已通过 Apple 公证|已经 Apple 公证|可由 macOS Gatekeeper 正常验证' \
+  "$readme" "$repo_root/docs/releases/1.0.0.md" "$site_root"/*.html; then
+  echo "Distribution copy incorrectly claims Developer ID signing or Apple notarization." >&2
   exit 1
 fi
 

@@ -78,15 +78,16 @@ npx ossuno-mcp install  # 一键注册到本机已安装的 AI 客户端
 - 账号配置原子写入，并保留上一份可恢复副本。
 - 路径穿越、符号链接逃逸、不完整分页和目标冲突都会中止相关批量操作。
 - 诊断摘要不包含账号名、AccessKey ID、Bucket、对象键、本地路径、URL、请求 ID、Secret 或 Token。
-- 软件内更新通过 Sparkle 校验更新包；安装完成后自动退出并重新打开 Ossuno。
+- 软件内更新会执行 Sparkle Ed25519 完整性校验；它用于确认更新包与发布源一致，不代表 Developer ID 签名或 Apple 公证。安装完成后会自动退出并重新打开 Ossuno。
 
 ## 安装
 
 1. 按这台 Mac 的芯片下载 Ossuno：[Apple Silicon（M 系列）](https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg)或 [Intel](https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-x86_64.dmg)。不确定时，可在苹果菜单的「关于本机」中查看芯片或处理器。
 2. 打开 DMG，把 Ossuno 拖进「应用程序」。
-3. 添加权限最小化的 RAM 子账号，选择地域，然后打开 Bucket。
+3. 双击 Ossuno 尝试打开一次。若 macOS 阻止运行，打开「系统设置 → 隐私与安全」，滚动到“安全性”，点击「仍要打开」，在再次出现的警告中点击「打开」（系统可能要求密码或 Touch ID）。
+4. 添加权限最小化的 RAM 子账号，选择地域，然后打开 Bucket。
 
-安装包目前是 ad-hoc 签名，首次打开若被 macOS 拦下，右键 Ossuno 选择「打开」即可。
+> **分发说明：** 两个 DMG 均采用 ad-hoc 代码签名（没有开发者身份），不是 Developer ID 签名，且未经 Apple 公证。因此 macOS 无法验证开发者或确认安装包已经过 Apple 恶意软件检查，首次打开通常会触发 Gatekeeper。仅在确认安装包来自本仓库的 GitHub Releases 时按上述步骤放行。参见 [Apple 的安全打开说明](https://support.apple.com/zh-cn/102445)。
 
 装好带自动更新功能的版本后，可以在「Ossuno → 检查更新…」直接升级，也可以在设置里开启自动检查。
 
