@@ -1,4 +1,4 @@
-// swift-tools-version:5.9
+// swift-tools-version:6.0
 import PackageDescription
 
 let package = Package(
@@ -12,7 +12,16 @@ let package = Package(
             name: "lumen-mcp",
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk"),
-            ]
+            ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
+        ),
+        .testTarget(
+            name: "lumen-mcpTests",
+            dependencies: [
+                "lumen-mcp",
+                .product(name: "MCP", package: "swift-sdk"),
+            ],
+            swiftSettings: [.swiftLanguageMode(.v6)]
         ),
     ]
 )

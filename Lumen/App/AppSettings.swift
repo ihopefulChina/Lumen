@@ -21,7 +21,7 @@ final class AppSettings {
         didSet { defaults.set(convertHEIC, forKey: Keys.heic) }
     }
     var imagesOnly: Bool {
-        didSet { defaults.set(imagesOnly, forKey: Keys.imagesOnly) }
+        didSet { defaults.set(imagesOnly, forKey: Keys.browserMaterialFilterV2) }
     }
     var preferredViewMode: BrowserViewMode {
         didSet { defaults.set(preferredViewMode.rawValue, forKey: Keys.preferredViewMode) }
@@ -81,7 +81,11 @@ final class AppSettings {
         let stored = defaults.object(forKey: Keys.concurrent) as? Int
         self._concurrentUploads = min(6, max(1, stored ?? 3))
         self.convertHEIC = defaults.object(forKey: Keys.heic) as? Bool ?? false
-        self.imagesOnly = defaults.object(forKey: Keys.imagesOnly) as? Bool ?? true
+        // Do not read the legacy `settings.imagesOnly` value here. It used to
+        // default to true, so upgraded installations may have persisted that
+        // value without intentionally choosing a filter. A v2 key gives every
+        // 1.0.3 user one unfiltered start, then persists later user choices.
+        self.imagesOnly = defaults.object(forKey: Keys.browserMaterialFilterV2) as? Bool ?? false
         self.preferredViewMode = defaults.string(forKey: Keys.preferredViewMode)
             .flatMap(BrowserViewMode.init(rawValue:)) ?? .grid
         self.playCompleteSound = defaults.bool(forKey: Keys.sound)
@@ -110,7 +114,7 @@ final class AppSettings {
     private enum Keys {
         static let concurrent = "settings.concurrentUploads"
         static let heic = "settings.convertHEIC"
-        static let imagesOnly = "settings.imagesOnly"
+        static let browserMaterialFilterV2 = "settings.browserMaterialFilter.v2"
         static let preferredViewMode = "settings.preferredViewMode"
         static let sound = "settings.playCompleteSound"
         static let menuBar = "settings.showMenuBar"

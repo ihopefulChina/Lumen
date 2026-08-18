@@ -16,25 +16,27 @@ struct BrowserView: View {
         // `@Environment(AppModel.self)` can trap ("No Observable object of
         // type AppModel found"), so they must use this captured reference.
         let modelRef = model
-        // The scope bar and path bar are stacked in a VStack instead of
-        // safeAreaInset. With the SwiftUI runtime shipped in Xcode 26 on
-        // macOS 15, a bottom bar placed after the flexible detail content
-        // stops rendering unless it is followed by another non-trivial view,
-        // so an invisible 18pt tail view is kept after the path bar (0pt and
-        // 1pt tails do not trigger the workaround).
         VStack(spacing: 0) {
             if showsSearchChrome {
                 searchScopeBar
             }
-            content
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-            if modelRef.selectedBucket != nil {
-                PathBar(showFileImporter: $showFileImporter)
+            ZStack(alignment: .bottom) {
+                content
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    // Keep the final list row clear of the overlaid Finder-style
+                    // path bar. Using an overlay also avoids the macOS 15 issue
+                    // where a trailing flexible VStack sibling can disappear.
+                    .padding(.bottom, modelRef.selectedBucket == nil ? 0 : 24)
+                if modelRef.selectedBucket != nil {
+                    PathBar(showFileImporter: $showFileImporter)
+                }
             }
-            Color.clear
-                .frame(height: 1)
-                .allowsHitTesting(false)
         }
+        // NavigationSplitView does not consistently propagate its bottom
+        // safe-area inset into the detail column on macOS 15. Reserve the
+        // transfer tray's height here as well so it cannot cover the path.
+        .padding(.bottom, modelRef.transfers.hasJobs ? 28 : 0)
+        .background(BrowserShortcutScopeProbe())
         .navigationTitle(title)
         .navigationSubtitle(subtitle)
         .searchable(text: $model.browser.searchText, placement: .toolbar, prompt: searchPrompt)
@@ -934,6 +936,7 @@ private struct PathBar: View {
         }
     }
 }
+
 
 private struct BrowserFolderDropModifier: ViewModifier {
     var folder: OSSFolder?

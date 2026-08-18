@@ -42,6 +42,123 @@ struct AppModelTests {
         #expect(AppSettings(defaults: defaults).preferredViewMode == .list)
     }
 
+    @Test func browserDoesNotHideUnknownObjectTypesByDefault() {
+        let defaults = Self.defaults()
+        let settings = AppSettings(defaults: defaults)
+        let browser = BrowserModel(defaults: defaults)
+        browser.objects = [
+            OSSObject(
+                key: "database.dump",
+                size: 1,
+                etag: "dump",
+                lastModified: nil,
+                storageClass: "Standard"
+            )
+        ]
+
+        #expect(!settings.imagesOnly)
+        #expect(!browser.imagesOnly)
+        #expect(browser.visibleObjects.map(\.key) == ["database.dump"])
+    }
+
+    @Test func legacyMaterialFilterIsResetOnceThenNewChoicesPersist() {
+        let defaults = Self.defaults()
+        defaults.set(true, forKey: "settings.imagesOnly")
+
+        let upgraded = AppSettings(defaults: defaults)
+        #expect(!upgraded.imagesOnly)
+        #expect(defaults.object(forKey: "settings.browserMaterialFilter.v2") == nil)
+
+        upgraded.imagesOnly = true
+        #expect(AppSettings(defaults: defaults).imagesOnly)
+
+        upgraded.imagesOnly = false
+        #expect(!AppSettings(defaults: defaults).imagesOnly)
+    }
+
+    @Test func textEditingDetectionCoversFieldEditorsAndSecureFields() {
+        let editor = NSTextView()
+        let secureField = NSSecureTextField()
+        let unrelated = NSView()
+
+        #expect(BrowserKeyEvent.isEditingText(responder: editor, fieldEditor: editor))
+        #expect(BrowserKeyEvent.isEditingText(responder: secureField, fieldEditor: editor))
+        #expect(!BrowserKeyEvent.isEditingText(responder: unrelated, fieldEditor: editor))
+    }
+
+    @Test func browserShortcutsRespectTheFocusedResponderRegionAndNativeControls() {
+        let window = NSWindow(
+            contentRect: CGRect(x: 0, y: 0, width: 1_000, height: 700),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let root = NSView(frame: CGRect(x: 0, y: 0, width: 1_000, height: 700))
+        window.contentView = root
+        let browserRegion = CGRect(x: 250, y: 0, width: 750, height: 650)
+
+        let sidebar = NSTableView(frame: CGRect(x: 0, y: 0, width: 240, height: 650))
+        let browserTable = NSTableView(frame: CGRect(x: 280, y: 0, width: 700, height: 600))
+        let browserButton = NSButton(frame: CGRect(x: 800, y: 610, width: 120, height: 28))
+        root.addSubview(sidebar)
+        root.addSubview(browserTable)
+        root.addSubview(browserButton)
+
+        #expect(!BrowserShortcutScope.shouldHandle(
+            responder: sidebar,
+            window: window,
+            browserRegion: browserRegion
+        ))
+        #expect(BrowserShortcutScope.shouldHandle(
+            responder: browserTable,
+            window: window,
+            browserRegion: browserRegion
+        ))
+        #expect(!BrowserShortcutScope.shouldHandle(
+            responder: browserButton,
+            window: window,
+            browserRegion: browserRegion
+        ))
+    }
+
+    @Test func editingAccountDraftKeepsThePersistedIdentityBeforeKeychainLoading() {
+        let account = OSSAccount(
+            id: UUID(),
+            name: "Production",
+            accessKeyId: "LTAI-existing",
+            regionID: "cn-shanghai",
+            endpointOverride: "https://oss.example.test",
+            cdnDomain: "cdn.example.test",
+            defaultACL: .private,
+            prefixTemplate: "assets/{yyyy}/",
+            useTransferAccelerate: true,
+            createdAt: Date(timeIntervalSince1970: 1_700_000_000)
+        )
+
+        let draft = AccountSheet.initialDraft(editing: account)
+
+        #expect(draft.id == account.id)
+        #expect(draft.name == account.name)
+        #expect(draft.accessKeyId == account.accessKeyId)
+        #expect(draft.regionID == account.regionID)
+        #expect(draft.endpointOverride == account.endpointOverride)
+        #expect(draft.cdnDomain == account.cdnDomain)
+        #expect(draft.defaultACL == account.defaultACL)
+        #expect(draft.prefixTemplate == account.prefixTemplate)
+        #expect(draft.useTransferAccelerate == account.useTransferAccelerate)
+        #expect(draft.createdAt == account.createdAt)
+        #expect(draft.secret.isEmpty)
+        #expect(draft.token.isEmpty)
+    }
+
+    @Test func newAccountDraftStillGetsANewIdentity() {
+        let draft = AccountSheet.initialDraft(editing: nil)
+
+        #expect(draft.name.isEmpty)
+        #expect(draft.accessKeyId.isEmpty)
+        #expect(draft.secret.isEmpty)
+    }
+
     @Test func newWindowUsesPreferredBrowserView() {
         let defaults = Self.defaults()
         let settings = AppSettings(defaults: defaults)
@@ -110,7 +227,8 @@ struct AppModelTests {
                 region: "cn-hangzhou",
                 endpointHost: "oss-cn-hangzhou.aliyuncs.com",
                 bucket: nil,
-                transport: transport
+                transport: transport,
+                testingVersioningStatusOverride: .disabled
             )
         }
         model.selectedAccountID = nil
@@ -153,6 +271,35 @@ struct AppModelTests {
 
         #expect(model.browser.prefix == "art/")
         #expect(model.browser.selectedKeys == [object.key])
+    }
+
+    @Test func openingUnknownSearchResultTemporarilyRevealsItWithoutChangingTheFilter() async {
+        let account = Self.account()
+        let bucket = Self.bucket()
+        let transport = BrowserSearchTransport()
+        let model = Self.model(account: account, bucket: bucket, transport: transport)
+        model.settings.imagesOnly = true
+        model.browser.imagesOnly = true
+        let object = OSSObject(
+            key: "art/database.dump",
+            size: 84,
+            etag: "dump",
+            lastModified: nil,
+            storageClass: "Standard"
+        )
+
+        await model.openSearchResult(object)
+
+        #expect(model.settings.imagesOnly)
+        #expect(model.browser.imagesOnly)
+        #expect(model.browser.transientlyRevealedKey == object.key)
+        #expect(model.browser.visibleObjects.contains(where: { $0.key == object.key }))
+        #expect(model.browser.selectedKeys == [object.key])
+
+        model.browser.navigate(to: "elsewhere/")
+
+        #expect(model.browser.transientlyRevealedKey == nil)
+        #expect(!model.browser.visibleObjects.contains(where: { $0.key == object.key }))
     }
 
     @Test func changingBucketClearsBucketSearchResults() async {
@@ -439,11 +586,111 @@ struct AppModelTests {
         #expect(await transport.headCount == 41)
     }
 
+    @Test func uploadOverwriteApprovalIsBoundToTheExactRemoteIdentity() async throws {
+        for mutation in UploadIdentityMutation.allCases {
+            let source = FileManager.default.temporaryDirectory
+                .appending(path: "\(UUID().uuidString)-identity.txt")
+            try Data("test data".utf8).write(to: source)
+            defer { try? FileManager.default.removeItem(at: source) }
+
+            let account = Self.account()
+            let bucket = Self.bucket()
+            let transport = UploadIdentityDriftTransport()
+            let model = Self.model(
+                account: account,
+                bucket: bucket,
+                transport: transport,
+                versioningStatus: .enabled
+            )
+            model.settings.transferConflictPolicy = .ask
+
+            model.upload(urls: [source], to: "", applyTemplate: false)
+            try await Self.waitUntil { model.overwritePrompt != nil }
+            let approvedIdentity = try #require(
+                model.overwritePrompt?.overwriteDestinations.values.first
+            )
+            #expect(approvedIdentity == UploadIdentityDriftTransport.initialIdentity)
+
+            await transport.apply(mutation)
+            let changedIdentity = await transport.currentIdentity
+            model.confirmOverwrite()
+            try await Self.waitUntil {
+                model.transfers.jobs.count == 1 && model.transfers.jobs.allSatisfy { !$0.isActive }
+            }
+
+            let job = try #require(model.transfers.jobs.first)
+            #expect(job.status == .failed)
+            #expect(job.errorMessage?.contains("目标对象在排队或传输期间发生变化") == true)
+            #expect(await transport.putCount == 0)
+            #expect(await transport.currentIdentity == changedIdentity)
+        }
+    }
+
+    @Test func unversionedBucketKeepsOverwriteDisabledButStillAllowsSkipping() async throws {
+        let source = FileManager.default.temporaryDirectory
+            .appending(path: "\(UUID().uuidString)-unversioned.txt")
+        try Data("test data".utf8).write(to: source)
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let account = Self.account()
+        let bucket = Self.bucket()
+        let transport = UploadIdentityDriftTransport()
+        let model = Self.model(account: account, bucket: bucket, transport: transport)
+        model.settings.transferConflictPolicy = .ask
+
+        model.upload(urls: [source], to: "", applyTemplate: false)
+        try await Self.waitUntil { model.overwritePrompt != nil }
+
+        #expect(model.overwritePrompt?.canOverwriteSafely == false)
+        #expect(model.overwritePrompt?.message.contains("请先启用版本控制") == true)
+        model.confirmOverwrite()
+        #expect(model.overwritePrompt != nil)
+        #expect(model.transfers.jobs.isEmpty)
+        #expect(await transport.putCount == 0)
+
+        model.skipOverwriteConflicts()
+        try await Self.waitUntil { model.overwritePrompt == nil }
+    }
+
+    @Test func askPolicyPausesCloudCopyBeforeReplacingAnExistingObject() async {
+        let account = Self.account()
+        let bucket = Self.bucket()
+        let transport = CloudConflictPromptTransport()
+        let model = Self.model(account: account, bucket: bucket, transport: transport)
+        model.settings.transferConflictPolicy = .ask
+        let payload = CloudDragPayload(
+            accountID: account.id,
+            bucketName: bucket.name,
+            sourceRegionID: bucket.regionID,
+            objectKeys: ["source.txt"],
+            folderPrefixes: []
+        )
+
+        let succeeded = await model.organizeCloud(payload, to: "archive/", mode: .copy)
+
+        #expect(!succeeded)
+        #expect(model.cloudConflictPrompt?.conflictKeys == ["archive/source.txt"])
+        #expect(model.cloudConflictPrompt?.destinationAccountID == account.id)
+        #expect(model.cloudConflictPrompt?.destinationBucketName == bucket.name)
+        #expect(model.cloudConflictPrompt?.canReplaceSafely == false)
+        #expect(await transport.methods == ["HEAD"])
+    }
+
     private static func defaults() -> UserDefaults {
         let suite = "Lumen.AppModelTests.\(UUID().uuidString)"
         let defaults = UserDefaults(suiteName: suite)!
         defaults.removePersistentDomain(forName: suite)
         return defaults
+    }
+
+    private static func waitUntil(
+        _ condition: @escaping @MainActor () -> Bool
+    ) async throws {
+        for _ in 0..<300 {
+            if condition() { return }
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        Issue.record("Timed out waiting for AppModel state")
     }
 
     private static func account() -> OSSAccount {
@@ -474,7 +721,8 @@ struct AppModelTests {
     private static func model(
         account: OSSAccount,
         bucket: OSSBucket,
-        transport: any OSSHTTPTransport
+        transport: any OSSHTTPTransport,
+        versioningStatus: OSSBucketVersioningStatus = .disabled
     ) -> AppModel {
         let model = AppModel(kind: .settings, services: AppServices(accounts: [account])) { _, _ in
             OSSClient(
@@ -486,13 +734,71 @@ struct AppModelTests {
                 region: bucket.regionID,
                 endpointHost: bucket.extranetEndpoint,
                 bucket: bucket.name,
-                transport: transport
+                transport: transport,
+                testingVersioningStatusOverride: versioningStatus
             )
         }
         model.selectedAccountID = account.id
         model.buckets = [bucket]
         model.selectedBucketName = bucket.name
         return model
+    }
+}
+
+private enum UploadIdentityMutation: CaseIterable, Sendable {
+    case etag
+    case versionID
+    case size
+}
+
+private actor UploadIdentityDriftTransport: OSSHTTPTransport {
+    static let initialIdentity = OSSObjectIdentity(
+        etag: "approved-etag",
+        versionID: "version-1",
+        size: 9
+    )
+
+    private(set) var currentIdentity = UploadIdentityDriftTransport.initialIdentity
+    private(set) var putCount = 0
+
+    func apply(_ mutation: UploadIdentityMutation) {
+        switch mutation {
+        case .etag:
+            currentIdentity.etag = "changed-etag"
+        case .versionID:
+            currentIdentity.versionID = "version-2"
+        case .size:
+            currentIdentity.size += 1
+        }
+    }
+
+    func send(
+        _ request: URLRequest,
+        body: OSSHTTPBody,
+        download: Bool,
+        onProgress: (@Sendable (Int64, Int64) -> Void)?
+    ) async throws -> OSSHTTPResult {
+        if request.httpMethod == "HEAD" {
+            return OSSHTTPResult(
+                status: 200,
+                headers: [
+                    "Content-Length": String(currentIdentity.size),
+                    "ETag": "\"\(currentIdentity.etag)\"",
+                    "x-oss-version-id": currentIdentity.versionID ?? ""
+                ],
+                data: Data(),
+                temporaryDownloadURL: nil
+            )
+        }
+        if request.httpMethod == "PUT" {
+            putCount += 1
+        }
+        return OSSHTTPResult(
+            status: 200,
+            headers: [:],
+            data: Data(),
+            temporaryDownloadURL: nil
+        )
     }
 }
 
@@ -570,6 +876,25 @@ private actor ConflictProbeTransport: OSSHTTPTransport {
     }
 }
 
+private actor CloudConflictPromptTransport: OSSHTTPTransport {
+    private(set) var methods: [String] = []
+
+    func send(
+        _ request: URLRequest,
+        body: OSSHTTPBody,
+        download: Bool,
+        onProgress: (@Sendable (Int64, Int64) -> Void)?
+    ) async throws -> OSSHTTPResult {
+        methods.append(request.httpMethod ?? "")
+        return OSSHTTPResult(
+            status: 200,
+            headers: ["Content-Length": "1", "ETag": "existing"],
+            data: Data(),
+            temporaryDownloadURL: nil
+        )
+    }
+}
+
 private actor BrowserSearchTransport: OSSHTTPTransport {
     func send(
         _ request: URLRequest,
@@ -585,6 +910,9 @@ private actor BrowserSearchTransport: OSSHTTPTransport {
           </Contents>
           <Contents>
             <Key>notes/readme.txt</Key><Size>12</Size><ETag>readme</ETag><StorageClass>Standard</StorageClass>
+          </Contents>
+          <Contents>
+            <Key>art/database.dump</Key><Size>84</Size><ETag>dump</ETag><StorageClass>Standard</StorageClass>
           </Contents>
         </ListBucketResult>
         """

@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://ihopefulchina.github.io/Lumen/"><strong>官网</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.2.dmg"><strong>下载 Lumen 1.0.2</strong></a>
+  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.3.dmg"><strong>下载 Lumen 1.0.3</strong></a>
   &nbsp;·&nbsp;
   <a href="https://ihopefulchina.github.io/Lumen/support.html">使用支持</a>
   &nbsp;·&nbsp;
@@ -36,11 +36,11 @@ Lumen 是一个原生的 macOS OSS 客户端。它不打算把控制台搬进桌
 
 - 单击选中，Command 多选，Shift 连选，Return 原地重命名。
 - 网格与列表、路径栏、方向键、空格快速查看和 `⌘I` 信息窗口，都是熟悉的 Mac 操作。
-- 在 Bucket 内拖放、复制或移动文件夹；目标冲突可以询问、替换、跳过或「保留两者」。
+- 在 Bucket 内拖放、复制或移动文件夹；目标冲突可以询问、跳过或「保留两者」，已开启版本控制时还可安全替换。
 - 把对象或整个文件夹直接拖到访达。多选时会生成一个「Lumen 下载」文件夹，保留云端目录结构。
 - 复制后切换 Bucket 再粘贴，就能跨 Bucket 整理。同账号同地域走云端复制；其他情况会先说明清楚，再经由这台 Mac 中转。
 
-移动永远先完成全部复制，再删除来源。失败不会让还没安全复制的源对象消失。
+覆盖只在目标 Bucket 已开启版本控制、OSS 返回精确 `versionId` 时执行；未开启时可选择「保留两者」或跳过。移动永远先完成全部复制，再按精确 `versionId` 删除来源；只有来源和目标 Bucket 都开启版本控制、且能确认两个精确版本时才会自动删源。未开启、已暂停或无法读取版本状态时会安全取消移动，你仍可先复制并在 OSS 控制台核对后手动删除来源。
 
 ## 传输可以停下来，再继续
 
@@ -50,7 +50,7 @@ Lumen 是一个原生的 macOS OSS 客户端。它不打算把控制台搬进桌
 
 ## 对象属性
 
-「对象属性」可以编辑 Content-Type、Cache-Control、Content-Disposition、用户元数据和最多十个 OSS 标签。重复键、空键和换行注入会在提交前被拦下；只改标签时不会重写元数据。Bucket 开了版本控制的话，刚删除的项目可以立即撤销。
+「对象属性」可以编辑 Content-Type、Cache-Control、Content-Disposition、用户元数据和最多十个 OSS 标签。重复键、空键和换行注入会在提交前被拦下；只改标签时不会重写元数据。为避免并发改写无法恢复，保存对象属性需要 Bucket 已开启版本控制。Bucket 开了版本控制的话，刚删除的项目也可以立即撤销。
 
 ## 安全边界
 
@@ -63,13 +63,25 @@ Lumen 是一个原生的 macOS OSS 客户端。它不打算把控制台搬进桌
 
 ## 安装
 
-1. [下载 Lumen 1.0.2](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.2.dmg)。
+1. [下载 Lumen 1.0.3](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.3.dmg)。
 2. 打开 DMG，把 Lumen 拖进「应用程序」。
 3. 添加权限最小化的 RAM 子账号，选择地域，然后打开 Bucket。
 
 安装包目前是 ad-hoc 签名，首次打开若被 macOS 拦下，右键 Lumen 选择「打开」即可。
 
 装好带自动更新功能的版本后，可以在「Lumen → 检查更新…」直接升级，也可以在设置里开启自动检查。
+
+### RAM 权限提示
+
+Lumen 1.0.3 在复制、移动、覆盖和撤销前会读取 Bucket 版本控制状态与对象 ACL，并在版本控制 Bucket 中按具体版本执行复制或清理。已有的自定义 RAM 策略除了列举、读取、上传、复制和删除对象等基础动作，还需要按使用场景加入：
+
+- `oss:GetBucketVersioning`：确认 Bucket 是否能安全执行禁止覆盖、替换或删除；查询失败时 Lumen 会安全取消相关操作。
+- `oss:GetObjectAcl`：复制或移动时读取并保留对象 ACL。RAM 动作名以 `Acl` 结尾，不是 API 名 `GetObjectACL` 的全大写写法。
+- `oss:GetObjectVersion`：版本控制 Bucket 中复制、恢复或中转指定版本时读取源版本。
+- `oss:DeleteObjectVersion`：撤销删除、清理精确版本或回滚已提交版本时使用。
+- `oss:GetObjectTagging` 与 `oss:PutObjectTagging`：复制时保留对象标签。
+
+若对象使用 SSE-KMS，还需要对应 KMS 密钥的 `kms:Decrypt` 与 `kms:GenerateDataKey` 权限。缺少安全检查所需的读取权限时，Lumen 不会静默降级为可能覆盖或误删数据的操作。
 
 <p align="center">
   <img src="docs/account.png" width="520" alt="在 Lumen 中添加 OSS 账号">

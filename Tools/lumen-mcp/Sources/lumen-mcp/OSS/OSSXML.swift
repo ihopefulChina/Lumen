@@ -85,16 +85,60 @@ enum OSSXML {
             nextToken: root.child("NextContinuationToken")?.string
         )
     }
+
+    static func bucketVersioningStatus(from data: Data) throws -> OSSBucketVersioningStatus {
+        let root = try parse(data)
+        guard root.name.caseInsensitiveCompare("VersioningConfiguration") == .orderedSame else {
+            throw OSSServiceError(
+                statusCode: 200,
+                code: "InvalidVersioningResponse",
+                message: "Bucket 版本控制响应根节点无效：\(root.name)",
+                requestId: ""
+            )
+        }
+        guard let rawStatus = root.child("Status")?.string, !rawStatus.isEmpty else {
+            return .unconfigured
+        }
+        switch rawStatus.lowercased() {
+        case "enabled": return .enabled
+        case "suspended": return .suspended
+        default:
+            throw OSSServiceError(
+                statusCode: 200,
+                code: "InvalidVersioningStatus",
+                message: "Bucket 返回了未知的版本控制状态：\(rawStatus)",
+                requestId: ""
+            )
+        }
+    }
 }
 
 enum ISO8601DateParser {
+    private static let cache = ISO8601FormatterCache()
+
     static func date(_ string: String?) -> Date? {
         guard let string, !string.isEmpty else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return cache.date(from: string)
+    }
+}
+
+private final class ISO8601FormatterCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private let standard: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    func date(from string: String) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
         if let date = fractional.date(from: string) { return date }
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
         return standard.date(from: string)
     }
 }

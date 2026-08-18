@@ -13,9 +13,9 @@
 | 工具 | 说明 |
 | --- | --- |
 | `list_buckets` | 列出账号下所有 Bucket（名称、地域、创建时间） |
-| `list_objects` | 浏览 Bucket 内的对象和子文件夹；默认按文件夹层级，传空 `delimiter` 可递归 |
-| `upload_file` | 上传本机文件到 OSS，返回对象 URL；Content-Type 按扩展名推断 |
-| `download_file` | 下载对象到本机指定路径；本地已有同名文件时不覆盖，会报错提示换路径 |
+| `list_objects` | 浏览 Bucket 内的对象和子文件夹；返回截断标记与 `next_continuation_token`，下一页用 `continuation_token` 原样续查 |
+| `upload_file` | 上传允许目录内的普通文件；默认拒绝覆盖，只有用户明确确认后才传 `overwrite=true` |
+| `download_file` | 下载到允许目录；拒绝符号链接逃逸，本地已有同名文件时不覆盖 |
 | `presign_url` | 为私有 Bucket 的对象生成带签名的临时下载链接（默认 1 小时） |
 
 ## 提示词
@@ -140,13 +140,39 @@ claude mcp add --scope user lumen --env LUMEN_MCP_DEFAULT_BUCKET=daniu-app-prod 
 
 修改后重启客户端生效。AI 仍可显式传 `bucket` 操作其他桶，两者不冲突。
 
+## 本地文件访问范围
+
+`upload_file` 和 `download_file` 不接受任意磁盘路径。默认只允许当前用户的桌面、文稿、下载目录和系统临时目录；路径必须是绝对路径，上传源必须是普通文件，且不能通过符号链接跳出允许范围。
+
+需要访问项目目录时，在 MCP 服务的 `env` 中设置 `LUMEN_MCP_ALLOWED_ROOTS`。可用冒号分隔多个绝对路径，或传 JSON 字符串数组：
+
+```json
+{
+  "mcpServers": {
+    "lumen": {
+      "command": "npx",
+      "args": ["-y", "lumen-mcp"],
+      "env": {
+        "LUMEN_MCP_ALLOWED_ROOTS": "/Users/me/projects:/Users/me/Downloads"
+      }
+    }
+  }
+}
+```
+
+不要把 `/` 配成允许目录。修改环境变量后需要重启 AI 客户端。
+
 ## 安全说明
 
 - AccessKey Secret 与 STS Token 只保存在 macOS 钥匙串，AI 客户端接触不到凭证本身。
 - 建议使用权限最小化的 RAM 子账号，只授予需要的 Bucket 和动作。
 - `lumen-mcp` 的凭证与 Lumen App 的账号完全独立，删除一边不影响另一边。
+- 上传默认先调用 GetBucketVersioning，再检查远端对象并发送禁止覆盖请求头。版本状态查询失败，或 Bucket 处于 Enabled / Suspended 状态时会安全拒绝；只有用户明确确认替换后才允许传 `overwrite=true`。
+- 本地文件工具只能访问允许目录，并拒绝符号链接逃逸。
 - AI 只能执行上面 5 个工具覆盖的操作；创建 Bucket、改权限策略等控制台操作不在范围内。
 - 大文件（GB 级）建议仍用 Lumen App，分片上传与断点续传更完整。
+
+默认安全上传至少需要 `oss:PutObject`、`oss:GetBucketVersioning`，以及用于 HEAD 存在性检查的 `oss:GetObject`。缺少任一读取权限都会 fail-closed；不要让 Agent 自动改用 `overwrite=true` 绕过检查。Lumen App 的对象复制与版本恢复还会使用 `oss:GetObjectAcl`、`oss:GetObjectVersion` 等动作，但它与 `lumen-mcp` 使用相互独立的账号和 RAM 策略。
 
 ## 故障排查
 
@@ -158,6 +184,8 @@ claude mcp add --scope user lumen --env LUMEN_MCP_DEFAULT_BUCKET=daniu-app-prod 
 | 想换账号 | `lumen-mcp auth --use <名称>` 切换活动档案后重启 AI 客户端 |
 | 重新编译后 AI 调用时弹钥匙串授权窗 | 二进制重新构建后签名发生变化，属正常现象，点一次「始终允许」即可 |
 | 下载报「本地已存在同名文件」 | 这是不覆盖保护。让 AI 换一个保存路径，或先手动删除该文件 |
+| 提示「拒绝访问允许目录之外的路径」 | 把目标放到桌面/文稿/下载目录，或配置 `LUMEN_MCP_ALLOWED_ROOTS` 后重启客户端 |
+| 上传提示无法确认版本状态或远端是否存在 | 当前 RAM 权限缺少 `oss:GetBucketVersioning` 或用于 HEAD 的 `oss:GetObject`；默认会安全拒绝。补齐最小读取权限，或仅在用户明确确认覆盖后使用 `overwrite=true` |
 
 更多问题请到 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues) 反馈。
 
@@ -167,7 +195,7 @@ npm 包是 Swift 服务器的薄启动器（位于 `Tools/lumen-mcp/npm/`），�
 
 ```bash
 cd Tools/lumen-mcp
-./npm/publish.sh <version>    # 例如 1.0.1
+./npm/publish.sh <version>    # 例如 1.0.2
 ```
 
 脚本会：构建 arm64 与 x86_64 双架构 release 二进制 → 同步三个包的版本号 → 依次发布 `lumen-mcp-darwin-arm64`、`lumen-mcp-darwin-x64`、`lumen-mcp`。前置条件：`npm login` 已完成、Xcode 命令行工具可用。发布后记得把 `npm/` 下 package.json 的版本变更提交进仓库。

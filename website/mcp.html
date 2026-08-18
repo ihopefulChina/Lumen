@@ -31,7 +31,7 @@
         <a href="support.html">支持</a>
         <a href="privacy.html">隐私</a>
       </nav>
-      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.2.dmg">下载</a>
+      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.3.dmg">下载</a>
     </div>
   </header>
 
@@ -102,7 +102,7 @@
             <p class="say-note">上传完成即返回对象 URL；私有 Bucket 自动生成带签名的临时链接。</p>
           </article>
           <article class="say-card">
-            <p class="say-prompt">「把这个月导出的报表，都下载到 ~/Reports。」</p>
+            <p class="say-prompt">「把这个月导出的报表，都下载到 ~/Documents/Reports。」</p>
             <div class="say-tools"><code>list_objects</code><code>download_file</code></div>
             <p class="say-note">本地已有同名文件时不覆盖，报错提示换路径，与 App 行为一致。</p>
           </article>
@@ -123,9 +123,9 @@
             </thead>
             <tbody>
               <tr><td>list_buckets</td><td>列出账号下所有 Bucket（名称、地域、创建时间）</td></tr>
-              <tr><td>list_objects</td><td>按文件夹层级浏览对象；<code>delimiter</code> 传空字符串可递归列举</td></tr>
-              <tr><td>upload_file</td><td>上传本机文件到 OSS，返回对象 URL；Content-Type 按扩展名推断</td></tr>
-              <tr><td>download_file</td><td>下载对象到本机；本地已有同名文件时不覆盖，报错提示换路径</td></tr>
+              <tr><td>list_objects</td><td>按文件夹层级浏览对象；用 <code>continuation_token</code> 逐页列完，不遗漏后续对象</td></tr>
+              <tr><td>upload_file</td><td>上传允许目录内的普通文件；默认拒绝覆盖，明确确认后才可传 <code>overwrite=true</code></td></tr>
+              <tr><td>download_file</td><td>下载到允许目录；拒绝符号链接逃逸，本地已有同名文件时不覆盖</td></tr>
               <tr><td>presign_url</td><td>为私有 Bucket 的对象生成带签名的临时下载链接（默认 1 小时）</td></tr>
             </tbody>
           </table>
@@ -222,15 +222,15 @@
           </article>
           <article class="safety-card">
             <h3>最小权限</h3>
-            <p>建议使用只授予目标 Bucket 必要动作的 RAM 子账号，权限范围自己说了算。</p>
+            <p>建议使用只授予目标 Bucket 必要动作的 RAM 子账号。默认安全上传需要 <code>oss:GetBucketVersioning</code>、<code>oss:GetObject</code> 与 <code>oss:PutObject</code>，缺少检查权限时会安全拒绝。</p>
           </article>
           <article class="safety-card">
             <h3>先确认，再执行</h3>
-            <p>AI 只能浏览、上传、下载和生成签名链接；删除、覆盖、批量操作前会先向你复述范围并确认。</p>
+            <p>上传默认拒绝远端同名对象；只有你明确确认替换后，AI 才能传 <code>overwrite=true</code>。</p>
           </article>
           <article class="safety-card">
-            <h3>永不静默覆盖</h3>
-            <p>下载遇到本地同名文件会报错而不是覆盖，与 Lumen App 的安全边界完全一致。</p>
+            <h3>本地范围明确</h3>
+            <p>默认只访问桌面、文稿、下载和临时目录；可用 <code>LUMEN_MCP_ALLOWED_ROOTS</code> 精确增加目录，符号链接不能越界。</p>
           </article>
         </div>
       </div>
@@ -249,6 +249,7 @@
               <tr><td>连接失败</td><td>确认配置里 command 为 <code>npx</code>、args 包含 <code>-y lumen-mcp</code>；从源码运行时，检查二进制绝对路径与执行权限</td></tr>
               <tr><td>弹出钥匙串授权窗口</td><td>重新编译后二进制签名变化所致，属正常现象，点一次「始终允许」即可</td></tr>
               <tr><td>上传报签名错误</td><td>运行 <code>npx lumen-mcp auth --test</code> 验证凭证与地域是否匹配</td></tr>
+              <tr><td>本地路径被拒绝</td><td>使用桌面、文稿或下载目录，或配置 <code>LUMEN_MCP_ALLOWED_ROOTS</code> 后重启客户端</td></tr>
               <tr><td>想换账号</td><td><code>npx lumen-mcp auth --use &lt;名称&gt;</code> 切换活动档案后重启 AI 客户端</td></tr>
               <tr><td>移除注册</td><td><code>npx lumen-mcp uninstall</code>，或加 <code>--client</code> 指定客户端</td></tr>
             </tbody>

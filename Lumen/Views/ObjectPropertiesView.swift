@@ -12,7 +12,7 @@ struct ObjectPropertiesView: View {
             } else {
                 Form {
                     Section {
-                        Text("这些是这个对象在 OSS 上的 HTTP 元数据和标签。点“保存”后立即写回云端，链接、下载文件名和缓存行为会按新值生效。")
+                        Text("这些是这个对象在 OSS 上的 HTTP 元数据和标签。安全保存要求 Bucket 已开启版本控制；提交后链接、下载文件名和缓存行为会按新值生效。")
                             .foregroundStyle(.secondary)
                     }
                     Section("打开与下载") {
@@ -52,8 +52,10 @@ struct ObjectPropertiesView: View {
             HStack {
                 if let error = properties.errorMessage {
                     Text(error).foregroundStyle(.red).lineLimit(2)
+                } else if let unavailable = properties.saveUnavailableMessage {
+                    Text(unavailable).foregroundStyle(.orange).lineLimit(2)
                 } else {
-                    Text("修改属性会在已启用版本控制的 Bucket 中产生新版本。")
+                    Text("修改属性会产生可精确回滚的新版本；未开启版本控制时不会提交。")
                         .foregroundStyle(.secondary)
                 }
                 Spacer()

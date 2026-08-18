@@ -19,7 +19,9 @@ struct FileTransferJournal: TransferJournaling {
     let url: URL
 
     static var live: FileTransferJournal {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+                .appending(path: "Library/Application Support", directoryHint: .isDirectory)
         return FileTransferJournal(
             url: base
                 .appending(path: "studio.lumen.oss", directoryHint: .isDirectory)

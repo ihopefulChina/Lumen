@@ -9,6 +9,8 @@ struct OSSObjectProperties: Equatable, Sendable {
     var contentType: String
     var cacheControl: String
     var contentDisposition: String
+    var contentLanguage: String = ""
+    var expires: String = ""
     var userMetadata: [String: String]
 }
 

@@ -192,43 +192,49 @@ struct LumenCommands: Commands {
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
-        CommandGroup(replacing: .undoRedo) {
-            Button(actions?.undoTitle ?? "撤销") {
+        // Keep AppKit's standard Undo/Redo items intact so focused text
+        // controls retain their native editing behavior. Lumen's cloud undo
+        // remains available as a separate semantic command (and ⌘Z is
+        // routed to it by RootView while the browser, rather than a field, is
+        // focused).
+        CommandGroup(after: .undoRedo) {
+            Divider()
+            Button(actions?.undoTitle ?? "撤销 Lumen 操作") {
                 actions?.undo()
             }
-            .keyboardShortcut("z", modifiers: [.command])
             .disabled(actions?.canUndo != true)
         }
         CommandGroup(replacing: .newItem) {
             Button("上传") { actions?.upload() }
                 .keyboardShortcut("o", modifiers: [.command])
             Button("从剪贴板上传") { actions?.pasteLocalFiles() }
-                .keyboardShortcut("v", modifiers: [.command, .shift])
             Button("添加账号…") { actions?.addAccount() }
-                .keyboardShortcut("a", modifiers: [.command, .shift])
             Divider()
             Button("新建文件夹") { actions?.newFolder() }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
         }
-        CommandGroup(replacing: .pasteboard) {
-            Button("剪切") {
+        // Never replace the system pasteboard group. Replacing it disables
+        // ⌘X/⌘C/⌘V/⌘A in SwiftUI TextField and SecureField. The
+        // browser-specific variants live beside the native commands, while
+        // RootView handles the familiar shortcuts only when text is not being
+        // edited.
+        CommandGroup(after: .pasteboard) {
+            Divider()
+            Button("剪切云端项目") {
                 (actions?.cut ?? { AppServices.shared.focused?.cutCloudSelection() })()
             }
-            .keyboardShortcut("x", modifiers: [.command])
             .disabled(!(actions?.canCopy ?? AppServices.shared.focused?.canCopyCloudItems ?? false))
-            Button("复制") {
+            Button("复制云端项目") {
                 (actions?.copy ?? { AppServices.shared.focused?.copyCloudSelection() })()
             }
-            .keyboardShortcut("c", modifiers: [.command])
             .disabled(!(actions?.canCopy ?? AppServices.shared.focused?.canCopyCloudItems ?? false))
-            Button("粘贴") {
+            Button("粘贴云端项目") {
                 if let actions {
                     actions.paste()
                 } else {
                     AppServices.shared.focused?.paste()
                 }
             }
-            .keyboardShortcut("v", modifiers: [.command])
             .disabled(!(actions?.canPaste ?? AppServices.shared.focused?.canPaste ?? false))
             Divider()
             Button("复制链接") { actions?.copyLink() }
@@ -236,9 +242,8 @@ struct LumenCommands: Commands {
             Button("复制 Markdown") { actions?.copyMarkdown() }
             Button("复制 HTML") { actions?.copyHTML() }
             Divider()
-            Button("全选") { actions?.selectAll() }
-                .keyboardShortcut("a", modifiers: [.command])
-            Button("取消全选") { actions?.deselectAll() }
+            Button("全选云端项目") { actions?.selectAll() }
+            Button("取消选择云端项目") { actions?.deselectAll() }
         }
         CommandGroup(after: .appInfo) {
             Button("检查更新…") {

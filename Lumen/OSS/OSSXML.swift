@@ -91,14 +91,120 @@ enum OSSXML {
         return id
     }
 
+    static func objectACL(from data: Data) throws -> ObjectACL {
+        let root = try parse(data)
+        let accessControlList: XMLNode?
+        if root.name.caseInsensitiveCompare("AccessControlList") == .orderedSame {
+            accessControlList = root
+        } else {
+            accessControlList = root.child("AccessControlList")
+        }
+
+        guard let accessControlList else {
+            throw OSSServiceError(
+                statusCode: 200,
+                code: "MissingObjectACL",
+                message: "对象 ACL 响应缺少 AccessControlList",
+                requestId: ""
+            )
+        }
+
+        let grants = accessControlList.children("Grant")
+        guard grants.count == 1 else {
+            throw OSSServiceError(
+                statusCode: 200,
+                code: grants.isEmpty ? "MissingObjectACL" : "InvalidObjectACL",
+                message: grants.isEmpty ? "对象 ACL 响应缺少 Grant" : "对象 ACL 响应包含多个 Grant",
+                requestId: ""
+            )
+        }
+
+        let grant = grants[0].string
+        guard !grant.isEmpty else {
+            throw OSSServiceError(
+                statusCode: 200,
+                code: "MissingObjectACL",
+                message: "对象 ACL 响应的 Grant 为空",
+                requestId: ""
+            )
+        }
+        guard let acl = ObjectACL(rawValue: grant) else {
+            throw OSSServiceError(
+                statusCode: 200,
+                code: "InvalidObjectACL",
+                message: "对象 ACL 响应包含未知 Grant：\(grant)",
+                requestId: ""
+            )
+        }
+        return acl
+    }
+
+    static func bucketVersioningStatus(from data: Data) throws -> OSSBucketVersioningStatus {
+        let root = try parse(data)
+        guard root.name.caseInsensitiveCompare("VersioningConfiguration") == .orderedSame else {
+            throw OSSServiceError(
+                statusCode: 200,
+                code: "InvalidVersioningConfiguration",
+                message: "Bucket 版本控制响应根节点无效",
+                requestId: ""
+            )
+        }
+        let statuses = root.children("Status")
+        guard statuses.count <= 1 else {
+            throw OSSServiceError(
+                statusCode: 200,
+                code: "InvalidVersioningConfiguration",
+                message: "Bucket 版本控制响应包含多个 Status",
+                requestId: ""
+            )
+        }
+        guard let status = statuses.first else { return .disabled }
+        let value = status.string
+        guard !value.isEmpty else {
+            throw OSSServiceError(
+                statusCode: 200,
+                code: "InvalidVersioningConfiguration",
+                message: "Bucket 版本控制响应的 Status 为空",
+                requestId: ""
+            )
+        }
+        return OSSBucketVersioningStatus(rawValue: value) ?? .unknown
+    }
+
     static func tags(from data: Data) throws -> [OSSObjectTag] {
         let root = try parse(data)
-        let set = root.child("TagSet") ?? root
-        let tags = set.children("Tag").compactMap { node -> OSSObjectTag? in
-            guard let key = node.child("Key")?.string, !key.isEmpty else { return nil }
-            return OSSObjectTag(key: key, value: node.child("Value")?.string ?? "")
+        let set: XMLNode?
+        if root.name.caseInsensitiveCompare("TagSet") == .orderedSame {
+            set = root
+        } else if root.name.caseInsensitiveCompare("Tagging") == .orderedSame {
+            let sets = root.children("TagSet")
+            set = sets.count == 1 ? sets[0] : nil
+        } else {
+            set = nil
         }
-        guard tags.count <= 10, Set(tags.map { $0.key.lowercased() }).count == tags.count else {
+        guard let set else {
+            throw OSSServiceError(statusCode: 0, code: "InvalidTags", message: "对象标签格式无效", requestId: "")
+        }
+
+        var tags: [OSSObjectTag] = []
+        for node in set.children("Tag") {
+            let keys = node.children("Key")
+            let values = node.children("Value")
+            guard keys.count == 1, values.count <= 1 else {
+                throw OSSServiceError(statusCode: 0, code: "InvalidTags", message: "对象标签格式无效", requestId: "")
+            }
+            let tag = OSSObjectTag(
+                // Leading/trailing ASCII spaces are legal OSS tag content and
+                // therefore must not be normalized while parsing a snapshot.
+                key: keys[0].text,
+                value: values.first?.text ?? ""
+            )
+            guard tag.isValidForOSS else {
+                throw OSSServiceError(statusCode: 0, code: "InvalidTags", message: "对象标签格式无效", requestId: "")
+            }
+            tags.append(tag)
+        }
+        guard tags.count <= 10, Set(tags.map(\.key)).count == tags.count else {
             throw OSSServiceError(statusCode: 0, code: "InvalidTags", message: "对象标签格式无效", requestId: "")
         }
         return tags
@@ -124,13 +230,31 @@ enum OSSXML {
 }
 
 enum ISO8601DateParser {
+    private static let cache = ISO8601FormatterCache()
+
     static func date(_ string: String?) -> Date? {
         guard let string, !string.isEmpty else { return nil }
-        let fractional = ISO8601DateFormatter()
-        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return cache.date(from: string)
+    }
+}
+
+private final class ISO8601FormatterCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private let fractional: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+    private let standard: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
+        return formatter
+    }()
+
+    func date(from string: String) -> Date? {
+        lock.lock()
+        defer { lock.unlock() }
         if let date = fractional.date(from: string) { return date }
-        let standard = ISO8601DateFormatter()
-        standard.formatOptions = [.withInternetDateTime]
         return standard.date(from: string)
     }
 }

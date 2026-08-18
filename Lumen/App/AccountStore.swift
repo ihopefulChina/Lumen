@@ -1,6 +1,11 @@
 import Foundation
 
 enum AccountStore {
+    struct Secrets: Equatable {
+        var secret: String?
+        var token: String?
+    }
+
     static func load() -> AccountLoadResult {
         repository.load()
     }
@@ -13,7 +18,7 @@ enum AccountStore {
     static func tokenAccount(_ id: UUID) -> String { id.uuidString + ".sts" }
 
     static func credentials(for account: OSSAccount) throws -> OSSCredentials {
-        guard let secret = SecretStore.get(account: secretAccount(account.id)), !secret.isEmpty else {
+        guard let secret = try SecretStore.read(account: secretAccount(account.id)), !secret.isEmpty else {
             throw OSSServiceError(
                 statusCode: 0,
                 code: "MissingSecret",
@@ -21,7 +26,7 @@ enum AccountStore {
                 requestId: ""
             )
         }
-        let token = SecretStore.get(account: tokenAccount(account.id))
+        let token = try SecretStore.read(account: tokenAccount(account.id))
         return OSSCredentials(
             accessKeyId: account.accessKeyId,
             accessKeySecret: secret,
@@ -34,13 +39,46 @@ enum AccountStore {
         if let token, !token.isEmpty {
             try SecretStore.set(token, account: tokenAccount(id))
         } else {
-            SecretStore.delete(account: tokenAccount(id))
+            try SecretStore.remove(account: tokenAccount(id))
         }
     }
 
-    static func deleteSecrets(id: UUID) {
-        SecretStore.delete(account: secretAccount(id))
-        SecretStore.delete(account: tokenAccount(id))
+    static func secrets(id: UUID) throws -> Secrets {
+        Secrets(
+            secret: try SecretStore.read(account: secretAccount(id)),
+            token: try SecretStore.read(account: tokenAccount(id))
+        )
+    }
+
+    static func restoreSecrets(id: UUID, snapshot: Secrets) throws {
+        if let secret = snapshot.secret {
+            try SecretStore.set(secret, account: secretAccount(id))
+        } else {
+            try SecretStore.remove(account: secretAccount(id))
+        }
+        if let token = snapshot.token {
+            try SecretStore.set(token, account: tokenAccount(id))
+        } else {
+            try SecretStore.remove(account: tokenAccount(id))
+        }
+    }
+
+    static func deleteSecrets(id: UUID) throws {
+        let snapshot = try secrets(id: id)
+        do {
+            try SecretStore.remove(account: secretAccount(id))
+            try SecretStore.remove(account: tokenAccount(id))
+        } catch {
+            do {
+                try restoreSecrets(id: id, snapshot: snapshot)
+            } catch let rollbackError {
+                throw AccountStoreError.rollbackFailed(
+                    primary: error.localizedDescription,
+                    rollback: rollbackError.localizedDescription
+                )
+            }
+            throw error
+        }
     }
 
     private static var directory: URL {
@@ -51,4 +89,15 @@ enum AccountStore {
     }
 
     private static var repository: AccountRepository { AccountRepository(directory: directory) }
+}
+
+enum AccountStoreError: LocalizedError {
+    case rollbackFailed(primary: String, rollback: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .rollbackFailed(let primary, let rollback):
+            return "账号凭证操作失败：\(primary)；恢复原凭证也失败：\(rollback)"
+        }
+    }
 }

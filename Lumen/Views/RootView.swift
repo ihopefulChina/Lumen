@@ -94,21 +94,34 @@ struct RootView: View {
                 return event
             }
             let editingText = BrowserKeyEvent.isEditingText
-            if BrowserKeyEvent.isPaste(event, flags: flags) {
-                // While editing text (rename field, dialogs), ⌘V must paste text,
-                // never cloud items.
-                if !editingText, model.canPasteCloudItems || model.canPaste {
-                    DispatchQueue.main.async { model.paste() }
-                    return nil
-                }
-                return event
-            }
             // All shortcuts below act on the browser. Do not hijack key events
             // while a text field is being edited, a sheet/dialog is open, or a
             // different window (help / transfers / settings) is key.
             let keyWindow = NSApp.keyWindow
             let isWorkspaceWindow = keyWindow?.identifier == WindowActions.workspaceID
-            guard !editingText, isWorkspaceWindow, keyWindow?.attachedSheet == nil else {
+            guard !editingText,
+                  isWorkspaceWindow,
+                  keyWindow?.attachedSheet == nil,
+                  BrowserShortcutScope.shouldHandleCurrentResponder(in: keyWindow)
+            else {
+                return event
+            }
+            if BrowserKeyEvent.isPaste(event, flags: flags) {
+                if model.canPasteCloudItems || model.canPaste {
+                    DispatchQueue.main.async { model.paste() }
+                    return nil
+                }
+                return event
+            }
+            if BrowserKeyEvent.isUndo(event, flags: flags) {
+                if model.browser.renameSession != nil {
+                    model.browser.cancelRenaming()
+                    return nil
+                }
+                if model.canUndoCloudOperation {
+                    Task { await model.undoLastCloudOperation() }
+                    return nil
+                }
                 return event
             }
             if event.keyCode == 51, flags.isEmpty, !model.browser.selectedKeys.isEmpty {
@@ -116,8 +129,12 @@ struct RootView: View {
                 model.requestDeleteSelection()
                 return nil
             }
-            if event.keyCode == 0, flags == .command {
+            if BrowserKeyEvent.isSelectAll(event, flags: flags) {
                 model.browser.selectAllVisible()
+                return nil
+            }
+            if BrowserKeyEvent.isDeselectAll(event, flags: flags) {
+                model.browser.clearSelection()
                 return nil
             }
             if BrowserKeyEvent.isCut(event, flags: flags) {
@@ -194,8 +211,25 @@ enum WorkspaceUndo {
 
 enum BrowserKeyEvent {
     static var isEditingText: Bool {
-        let responder = NSApp.keyWindow?.firstResponder
-        return responder is NSTextView || responder is NSTextField
+        MainActor.assumeIsolated {
+            guard let window = NSApp.keyWindow else { return false }
+            let responder = window.firstResponder
+            // SwiftUI fields normally edit through the window's shared field
+            // editor. Keep this explicit fallback for SecureField and search
+            // field implementations that do not expose NSTextField itself as
+            // first responder.
+            return isEditingText(
+                responder: responder,
+                fieldEditor: window.fieldEditor(false, for: nil)
+            )
+        }
+    }
+
+    static func isEditingText(responder: NSResponder?, fieldEditor: NSText?) -> Bool {
+        if responder is NSTextView || responder is NSTextField {
+            return true
+        }
+        return fieldEditor.map { responder === $0 } ?? false
     }
 
     static func isPaste(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
@@ -210,13 +244,26 @@ enum BrowserKeyEvent {
         isCommandCharacter("x", keyCode: 7, event: event, flags: flags)
     }
 
+    static func isSelectAll(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        isCommandCharacter("a", keyCode: 0, event: event, flags: flags)
+    }
+
+    static func isDeselectAll(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        isCommandCharacter("a", keyCode: 0, event: event, flags: flags, modifiers: [.command, .shift])
+    }
+
+    static func isUndo(_ event: NSEvent, flags: NSEvent.ModifierFlags) -> Bool {
+        isCommandCharacter("z", keyCode: 6, event: event, flags: flags)
+    }
+
     static func isCommandCharacter(
         _ character: String,
         keyCode: UInt16,
         event: NSEvent,
-        flags: NSEvent.ModifierFlags
+        flags: NSEvent.ModifierFlags,
+        modifiers: NSEvent.ModifierFlags = .command
     ) -> Bool {
-        guard flags == .command else { return false }
+        guard flags == modifiers else { return false }
         return event.keyCode == keyCode || event.charactersIgnoringModifiers?.lowercased() == character
     }
 }
@@ -227,6 +274,114 @@ private enum KeyMonitor {
     static func install(_ handler: @escaping (NSEvent) -> NSEvent?) {
         guard token == nil else { return }
         token = NSEvent.addLocalMonitorForEvents(matching: .keyDown, handler: handler)
+    }
+}
+
+/// Browser shortcuts are scoped to the detail region, not merely to the whole
+/// workspace window. This preserves native keyboard navigation for the
+/// sidebar, transfer tray, toolbar, and other focused controls.
+@MainActor
+enum BrowserShortcutScope {
+    private final class Registration {
+        weak var owner: NSView?
+        var region: CGRect
+
+        init(owner: NSView, region: CGRect) {
+            self.owner = owner
+            self.region = region
+        }
+    }
+
+    private static var registrations: [ObjectIdentifier: Registration] = [:]
+
+    static func update(owner: NSView) {
+        unregister(owner: owner)
+        guard let window = owner.window else { return }
+        let region = owner.convert(owner.bounds, to: nil)
+        guard !region.isEmpty else { return }
+        registrations[ObjectIdentifier(window)] = Registration(owner: owner, region: region)
+    }
+
+    static func unregister(owner: NSView) {
+        registrations = registrations.filter { _, registration in
+            guard let registeredOwner = registration.owner else { return false }
+            return registeredOwner !== owner
+        }
+    }
+
+    static func shouldHandleCurrentResponder(in window: NSWindow?) -> Bool {
+        guard let window else { return false }
+        let key = ObjectIdentifier(window)
+        guard let registration = registrations[key], registration.owner != nil else {
+            registrations[key] = nil
+            return false
+        }
+        return shouldHandle(
+            responder: window.firstResponder,
+            window: window,
+            browserRegion: registration.region
+        )
+    }
+
+    static func shouldHandle(
+        responder: NSResponder?,
+        window: NSWindow,
+        browserRegion: CGRect
+    ) -> Bool {
+        guard let responder else { return false }
+        if responder === window { return true }
+        guard let view = responder as? NSView, view.window === window else { return false }
+
+        // Buttons and value controls keep Space/Return/arrows for their native
+        // actions even if they happen to be visually inside the detail column.
+        if view is NSButton
+            || view is NSSegmentedControl
+            || view is NSSlider
+            || view is NSStepper
+            || view is NSPopUpButton
+        {
+            return false
+        }
+
+        let responderFrame = view.convert(view.bounds, to: nil)
+        guard !responderFrame.isEmpty else { return false }
+        return browserRegion.contains(
+            CGPoint(x: responderFrame.midX, y: responderFrame.midY)
+        )
+    }
+}
+
+struct BrowserShortcutScopeProbe: NSViewRepresentable {
+    func makeNSView(context: Context) -> Probe {
+        Probe()
+    }
+
+    func updateNSView(_ view: Probe, context: Context) {
+        view.publishRegion()
+    }
+
+    static func dismantleNSView(_ view: Probe, coordinator: Void) {
+        BrowserShortcutScope.unregister(owner: view)
+    }
+
+    final class Probe: NSView {
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            nil
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            publishRegion()
+        }
+
+        override func layout() {
+            super.layout()
+            publishRegion()
+        }
+
+        fileprivate func publishRegion() {
+            BrowserShortcutScope.update(owner: self)
+        }
     }
 }
 
@@ -306,10 +461,35 @@ private struct RootPresentation: ViewModifier {
                 titleVisibility: .visible
             ) {
                 Button("覆盖") { model.confirmOverwrite() }
+                    .disabled(model.overwritePrompt?.canOverwriteSafely != true)
                 Button("跳过这些文件") { model.skipOverwriteConflicts() }
                 Button("取消", role: .cancel) { model.cancelOverwrite() }
             } message: {
                 Text(model.overwritePrompt?.message ?? "")
+            }
+            .confirmationDialog(
+                model.cloudConflictPrompt?.title ?? "目标已有同名项目",
+                isPresented: Binding(
+                    get: { model.cloudConflictPrompt != nil },
+                    set: { if !$0 { model.cancelCloudConflicts() } }
+                ),
+                titleVisibility: .visible
+            ) {
+                Button("覆盖同名项目", role: .destructive) {
+                    model.resolveCloudConflicts(.replace)
+                }
+                .disabled(model.cloudConflictPrompt?.canReplaceSafely != true)
+                Button("保留两者") {
+                    model.resolveCloudConflicts(.keepBoth)
+                }
+                Button("跳过同名项目") {
+                    model.resolveCloudConflicts(.skip)
+                }
+                Button("取消", role: .cancel) {
+                    model.cancelCloudConflicts()
+                }
+            } message: {
+                Text(model.cloudConflictPrompt?.message ?? "")
             }
             .confirmationDialog(
                 "上传 \(model.pendingOpenURLs.count) 个文件到当前文件夹？",
@@ -344,7 +524,7 @@ private struct RootPresentation: ViewModifier {
             return ScreenshotDemo.accountDraft
         }
         #endif
-        return AccountDraft.fresh()
+        return AccountSheet.initialDraft(editing: model.editingAccount)
     }
 }
 

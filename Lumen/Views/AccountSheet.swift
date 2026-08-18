@@ -9,8 +9,18 @@ struct AccountSheet: View {
     @State private var errorText: String?
     @State private var showAdvanced = false
     @State private var showSecret = false
+    @State private var showToken = false
     @State private var pendingACL: ObjectACL?
     @State private var showACLConfirmation = false
+
+    /// Editing must start with the persisted account identity before any
+    /// Keychain lookup. A Keychain error must never leave an edit sheet backed
+    /// by a fresh UUID, otherwise re-entering the credentials would append a
+    /// duplicate account instead of updating the selected one.
+    static func initialDraft(editing account: OSSAccount?) -> AccountDraft {
+        guard let account else { return .fresh() }
+        return .from(account, secret: "", token: "")
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -32,6 +42,7 @@ struct AccountSheet: View {
                             }
                         }
                         .textContentType(.password)
+                        .privacySensitive()
                         Button {
                             showSecret.toggle()
                         } label: {
@@ -39,6 +50,7 @@ struct AccountSheet: View {
                         }
                         .buttonStyle(.borderless)
                         .help(showSecret ? "隐藏密钥" : "显示密钥")
+                        .accessibilityLabel(showSecret ? "隐藏 AccessKey Secret" : "显示 AccessKey Secret")
                     }
                 }
 
@@ -75,7 +87,25 @@ struct AccountSheet: View {
 
                 Section {
                     DisclosureGroup("高级", isExpanded: $showAdvanced) {
-                        TextField("STS Token", text: $draft.token)
+                        HStack {
+                            Group {
+                                if showToken {
+                                    TextField("STS Token", text: $draft.token)
+                                } else {
+                                    SecureField("STS Token", text: $draft.token)
+                                }
+                            }
+                            .textContentType(.password)
+                            .privacySensitive()
+                            Button {
+                                showToken.toggle()
+                            } label: {
+                                Image(systemName: showToken ? "eye.slash" : "eye")
+                            }
+                            .buttonStyle(.borderless)
+                            .help(showToken ? "隐藏 STS Token" : "显示 STS Token")
+                            .accessibilityLabel(showToken ? "隐藏 STS Token" : "显示 STS Token")
+                        }
                         TextField("自定义 Endpoint", text: $draft.endpointOverride, prompt: Text("oss-cn-hangzhou.aliyuncs.com"))
                         TextField("CDN 域名", text: $draft.cdnDomain, prompt: Text("cdn.example.com"))
                         Button("使用公共读写权限…", role: .destructive) {
@@ -144,11 +174,22 @@ struct AccountSheet: View {
                 Text(AccountACLConfirmation.message(for: pendingACL))
             }
         }
-        .task {
+        .task(id: model.editingAccount?.id) {
             if let account = model.editingAccount {
-                let secret = SecretStore.get(account: AccountStore.secretAccount(account.id)) ?? ""
-                let token = SecretStore.get(account: AccountStore.tokenAccount(account.id)) ?? ""
-                draft = AccountDraft.from(account, secret: secret, token: token)
+                // Keep this defensive assignment even though every production
+                // caller uses initialDraft(editing:). It preserves the existing
+                // account ID if a future caller accidentally supplies .fresh().
+                if draft.id != account.id {
+                    draft = Self.initialDraft(editing: account)
+                }
+                do {
+                    let secret = try SecretStore.read(account: AccountStore.secretAccount(account.id)) ?? ""
+                    draft.secret = secret
+                    let token = try SecretStore.read(account: AccountStore.tokenAccount(account.id)) ?? ""
+                    draft.token = token
+                } catch {
+                    errorText = error.localizedDescription
+                }
             }
         }
     }

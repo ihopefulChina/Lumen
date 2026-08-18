@@ -1,26 +1,36 @@
 #!/bin/bash
 # 发布 lumen-mcp 到 npm（三个包：两个平台二进制 + 主包）。
-# 用法：在 Terminal.app 中运行  ./npm/publish.sh <version>
+# 版本唯一来源：Sources/lumen-mcp/LumenMCPVersion.swift。
+# 用法：在 Terminal.app 中运行 ./npm/publish.sh [version]
+# 可选 version 只用于防止误发，必须与源码版本完全一致。
 # 前置：已 npm login；Xcode 命令行工具可用。
 set -euo pipefail
 
-VERSION="${1:?用法：publish.sh <version>，例如 publish.sh 1.0.1}"
 cd "$(dirname "$0")"
 NPM_DIR="$PWD"
 SWIFT_DIR="$(cd .. && pwd)"
+VERSION_FILE="$SWIFT_DIR/Sources/lumen-mcp/LumenMCPVersion.swift"
+VERSION="$(sed -nE 's/^[[:space:]]*static let current = "([^"]+)".*/\1/p' "$VERSION_FILE")"
+
+if [ -z "$VERSION" ]; then
+  echo "错误：无法从 $VERSION_FILE 读取版本号。" >&2; exit 1
+fi
+if [ "$#" -gt 1 ]; then
+  echo "用法：publish.sh [version]" >&2; exit 64
+fi
+if [ "$#" -eq 1 ] && [ "$1" != "$VERSION" ]; then
+  echo "错误：参数版本 $1 与源码唯一版本 $VERSION 不一致。请先修改 LumenMCPVersion.swift。" >&2
+  exit 1
+fi
 
 if ! command -v npm >/dev/null; then
   echo "错误：未找到 npm。" >&2; exit 1
 fi
-if [ "$(npm whoami 2>/dev/null || true)" = "" ]; then
-  echo "错误：未登录 npm，请先运行 npm login。" >&2; exit 1
-fi
-
 echo "==> 构建 arm64..."
 cd "$SWIFT_DIR"
-swift build --disable-sandbox -c release
+swift build --disable-sandbox -c release --arch arm64
 mkdir -p "$NPM_DIR/lumen-mcp-darwin-arm64/bin"
-cp .build/release/lumen-mcp "$NPM_DIR/lumen-mcp-darwin-arm64/bin/lumen-mcp"
+cp .build/arm64-apple-macosx/release/lumen-mcp "$NPM_DIR/lumen-mcp-darwin-arm64/bin/lumen-mcp"
 
 echo "==> 交叉编译 x86_64..."
 swift build --disable-sandbox -c release --arch x86_64
@@ -45,6 +55,40 @@ for (const key of Object.keys(main.optionalDependencies)) {
 }
 fs.writeFileSync("lumen-mcp/package.json", JSON.stringify(main, null, 2) + "\n");
 ' "$VERSION"
+
+echo "==> 校验源码、二进制和 npm 包版本..."
+ARM_BINARY="$NPM_DIR/lumen-mcp-darwin-arm64/bin/lumen-mcp"
+X64_BINARY="$NPM_DIR/lumen-mcp-darwin-x64/bin/lumen-mcp"
+lipo "$ARM_BINARY" -verify_arch arm64
+lipo "$X64_BINARY" -verify_arch x86_64
+ARM_VERSION="$(/usr/bin/arch -arm64 "$ARM_BINARY" --version)"
+X64_VERSION="$(/usr/bin/arch -x86_64 "$X64_BINARY" --version)"
+EXPECTED="lumen-mcp $VERSION"
+if [ "$ARM_VERSION" != "$EXPECTED" ] || [ "$X64_VERSION" != "$EXPECTED" ]; then
+  echo "错误：二进制版本不一致。期望 '$EXPECTED'，arm64='$ARM_VERSION'，x64='$X64_VERSION'。" >&2
+  exit 1
+fi
+node -e '
+const fs = require("fs");
+const expected = process.argv[1];
+const arm = JSON.parse(fs.readFileSync("lumen-mcp-darwin-arm64/package.json", "utf8"));
+const x64 = JSON.parse(fs.readFileSync("lumen-mcp-darwin-x64/package.json", "utf8"));
+const main = JSON.parse(fs.readFileSync("lumen-mcp/package.json", "utf8"));
+const actual = [arm.version, x64.version, main.version, ...Object.values(main.optionalDependencies)];
+if (actual.some(version => version !== expected)) {
+  console.error(`错误：npm 包版本不一致。期望 ${expected}，实际 ${actual.join(", ")}`);
+  process.exit(1);
+}
+' "$VERSION"
+
+echo "==> 校验 npm 包内容..."
+(cd lumen-mcp-darwin-arm64 && npm pack --dry-run >/dev/null)
+(cd lumen-mcp-darwin-x64 && npm pack --dry-run >/dev/null)
+(cd lumen-mcp && npm pack --dry-run >/dev/null)
+
+if [ "$(npm whoami 2>/dev/null || true)" = "" ]; then
+  echo "错误：未登录 npm，请先运行 npm login。" >&2; exit 1
+fi
 
 echo "==> 发布平台包（arm64 / x64）..."
 (cd lumen-mcp-darwin-arm64 && npm publish --access public)

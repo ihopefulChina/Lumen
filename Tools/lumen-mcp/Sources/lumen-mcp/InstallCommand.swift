@@ -29,11 +29,8 @@ enum InstallCommand {
         }
         let appSupport = home.appendingPathComponent(
             "Library/Application Support", isDirectory: true)
-        func exists(_ path: String) -> Bool {
-            @Sendable func fileExists(_ path: String) -> Bool {
-                FileManager.default.fileExists(atPath: path)
-            }
-            return fileExists(path)
+        @Sendable func exists(_ path: String) -> Bool {
+            FileManager.default.fileExists(atPath: path)
         }
         return [
             Client(
@@ -92,7 +89,7 @@ enum InstallCommand {
                 }
                 requested.append(arguments[index])
             case "--all":
-                requested = clients.map(\.id)
+                requested = supportedClientIDs
             case "--dry-run":
                 dryRun = true
             case "--help", "-h":
@@ -106,7 +103,7 @@ enum InstallCommand {
             index += 1
         }
 
-        for id in requested where clients.first(where: { $0.id == id }) == nil {
+        for id in requested where !supportedClientIDs.contains(id) {
             fail("未知客户端「\(id)」。可选：\(clientIDs())")
             return 64
         }
@@ -153,7 +150,14 @@ enum InstallCommand {
         let wantClaudeCode =
             requested.isEmpty ? isClaudeCodeInstalled() : requested.contains("claude-code")
         if wantClaudeCode {
-            if isClaudeCodeInstalled() {
+            if dryRun {
+                let command = (["claude"] + (
+                    uninstalling
+                        ? ["mcp", "remove", serverKey, "-s", "user"]
+                        : ["mcp", "add", "--scope", "user", serverKey, "--"] + launch.commandWords
+                )).map(shellQuoted).joined(separator: " ")
+                print("[dry-run] Claude Code → \(command)")
+            } else if isClaudeCodeInstalled() {
                 let ok =
                     uninstalling
                     ? runCLIClaudeCode(["mcp", "remove", serverKey, "-s", "user"])
@@ -200,8 +204,12 @@ enum InstallCommand {
         return failures == 0 ? 0 : 1
     }
 
+    static var supportedClientIDs: [String] {
+        clients.map(\.id) + ["claude-code"]
+    }
+
     private static func clientIDs() -> String {
-        (clients.map(\.id) + ["claude-code"]).joined(separator: "|")
+        supportedClientIDs.joined(separator: "|")
     }
 
     private static func printHelp(uninstalling: Bool) {
@@ -215,7 +223,7 @@ enum InstallCommand {
               lumen-mcp \(uninstalling ? "uninstall" : "install") --all             处理全部支持的客户端
               lumen-mcp \(uninstalling ? "uninstall" : "install") --dry-run         只预览将要写入的内容
 
-            支持的客户端：claude-desktop、claude-code、cursor、windsurf、codex
+            支持的客户端：claude-desktop、claude-code、cursor、trae、windsurf、codex
             JSON 配置采用合并写入并保留 .bak 备份，不影响其他 MCP 服务器。
             """)
     }
@@ -224,9 +232,23 @@ enum InstallCommand {
         FileHandle.standardError.write((message + "\n").data(using: .utf8)!)
     }
 
+    private static func shellQuoted(_ value: String) -> String {
+        guard !value.isEmpty,
+              value.allSatisfy({ $0.isLetter || $0.isNumber || "-._/:".contains($0) }) else {
+            return "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+        }
+        return value
+    }
+
     // MARK: - Binary path resolution
 
     private static func currentBinaryPath() -> String? {
+        // Bundle resolves the real executable even when argv[0] came from a
+        // PATH lookup (for example simply `lumen-mcp`).
+        if let bundled = Bundle.main.executableURL?.resolvingSymlinksInPath(),
+           FileManager.default.isExecutableFile(atPath: bundled.path) {
+            return bundled.path
+        }
         let argv0 = CommandLine.arguments.first ?? ""
         var url: URL
         if argv0.hasPrefix("/") {
@@ -270,7 +292,9 @@ enum InstallCommand {
         process.arguments = arguments
         let pipe = Pipe()
         process.standardOutput = pipe
-        process.standardError = Pipe()
+        // Drain one combined stream while the process runs. Two independent
+        // pipes with only stdout being read can deadlock when stderr fills.
+        process.standardError = pipe
         do {
             try process.run()
         } catch {
@@ -297,7 +321,7 @@ enum InstallCommand {
         // existing .bak never breaks the run.
         if FileManager.default.fileExists(atPath: url.path) {
             let existing = try Data(contentsOf: url)
-            try? existing.write(to: URL(fileURLWithPath: url.path + ".bak"), options: .atomic)
+            try existing.write(to: URL(fileURLWithPath: url.path + ".bak"), options: .atomic)
         }
         try newContent.write(to: url, atomically: true, encoding: .utf8)
     }
@@ -309,7 +333,12 @@ enum InstallCommand {
         case "json":
             return try mergeJSON(url: url, launch: launch, uninstalling: uninstalling)
         case "toml":
-            let existing = (try? String(contentsOf: url, encoding: .utf8)) ?? ""
+            let existing: String
+            if FileManager.default.fileExists(atPath: url.path) {
+                existing = try String(contentsOf: url, encoding: .utf8)
+            } else {
+                existing = ""
+            }
             return upsertTOMLSection(
                 existing, section: "mcp_servers.\(serverKey)", body: launch.tomlLines,
                 removing: uninstalling)
@@ -321,30 +350,47 @@ enum InstallCommand {
     private static func mergeJSON(url: URL, launch: LaunchMode, uninstalling: Bool) throws -> String
     {
         var root: [String: Any] = [:]
-        if let data = try? Data(contentsOf: url), !data.isEmpty {
+        if FileManager.default.fileExists(atPath: url.path) {
+            let data = try Data(contentsOf: url)
+            if data.isEmpty { return try encodedJSON(root: root, launch: launch, uninstalling: uninstalling) }
             guard let existing = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             else {
                 throw InstallError.invalidJSON(url.path)
             }
             root = existing
         }
-        var servers = root["mcpServers"] as? [String: Any] ?? [:]
-        if uninstalling {
-            servers.removeValue(forKey: serverKey)
+        return try encodedJSON(root: root, launch: launch, uninstalling: uninstalling)
+    }
+
+    private static func encodedJSON(
+        root originalRoot: [String: Any],
+        launch: LaunchMode,
+        uninstalling: Bool
+    ) throws -> String {
+        var root = originalRoot
+        let servers: [String: Any]
+        if let existing = root["mcpServers"] {
+            guard let dictionary = existing as? [String: Any] else {
+                throw InstallError.invalidMCPServers
+            }
+            servers = dictionary
         } else {
-            servers[serverKey] = launch.jsonEntry
+            servers = [:]
         }
-        if servers.isEmpty {
+        var updatedServers = servers
+        if uninstalling {
+            updatedServers.removeValue(forKey: serverKey)
+        } else {
+            updatedServers[serverKey] = launch.jsonEntry
+        }
+        if updatedServers.isEmpty {
             root.removeValue(forKey: "mcpServers")
         } else {
-            root["mcpServers"] = servers
+            root["mcpServers"] = updatedServers
         }
         let data = try JSONSerialization.data(
             withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
-        guard let text = String(data: data, encoding: .utf8) else {
-            throw InstallError.invalidJSON(url.path)
-        }
-        return text + "\n"
+        return String(decoding: data, as: UTF8.self) + "\n"
     }
 
     /// Line-based upsert/removal of a `[section]` block in a TOML file.
@@ -445,12 +491,15 @@ enum LaunchMode {
 
 enum InstallError: LocalizedError {
     case invalidJSON(String)
+    case invalidMCPServers
     case unsupportedFormat(String)
 
     var errorDescription: String? {
         switch self {
         case .invalidJSON(let path):
-            return "配置文件不是合法 JSON：\(path)（已保留 .bak 备份，可手动修复后重试）"
+            return "配置文件不是合法 JSON：\(path)（未修改原文件，请手动修复后重试）"
+        case .invalidMCPServers:
+            return "配置文件中的 mcpServers 必须是 JSON 对象；为避免覆盖现有内容，本次未修改。"
         case .unsupportedFormat(let format):
             return "不支持的配置格式：\(format)"
         }

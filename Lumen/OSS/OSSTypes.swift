@@ -78,6 +78,56 @@ enum ObjectACL: String, CaseIterable, Identifiable, Codable, Sendable {
     }
 }
 
+enum OSSBucketVersioningStatus: String, Codable, Sendable, Equatable {
+    case disabled = "Disabled"
+    case enabled = "Enabled"
+    case suspended = "Suspended"
+    case unknown = "Unknown"
+
+    /// Alibaba OSS honors x-oss-forbid-overwrite only when versioning has
+    /// never been enabled (Disabled).
+    var supportsCreateOnlyWrites: Bool { self == .disabled }
+
+    /// CopyObject/PutObject have no destination-side If-Match. Only an Enabled
+    /// bucket preserves the previous value as an immutable version if a writer
+    /// races the final HEAD-to-PUT window.
+    var supportsRecoverableReplace: Bool { self == .enabled }
+
+    /// An unscoped delete is forbidden in Suspended/unknown mode because a
+    /// lost response can hide or destroy the null version without safe proof.
+    var supportsDirectDelete: Bool { self == .disabled || self == .enabled }
+
+    /// Move is a copy followed by deletion. OSS has no conditional key-scoped
+    /// delete, so only an Enabled bucket that returns an immutable version ID
+    /// can safely remove exactly the version that was copied.
+    var supportsSafeMove: Bool { self == .enabled }
+}
+
+struct OSSVersioningSafetyError: LocalizedError, Sendable, Equatable {
+    enum Operation: String, Sendable, Equatable {
+        case createOnly
+        case replace
+        case delete
+        case move
+    }
+
+    var operation: Operation
+    var status: OSSBucketVersioningStatus
+
+    var errorDescription: String? {
+        switch operation {
+        case .createOnly:
+            "Bucket 版本控制为 \(status.rawValue)，OSS 不保证禁止覆盖，本次写入已安全取消"
+        case .replace:
+            "Bucket 版本控制为 \(status.rawValue)，无法安全覆盖对象。仍可选择新建副本、保留两者或跳过；如需覆盖或修改元数据，请先启用 Bucket 版本控制"
+        case .delete:
+            "Bucket 版本控制为 \(status.rawValue)，无法安全确认删除结果，本次操作已取消"
+        case .move:
+            "Bucket 版本控制为 \(status.rawValue)，无法按精确版本安全移动对象，本次操作已取消"
+        }
+    }
+}
+
 struct OSSAccount: Identifiable, Hashable, Codable, Sendable {
     var id: UUID
     var name: String
@@ -171,23 +221,30 @@ enum OSSEndpoint {
     }
 
     static func normalize(_ raw: String) -> String {
-        var host = raw
-            .replacingOccurrences(of: "https://", with: "")
-            .replacingOccurrences(of: "http://", with: "")
-            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        if let slash = host.firstIndex(of: "/") {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let candidate = trimmed.contains("://") ? trimmed : "https://\(trimmed)"
+        let parsedHost = URLComponents(string: candidate)?.host
+        var host = (parsedHost ?? trimmed)
+            .trimmingCharacters(in: CharacterSet(charactersIn: "."))
+            .lowercased()
+        if parsedHost == nil, let slash = host.firstIndex(of: "/") {
             host = String(host[..<slash])
         }
         let parts = host.split(separator: ".")
-        if parts.count >= 4, parts[1].hasPrefix("oss-") {
+        if parts.count >= 4,
+           isAliyunVirtualHost(host),
+           parts[1].hasPrefix("oss-") {
             return parts.dropFirst().joined(separator: ".")
         }
         return host
     }
 
     static func isAliyunVirtualHost(_ host: String) -> Bool {
-        let value = host.lowercased()
-        return value.contains("aliyuncs.com") || value.contains("aliyun-inc.com")
+        let value = host.lowercased().trimmingCharacters(in: CharacterSet(charactersIn: "."))
+        return value == "aliyuncs.com"
+            || value.hasSuffix(".aliyuncs.com")
+            || value == "aliyun-inc.com"
+            || value.hasSuffix(".aliyun-inc.com")
     }
 
     static func objectHost(endpoint: String, bucketName: String) -> String {
@@ -250,8 +307,32 @@ struct ObjectHead: Sendable {
     var crc64: UInt64? = nil
     var cacheControl: String? = nil
     var contentDisposition: String? = nil
+    var contentEncoding: String? = nil
+    var contentLanguage: String? = nil
+    var expires: String? = nil
+    var serverSideEncryption: String? = nil
+    var serverSideEncryptionKeyID: String? = nil
+    var serverSideDataEncryption: String? = nil
     var userMetadata: [String: String] = [:]
     var versionID: String? = nil
+
+    var identity: OSSObjectIdentity? {
+        guard let etag, !etag.isEmpty, let contentLength else { return nil }
+        return OSSObjectIdentity(etag: etag, versionID: versionID, size: contentLength)
+    }
+}
+
+struct OSSObjectIdentity: Equatable, Sendable {
+    var etag: String
+    var versionID: String?
+    var size: Int64
+}
+
+struct OSSObjectSnapshot: Sendable {
+    var head: ObjectHead
+    var acl: ObjectACL
+    var tags: [OSSObjectTag]
+    var etag: String
 }
 
 struct OSSDeleteReceipt: Equatable, Sendable {
@@ -260,8 +341,29 @@ struct OSSDeleteReceipt: Equatable, Sendable {
     var versionID: String?
 
     var undoMarker: OSSDeleteMarker? {
-        guard isDeleteMarker, let versionID, !versionID.isEmpty else { return nil }
+        guard isDeleteMarker,
+              let versionID,
+              !versionID.isEmpty,
+              versionID.caseInsensitiveCompare("null") != .orderedSame
+        else { return nil }
         return OSSDeleteMarker(key: key, versionID: versionID)
+    }
+}
+
+extension OSSObjectTag {
+    var isValidForOSS: Bool {
+        !key.isEmpty
+            && key.count <= 128
+            && value.count <= 256
+            && key.allSatisfy(Self.isAllowedCharacter)
+            && value.allSatisfy(Self.isAllowedCharacter)
+    }
+
+    private static func isAllowedCharacter(_ character: Character) -> Bool {
+        character.isLetter
+            || character.isNumber
+            || character == " "
+            || "+-=._:/".contains(character)
     }
 }
 

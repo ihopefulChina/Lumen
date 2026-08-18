@@ -93,29 +93,64 @@ enum CloudObjectOperationError: LocalizedError, Sendable, Equatable {
     case destinationExists(String)
     case incompleteListing
     case emptySource
-    case sourceCleanupFailed(String)
+    case copyOutcomeUncertain(destination: String)
+    case copyPhaseFailed(
+        operation: String,
+        modifiedExistingDestinations: Set<String>,
+        residualDestinations: Set<String>,
+        uncertainDestinations: Set<String>
+    )
+    case sourceCleanupFailed(
+        failedSource: String,
+        removedSources: Set<String>,
+        uncertainSources: Set<String>,
+        residualDestinations: Set<String>
+    )
 
     var errorDescription: String? {
         switch self {
         case .invalidPrefix:
-            "文件夹路径无效"
+            return "文件夹路径无效"
         case .destinationInsideSource:
-            "不能把文件夹移动或复制到它自己里面"
+            return "不能把文件夹移动或复制到它自己里面"
         case .keyOutsideSource:
-            "云端对象不在要整理的文件夹内"
+            return "云端对象不在要整理的文件夹内"
         case .unchangedDestination:
-            "项目已经在这个位置"
+            return "项目已经在这个位置"
         case .duplicateDestination:
-            "多个项目会产生同一个目标名称"
+            return "多个项目会产生同一个目标名称"
         case .destinationExists(let key):
-            "目标已存在：\(PathTemplate.lastComponent(key))"
+            return "目标已存在：\(PathTemplate.lastComponent(key))"
         case .incompleteListing:
-            "文件夹没有完整列出，已取消操作以避免遗漏"
+            return "文件夹没有完整列出，已取消操作以避免遗漏"
         case .emptySource:
-            "源文件夹不存在或为空"
-        case .sourceCleanupFailed(let key):
-            "目标已复制完成，但未能删除源对象：\(key)"
+            return "源文件夹不存在或为空"
+        case .copyOutcomeUncertain(let destination):
+            return "复制响应中断，无法确认目标是否已写入：\(destination)"
+        case .copyPhaseFailed(
+            let operation,
+            _,
+            let residualDestinations,
+            let uncertainDestinations
+        ):
+            let affected = residualDestinations.union(uncertainDestinations)
+            if affected.isEmpty {
+                return operation
+            } else {
+                return "\(operation)；以下目标需要手动检查：\(Self.keysDescription(affected))"
+            }
+        case .sourceCleanupFailed(let key, _, let uncertainSources, let residualDestinations):
+            let uncertainty = uncertainSources.isEmpty ? "" : "，源对象状态不确定"
+            if residualDestinations.isEmpty {
+                return "目标已复制完成，但未能删除源对象：\(key)\(uncertainty)"
+            } else {
+                return "未能删除源对象：\(key)\(uncertainty)；以下目标需要手动检查：\(Self.keysDescription(residualDestinations))"
+            }
         }
+    }
+
+    private static func keysDescription(_ keys: Set<String>) -> String {
+        keys.sorted().prefix(5).joined(separator: "、")
     }
 }
 

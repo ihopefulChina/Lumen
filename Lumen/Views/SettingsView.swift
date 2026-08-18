@@ -21,7 +21,7 @@ struct SettingsView: View {
         }
         .padding(8)
         .sheet(isPresented: $model.showAccountSheet) {
-            AccountSheet(draft: .fresh())
+            AccountSheet(draft: AccountSheet.initialDraft(editing: model.editingAccount))
                 .environment(model)
         }
         .confirmationDialog(
@@ -65,13 +65,13 @@ struct SettingsView: View {
                 }
                 .pickerStyle(.segmented)
 
-                Toggle("只显示素材文件", isOn: $model.settings.imagesOnly)
+                Toggle("浏览时只显示素材文件", isOn: $model.settings.imagesOnly)
                     .onChange(of: model.settings.imagesOnly) { _, value in
                         for session in AppServices.shared.sessions {
                             session.browser.imagesOnly = value
                         }
                     }
-                Text("开启后列表只显示素材文件（图片、视频、音频、设计稿、文档、压缩包等）。上传始终支持任意类型文件。")
+                Text("默认显示 OSS 中的所有对象。开启后仅收窄浏览列表，不会限制上传的文件类型。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

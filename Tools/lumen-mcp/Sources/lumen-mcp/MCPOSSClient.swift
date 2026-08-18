@@ -5,14 +5,21 @@ import Foundation
 /// in the GUI app.
 final class MCPOSSClient: @unchecked Sendable {
     let profile: MCPOSSProfile
+    private let redirectDelegate: OSSRedirectRejectingDelegate
     private let session: URLSession
 
-    init(profile: MCPOSSProfile) {
+    init(profile: MCPOSSProfile, configuration: URLSessionConfiguration? = nil) {
         self.profile = profile
-        let config = URLSessionConfiguration.ephemeral
+        let config = configuration ?? URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 120
         config.timeoutIntervalForResource = 3600
-        self.session = URLSession(configuration: config)
+        let redirectDelegate = OSSRedirectRejectingDelegate()
+        self.redirectDelegate = redirectDelegate
+        self.session = URLSession(
+            configuration: config,
+            delegate: redirectDelegate,
+            delegateQueue: nil
+        )
     }
 
     // MARK: - URL construction (byte-compatible with Lumen's OSSClient.makeURL)
@@ -123,6 +130,15 @@ final class MCPOSSClient: @unchecked Sendable {
         guard let http = response as? HTTPURLResponse else {
             throw OSSServiceError(statusCode: 0, code: "InvalidResponse", message: "非 HTTP 响应", requestId: "")
         }
+        if (300...399).contains(http.statusCode) {
+            let location = http.value(forHTTPHeaderField: "Location") ?? "（未提供 Location）"
+            throw OSSServiceError(
+                statusCode: http.statusCode,
+                code: "RedirectRejected",
+                message: "OSS 签名请求拒绝自动重定向：\(location)。请直接配置最终 Endpoint。",
+                requestId: ""
+            )
+        }
         guard (200...299).contains(http.statusCode) else {
             throw OSSXML.parseError(data, status: http.statusCode)
         }
@@ -160,6 +176,15 @@ final class MCPOSSClient: @unchecked Sendable {
         return listing
     }
 
+    func bucketVersioningStatus(bucket: String) async throws -> OSSBucketVersioningStatus {
+        let (data, _) = try await perform(
+            method: "GET",
+            bucket: bucket,
+            query: [("versioning", "")]
+        )
+        return try OSSXML.bucketVersioningStatus(from: data)
+    }
+
     struct UploadResult: Sendable {
         var bucket: String
         var key: String
@@ -168,12 +193,62 @@ final class MCPOSSClient: @unchecked Sendable {
         var url: URL
     }
 
-    func uploadFile(bucket: String, key: String, fileURL: URL, contentType: String?) async throws -> UploadResult {
+    func uploadFile(
+        bucket: String,
+        key: String,
+        fileURL: URL,
+        contentType: String?,
+        overwrite: Bool = false
+    ) async throws -> UploadResult {
         let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
         let size = (attributes[.size] as? Int64) ?? 0
         var headers: [String: String] = [:]
-        if let contentType {
+        if let contentType = try MCPHTTPSafety.validatedContentType(contentType) {
             headers["Content-Type"] = contentType
+        }
+        if !overwrite {
+            let versioningStatus: OSSBucketVersioningStatus
+            do {
+                versioningStatus = try await bucketVersioningStatus(bucket: bucket)
+            } catch let error as OSSServiceError {
+                throw OSSServiceError(
+                    statusCode: error.statusCode,
+                    code: "VersioningStatusUnavailable",
+                    message: "无法确认 Bucket 版本控制状态，已安全拒绝上传。请授予 oss:GetBucketVersioning 权限后重试；只有用户明确授权覆盖时才能传 overwrite=true。原始错误：\(error.message.isEmpty ? error.code : error.message)",
+                    requestId: error.requestId
+                )
+            } catch {
+                throw OSSServiceError(
+                    statusCode: 0,
+                    code: "VersioningStatusUnavailable",
+                    message: "无法确认 Bucket 版本控制状态，已安全拒绝上传：\(error.localizedDescription)",
+                    requestId: ""
+                )
+            }
+            guard versioningStatus == .unconfigured else {
+                let statusName = versioningStatus == .enabled ? "Enabled" : "Suspended"
+                throw OSSServiceError(
+                    statusCode: 409,
+                    code: "BucketVersioningUnsafe",
+                    message: "Bucket 的版本控制处于 \(statusName)，OSS 会忽略禁止覆盖请求头；为避免竞态覆盖，默认拒绝上传。请关闭版本控制，或在用户明确授权后传 overwrite=true。",
+                    requestId: ""
+                )
+            }
+            // Only an unconfigured (non-versioned) bucket reaches this point.
+            // HEAD is a fail-closed preflight and the request header below is
+            // the atomic guard against a concurrent creator.
+            do {
+                _ = try await perform(method: "HEAD", bucket: bucket, key: key)
+                throw OSSServiceError(
+                    statusCode: 409,
+                    code: "ObjectAlreadyExists",
+                    message: "远端对象已存在，默认未覆盖：\(bucket)/\(key)。请先获得用户明确确认，再传 overwrite=true。",
+                    requestId: ""
+                )
+            } catch let error as OSSServiceError where error.statusCode == 404 || error.code == "NoSuchKey" {
+                // Absent: continue to the guarded upload.
+            }
+            headers["x-oss-forbid-overwrite"] = "true"
         }
         let (data, http) = try await perform(
             method: "PUT",
@@ -228,6 +303,16 @@ final class MCPOSSClient: @unchecked Sendable {
             try? FileManager.default.removeItem(at: tempURL)
             throw OSSServiceError(statusCode: 0, code: "InvalidResponse", message: "非 HTTP 响应", requestId: "")
         }
+        if (300...399).contains(http.statusCode) {
+            let location = http.value(forHTTPHeaderField: "Location") ?? "（未提供 Location）"
+            try? FileManager.default.removeItem(at: tempURL)
+            throw OSSServiceError(
+                statusCode: http.statusCode,
+                code: "RedirectRejected",
+                message: "OSS 签名请求拒绝自动重定向：\(location)。请直接配置最终 Endpoint。",
+                requestId: ""
+            )
+        }
         guard (200...299).contains(http.statusCode) else {
             let body = (try? Data(contentsOf: tempURL)) ?? Data()
             try? FileManager.default.removeItem(at: tempURL)
@@ -235,9 +320,18 @@ final class MCPOSSClient: @unchecked Sendable {
         }
         let parent = destination.deletingLastPathComponent()
         try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: true)
+        let staging = parent.appendingPathComponent(
+            ".\(destination.lastPathComponent).lumen-mcp-\(UUID().uuidString).tmp"
+        )
         do {
-            try FileManager.default.moveItem(at: tempURL, to: destination)
+            // URLSession's temp directory and the requested destination may be
+            // on different volumes. Copy into the destination directory, then
+            // rename locally so the final path never exposes a partial file.
+            try FileManager.default.copyItem(at: tempURL, to: staging)
+            try FileManager.default.moveItem(at: staging, to: destination)
+            try? FileManager.default.removeItem(at: tempURL)
         } catch {
+            try? FileManager.default.removeItem(at: staging)
             try? FileManager.default.removeItem(at: tempURL)
             throw error
         }

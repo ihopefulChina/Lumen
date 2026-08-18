@@ -61,6 +61,7 @@ final class AppModel {
     var showObjectProperties = false
     var crossBucketPreflight: CrossBucketPreflight?
     var showCrossBucketPreflight = false
+    var cloudConflictPrompt: CloudConflictPrompt?
     var showAccountSheet = false
     var editingAccount: OSSAccount?
     var isLoadingBuckets = false
@@ -441,6 +442,7 @@ final class AppModel {
         searchController.clear()
         invalidateListingAndInspectorRequests()
         browser.navigate(to: PathTemplate.parentPrefix(object.key))
+        browser.revealObjectTemporarily(object.key)
         await refreshListing()
         browser.replaceSelection([object.key])
     }
@@ -544,19 +546,22 @@ final class AppModel {
         } else {
             updatedAccounts.append(account)
         }
-        let previousSecret = SecretStore.get(account: AccountStore.secretAccount(account.id))
-        let previousToken = SecretStore.get(account: AccountStore.tokenAccount(account.id))
+        let previousSecrets = try AccountStore.secrets(id: account.id)
         try AccountStore.save(updatedAccounts)
         do {
             try AccountStore.storeSecrets(id: account.id, secret: draft.secret, token: draft.token)
         } catch {
-            try? AccountStore.save(accounts)
-            if let previousSecret {
-                try? AccountStore.storeSecrets(id: account.id, secret: previousSecret, token: previousToken)
-            } else {
-                AccountStore.deleteSecrets(id: account.id)
+            let primary = error
+            do {
+                try AccountStore.save(accounts)
+                try AccountStore.restoreSecrets(id: account.id, snapshot: previousSecrets)
+            } catch let rollbackError {
+                throw AccountStoreError.rollbackFailed(
+                    primary: primary.localizedDescription,
+                    rollback: rollbackError.localizedDescription
+                )
             }
-            throw error
+            throw primary
         }
         accounts = updatedAccounts
         buckets = found.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
@@ -582,14 +587,43 @@ final class AppModel {
 
     func deleteAccount(_ account: OSSAccount) {
         let updatedAccounts = accounts.filter { $0.id != account.id }
+        var previousSecrets: AccountStore.Secrets?
+        var persistedUpdatedAccounts = false
         do {
+            let snapshot = try AccountStore.secrets(id: account.id)
+            previousSecrets = snapshot
+            // Commit the non-secret account list first. If the process exits
+            // between these two durable writes, startup cleanup removes only an
+            // orphaned Keychain item; it never loses credentials for an account
+            // that still exists in accounts.json.
             try AccountStore.save(updatedAccounts)
+            persistedUpdatedAccounts = true
+            try AccountStore.deleteSecrets(id: account.id)
         } catch {
-            present("无法保存账号更改：\(error.localizedDescription)", error: true)
+            let primary = error
+            if persistedUpdatedAccounts || previousSecrets != nil {
+                do {
+                    if persistedUpdatedAccounts {
+                        try AccountStore.save(accounts)
+                    }
+                    if let previousSecrets {
+                        try AccountStore.restoreSecrets(id: account.id, snapshot: previousSecrets)
+                    }
+                } catch let rollbackError {
+                    present(
+                        AccountStoreError.rollbackFailed(
+                            primary: primary.localizedDescription,
+                            rollback: rollbackError.localizedDescription
+                        ).localizedDescription,
+                        error: true
+                    )
+                    return
+                }
+            }
+            present("无法删除账号：\(primary.localizedDescription)", error: true)
             return
         }
         accounts = updatedAccounts
-        AccountStore.deleteSecrets(id: account.id)
         services.sessions.forEach { $0.pruneIfNeeded() }
         pruneIfNeeded()
     }
@@ -600,16 +634,19 @@ final class AppModel {
         applyTemplate: Bool? = nil,
         ownedTemporaryURLs: Set<URL> = []
     ) {
-        // makeClient() reports its own error (e.g. missing credentials), so
-        // avoid stacking a second, misleading banner on top of it.
-        let clientMissing = makeClient() == nil
-        guard selectedAccount != nil, selectedBucket != nil, !clientMissing else {
+        guard let account = selectedAccount, let bucket = selectedBucket else {
             pendingOpenURLs.append(contentsOf: urls)
             pendingOwnedTemporaryURLs.formUnion(ownedTemporaryURLs)
-            if selectedAccount == nil || selectedBucket == nil {
-                showAccountSheet = accounts.isEmpty
-                present("先添加账号并选择存储空间", error: true)
-            }
+            showAccountSheet = accounts.isEmpty
+            present("先添加账号并选择存储空间", error: true)
+            return
+        }
+        // Resolve the client and destination synchronously. Otherwise a quick
+        // account/Bucket switch before the Task starts can upload into the new
+        // selection while retaining the old path.
+        guard let client = makeClient() else {
+            pendingOpenURLs.append(contentsOf: urls)
+            pendingOwnedTemporaryURLs.formUnion(ownedTemporaryURLs)
             return
         }
         let dest = prefix ?? browser.prefix
@@ -619,20 +656,27 @@ final class AppModel {
                 urls: urls,
                 prefix: dest,
                 applyTemplate: useTemplate,
-                ownedTemporaryURLs: ownedTemporaryURLs
+                ownedTemporaryURLs: ownedTemporaryURLs,
+                client: client,
+                account: account,
+                bucket: bucket
             )
         }
     }
 
     func confirmOverwrite() {
         guard let prompt = overwritePrompt else { return }
+        guard prompt.canOverwriteSafely else {
+            present("安全覆盖要求 Bucket 已开启版本控制", error: true)
+            return
+        }
         overwritePrompt = nil
         commit(
             plan: prompt.plan,
             client: prompt.client,
             account: prompt.account,
             bucket: prompt.bucket,
-            allowOverwrite: true
+            overwriteDestinations: prompt.overwriteDestinations
         )
     }
 
@@ -658,19 +702,19 @@ final class AppModel {
         urls: [URL],
         prefix: String,
         applyTemplate: Bool,
-        ownedTemporaryURLs: Set<URL>
+        ownedTemporaryURLs: Set<URL>,
+        client: OSSClient,
+        account: OSSAccount,
+        bucket: OSSBucket
     ) async {
-        guard let client = makeClient(), let account = selectedAccount, let bucket = selectedBucket else {
-            ownedTemporaryURLs.forEach { try? FileManager.default.removeItem(at: $0) }
-            return
-        }
         uploadGeneration += 1
         let generation = uploadGeneration
         if overwritePrompt != nil {
             cancelOverwrite()
         }
         let options = TransferEngine.UploadPreparationOptions(
-            imagesOnly: settings.imagesOnly,
+            // Browsing filters must never discard files selected for upload.
+            imagesOnly: false,
             convertHEIC: settings.convertHEIC,
             ownedTemporaryURLs: ownedTemporaryURLs
         )
@@ -686,16 +730,40 @@ final class AppModel {
         }
         let viable = plan.items.filter { $0.failure == nil }
         guard !viable.isEmpty else {
-            transfers.enqueue(plan: plan, client: client, account: account, bucket: selectedBucket, settings: settings)
+            transfers.enqueue(plan: plan, client: client, account: account, bucket: bucket, settings: settings)
             return
         }
-        let existing: Set<String>
+        let existingIdentities: [String: OSSObjectIdentity]
         do {
-            existing = try await existingKeys(among: viable.map(\.objectKey), client: client)
+            let existing = try await existingKeys(among: viable.map(\.objectKey), client: client)
+            existingIdentities = try await existingObjectIdentities(
+                among: Array(existing),
+                client: client
+            )
         } catch {
             transfers.abandon(plan: plan)
             present("无法确认目标是否已有同名文件，已取消上传", error: true)
             return
+        }
+        guard generation == uploadGeneration else {
+            transfers.abandon(plan: plan)
+            return
+        }
+        let existing = Set(existingIdentities.keys)
+        let needsOverwriteCapability = !existing.isEmpty
+            && (settings.transferConflictPolicy == .ask
+                || settings.transferConflictPolicy == .replace)
+        let overwriteSafetyStatus: OSSBucketVersioningStatus?
+        if needsOverwriteCapability {
+            do {
+                overwriteSafetyStatus = try await client.bucketVersioningStatus()
+            } catch {
+                // The prompt remains useful for skipping conflicts, but the
+                // destructive option must be disabled when status is unknown.
+                overwriteSafetyStatus = nil
+            }
+        } else {
+            overwriteSafetyStatus = nil
         }
         guard generation == uploadGeneration else {
             transfers.abandon(plan: plan)
@@ -706,21 +774,35 @@ final class AppModel {
             existing: existing,
             policy: settings.transferConflictPolicy
         )
-        let conflicts = zip(viable, resolutions).compactMap { item, resolution -> String? in
-            guard resolution == .ask else { return nil }
-            return PathTemplate.relative(item.objectKey, under: prefix)
+        let replaceNeedsSafePrompt = settings.transferConflictPolicy == .replace
+            && overwriteSafetyStatus != .enabled
+        let conflictItems = zip(viable, resolutions).compactMap {
+            item,
+            resolution -> TransferEngine.PlannedUpload? in
+            if resolution == .ask { return item }
+            if replaceNeedsSafePrompt, existing.contains(item.objectKey) { return item }
+            return nil
+        }
+        let conflicts = conflictItems.map {
+            PathTemplate.relative($0.objectKey, under: prefix)
         }
         if !conflicts.isEmpty {
-            let skipSources = Set(zip(viable, resolutions).compactMap { item, resolution in
-                resolution == .ask ? item.sourceURL : nil
-            })
+            let conflictKeys = Set(conflictItems.map(\.objectKey))
+            let skipSources = Set(conflictItems.map(\.sourceURL))
             overwritePrompt = OverwritePrompt(
                 plan: plan,
                 client: client,
                 account: account,
                 bucket: bucket,
                 conflicts: Array(Set(conflicts)).sorted(),
-                skipSources: skipSources
+                skipSources: skipSources,
+                overwriteDestinations: Dictionary(uniqueKeysWithValues: conflictKeys.compactMap {
+                    key -> (String, OSSObjectIdentity)? in
+                    guard let identity = existingIdentities[key]
+                    else { return nil }
+                    return (key, identity)
+                }),
+                versioningStatus: overwriteSafetyStatus
             )
             return
         }
@@ -745,7 +827,11 @@ final class AppModel {
             account: account,
             bucket: bucket,
             excludingSources: excludedSources,
-            allowOverwrite: settings.transferConflictPolicy == .replace
+            overwriteDestinations: settings.transferConflictPolicy == .replace
+                ? existingIdentities.filter { key, _ in
+                    resolvedPlan.items.contains { $0.objectKey == key }
+                }
+                : [:]
         )
     }
 
@@ -755,7 +841,7 @@ final class AppModel {
         account: OSSAccount,
         bucket: OSSBucket?,
         excludingSources: Set<URL> = [],
-        allowOverwrite: Bool = false
+        overwriteDestinations: [String: OSSObjectIdentity] = [:]
     ) {
         transfers.enqueue(
             plan: plan,
@@ -764,7 +850,7 @@ final class AppModel {
             bucket: bucket,
             settings: settings,
             excludingSources: excludingSources,
-            allowOverwrite: allowOverwrite
+            overwriteDestinations: overwriteDestinations
         )
         scheduleListingRefresh()
     }
@@ -777,24 +863,87 @@ final class AppModel {
             for parent in parents {
                 let listing = try await client.listAllObjects(prefix: parent)
                 if listing.truncated {
-                    for key in unique where PathTemplate.parentPrefix(key) == parent {
-                        if try await client.objectExists(key: key) {
-                            found.insert(key)
-                        }
-                    }
+                    found.formUnion(try await existingKeysByHead(
+                        unique.filter { PathTemplate.parentPrefix($0) == parent },
+                        client: client
+                    ))
                     continue
                 }
                 found.formUnion(listing.objects.map(\.key))
             }
             return found.intersection(unique)
         }
-        var found = Set<String>()
-        for key in unique {
-            if try await client.objectExists(key: key) {
-                found.insert(key)
+        return try await existingKeysByHead(unique, client: client)
+    }
+
+    private func existingKeysByHead(
+        _ keys: [String],
+        client: OSSClient,
+        maximumConcurrent: Int = 8
+    ) async throws -> Set<String> {
+        let limit = max(1, maximumConcurrent)
+        return try await withThrowingTaskGroup(of: (String, Bool).self) { group in
+            var iterator = keys.makeIterator()
+            for _ in 0..<min(limit, keys.count) {
+                guard let key = iterator.next() else { break }
+                group.addTask {
+                    (key, try await client.objectExists(key: key))
+                }
             }
+            var found = Set<String>()
+            while let (key, exists) = try await group.next() {
+                if exists { found.insert(key) }
+                if let next = iterator.next() {
+                    group.addTask {
+                        (next, try await client.objectExists(key: next))
+                    }
+                }
+            }
+            return found
         }
-        return found
+    }
+
+    private func existingObjectIdentities(
+        among keys: [String],
+        client: OSSClient,
+        maximumConcurrent: Int = 8
+    ) async throws -> [String: OSSObjectIdentity] {
+        let unique = Array(Set(keys))
+        let limit = max(1, maximumConcurrent)
+        return try await withThrowingTaskGroup(of: (String, OSSObjectIdentity?).self) { group in
+            var iterator = unique.makeIterator()
+            func enqueue(_ key: String) {
+                group.addTask {
+                    do {
+                        let head = try await client.head(key: key)
+                        guard let identity = head.identity else {
+                            throw OSSServiceError(
+                                statusCode: 0,
+                                code: "MissingDestinationIdentity",
+                                message: "OSS 未返回目标对象的完整标识，无法安全覆盖：\(key)",
+                                requestId: ""
+                            )
+                        }
+                        return (key, identity)
+                    } catch let error as OSSServiceError where error.statusCode == 404 {
+                        // The object disappeared after the listing. Treat it as
+                        // create-only; the final write still performs its own
+                        // no-overwrite/versioning safety check.
+                        return (key, nil)
+                    }
+                }
+            }
+            for _ in 0..<min(limit, unique.count) {
+                guard let key = iterator.next() else { break }
+                enqueue(key)
+            }
+            var identities: [String: OSSObjectIdentity] = [:]
+            while let (key, identity) = try await group.next() {
+                if let identity { identities[key] = identity }
+                if let next = iterator.next() { enqueue(next) }
+            }
+            return identities
+        }
     }
 
     func ingestIncoming(_ urls: [URL]) {
@@ -906,7 +1055,13 @@ final class AppModel {
         guard let client = makeClient() else { return }
         let key = PathTemplate.join(browser.prefix, key: name) + "/"
         do {
-            try await client.putData(key: key, data: Data(), contentType: "application/x-directory", acl: .default)
+            try await client.putData(
+                key: key,
+                data: Data(),
+                contentType: "application/x-directory",
+                acl: .default,
+                allowVersionedCreate: true
+            )
             noteBucketMutated()
             await refreshListing()
         } catch {
@@ -1040,7 +1195,11 @@ final class AppModel {
         isOrganizingCloud = true
         defer { isOrganizingCloud = false }
         do {
-            try await client.renameObject(from: object.key, to: dest, overwrite: false)
+            let destinationIdentity = try await client.renameObject(
+                from: object.key,
+                to: dest,
+                overwrite: false
+            )
             noteBucketMutated()
             await refreshListing()
             browser.select(key: dest, modifiers: [])
@@ -1052,6 +1211,7 @@ final class AppModel {
                 mappings: [
                     CloudObjectMapping(sourceKey: object.key, destinationKey: dest)
                 ],
+                committedDestinationIdentities: [dest: destinationIdentity],
                 favoriteMoves: [],
                 sourceSelection: [object.key],
                 destinationSelection: [dest]
@@ -1100,7 +1260,10 @@ final class AppModel {
                 from: folder.prefix,
                 to: destination
             )
-            try await client.performCloudOperation(mappings, mode: .move)
+            let destinationIdentities = try await client.performCloudOperation(
+                mappings,
+                mode: .move
+            )
             favorites.replacePrefix(
                 accountID: accountID,
                 bucketName: bucketName,
@@ -1116,6 +1279,7 @@ final class AppModel {
                 bucketName: bucketName,
                 title: "撤销重命名",
                 mappings: mappings,
+                committedDestinationIdentities: destinationIdentities,
                 favoriteMoves: [
                     CloudFavoriteMove(
                         sourcePrefix: folder.prefix,
@@ -1260,7 +1424,15 @@ final class AppModel {
                 present("项目已经在这个位置")
                 return
             }
+            let destinationAccountID = selectedAccountID
+            let destinationBucketName = selectedBucketName
             Task {
+                guard selectedAccountID == destinationAccountID,
+                      selectedBucketName == destinationBucketName
+                else {
+                    present("目标账号或 Bucket 已改变，本次操作已取消", error: true)
+                    return
+                }
                 let succeeded = await organizeCloud(item.payload, to: destination, mode: item.mode)
                 if succeeded, item.mode == .move {
                     clearCloudClipboard()
@@ -1304,23 +1476,40 @@ final class AppModel {
     }
 
     func moveCloudItems(_ payload: CloudDragPayload, to destinationPrefix: String) {
-        Task { await organizeCloud(payload, to: destinationPrefix, mode: .move) }
+        let destinationAccountID = selectedAccountID
+        let destinationBucketName = selectedBucketName
+        Task {
+            guard selectedAccountID == destinationAccountID,
+                  selectedBucketName == destinationBucketName
+            else {
+                present("目标账号或 Bucket 已改变，本次操作已取消", error: true)
+                return
+            }
+            await organizeCloud(payload, to: destinationPrefix, mode: .move)
+        }
     }
 
     @discardableResult
     func organizeCloud(
         _ payload: CloudDragPayload,
         to destinationPrefix: String,
-        mode: CloudOperationMode
+        mode: CloudOperationMode,
+        conflictPolicy overridePolicy: TransferConflictPolicy? = nil
     ) async -> Bool {
         guard !isOrganizingCloud else {
             present("请等待当前云端整理完成", error: true)
             return false
         }
+        let conflictPolicy = overridePolicy ?? settings.transferConflictPolicy
         guard payload.accountID == selectedAccountID,
               payload.bucketName == selectedBucketName
         else {
-            await prepareCrossBucketOperation(payload, to: destinationPrefix, mode: mode)
+            await prepareCrossBucketOperation(
+                payload,
+                to: destinationPrefix,
+                mode: mode,
+                conflictPolicy: conflictPolicy
+            )
             return false
         }
         guard let client = makeClient(),
@@ -1333,85 +1522,121 @@ final class AppModel {
         do {
             var mappings: [CloudObjectMapping] = []
             var movedPrefixes: [(source: String, destination: String)] = []
-            var selection = Set<String>()
-            if mode == .copy {
-                let planned = payload.objectKeys.map {
-                    CloudObjectOperation.copyDestination(
-                        source: $0,
-                        destinationPrefix: destinationPrefix,
-                        isFolder: false,
-                        reserved: []
-                    )
-                } + payload.folderPrefixes.map {
-                    CloudObjectOperation.copyDestination(
-                        source: $0,
-                        destinationPrefix: destinationPrefix,
-                        isFolder: true,
-                        reserved: []
+            var topLevelDestinations = Set<String>()
+
+            for sourceKey in payload.objectKeys {
+                var destination = PathTemplate.join(
+                    destinationPrefix,
+                    key: PathTemplate.lastComponent(sourceKey)
+                )
+                if destination == sourceKey {
+                    guard mode == .copy else { continue }
+                    destination = try await availableCloudKey(
+                        destination,
+                        reserved: topLevelDestinations.union([sourceKey]),
+                        client: client
                     )
                 }
-                var reserved = try await existingKeys(among: planned, client: client)
-                for sourceKey in payload.objectKeys {
-                    let destination = CloudObjectOperation.copyDestination(
-                        source: sourceKey,
-                        destinationPrefix: destinationPrefix,
-                        isFolder: false,
-                        reserved: reserved
+                topLevelDestinations.insert(destination)
+                mappings.append(CloudObjectMapping(sourceKey: sourceKey, destinationKey: destination))
+            }
+            for sourcePrefix in payload.folderPrefixes {
+                var destination = PathTemplate.join(
+                    destinationPrefix,
+                    key: PathTemplate.lastComponent(sourcePrefix)
+                ) + "/"
+                if destination == sourcePrefix {
+                    guard mode == .copy else { continue }
+                    destination = try await availableCloudKey(
+                        destination,
+                        reserved: topLevelDestinations.union([sourcePrefix]),
+                        client: client
                     )
-                    reserved.insert(destination)
-                    mappings.append(CloudObjectMapping(sourceKey: sourceKey, destinationKey: destination))
-                    selection.insert(destination)
                 }
-                for sourcePrefix in payload.folderPrefixes {
-                    let destination = CloudObjectOperation.copyDestination(
-                        source: sourcePrefix,
-                        destinationPrefix: destinationPrefix,
-                        isFolder: true,
-                        reserved: reserved
-                    )
-                    reserved.insert(destination)
-                    mappings.append(contentsOf: try await client.prefixMappings(
-                        from: sourcePrefix,
-                        to: destination
-                    ))
-                    movedPrefixes.append((sourcePrefix, destination))
-                    selection.insert(destination)
-                }
-            } else {
-                // Moving an item that is already at the destination would make
-                // CloudObjectOperation.validate throw for the whole batch, so
-                // skip those and move only what actually changes place.
-                mappings = payload.objectKeys.compactMap { sourceKey in
-                    let destination = PathTemplate.join(
-                        destinationPrefix,
-                        key: PathTemplate.lastComponent(sourceKey)
-                    )
-                    guard destination != sourceKey else { return nil }
-                    return CloudObjectMapping(sourceKey: sourceKey, destinationKey: destination)
-                }
-                selection = Set(mappings.map(\.destinationKey))
-                for sourcePrefix in payload.folderPrefixes {
-                    let destination = PathTemplate.join(
-                        destinationPrefix,
-                        key: PathTemplate.lastComponent(sourcePrefix)
-                    ) + "/"
-                    guard destination != sourcePrefix else { continue }
-                    mappings.append(contentsOf: try await client.prefixMappings(
-                        from: sourcePrefix,
-                        to: destination
-                    ))
-                    movedPrefixes.append((sourcePrefix, destination))
-                    selection.insert(destination)
-                }
-                guard !mappings.isEmpty else {
-                    present("项目已经在这个位置")
-                    return false
-                }
+                topLevelDestinations.insert(destination)
+                mappings.append(contentsOf: try await client.prefixMappings(
+                    from: sourcePrefix,
+                    to: destination
+                ))
+                movedPrefixes.append((sourcePrefix, destination))
+            }
+            guard !mappings.isEmpty else {
+                present("项目已经在这个位置")
+                return false
             }
 
-            try await client.performCloudOperation(mappings, mode: mode)
+            let existing = try await existingKeys(
+                among: mappings.map(\.destinationKey),
+                client: client
+            )
+            let conflictVersioningStatus: OSSBucketVersioningStatus?
+            if !existing.isEmpty,
+               conflictPolicy == .ask || conflictPolicy == .replace {
+                do {
+                    conflictVersioningStatus = try await client.bucketVersioningStatus()
+                } catch {
+                    conflictVersioningStatus = nil
+                }
+            } else {
+                conflictVersioningStatus = nil
+            }
+            if !existing.isEmpty,
+               conflictPolicy == .ask
+                || (conflictPolicy == .replace && conflictVersioningStatus != .enabled) {
+                cloudConflictPrompt = CloudConflictPrompt(
+                    payload: payload,
+                    destinationPrefix: destinationPrefix,
+                    mode: mode,
+                    conflictKeys: existing.sorted(),
+                    isCrossBucket: false,
+                    destinationAccountID: accountID,
+                    destinationBucketName: bucketName,
+                    versioningStatus: conflictVersioningStatus
+                )
+                return false
+            }
+
+            var resolvedMappings: [CloudObjectMapping] = []
+            var reserved = Set(mappings.map(\.destinationKey)).union(existing)
+            var changedMapping = false
+            for var mapping in mappings {
+                guard existing.contains(mapping.destinationKey) else {
+                    resolvedMappings.append(mapping)
+                    continue
+                }
+                switch conflictPolicy {
+                case .skip:
+                    changedMapping = true
+                case .replace:
+                    resolvedMappings.append(mapping)
+                case .keepBoth:
+                    mapping.destinationKey = try await availableCloudKey(
+                        mapping.destinationKey,
+                        reserved: reserved,
+                        client: client
+                    )
+                    reserved.insert(mapping.destinationKey)
+                    changedMapping = true
+                    resolvedMappings.append(mapping)
+                case .ask:
+                    // Conflicts were returned above. This branch only keeps the
+                    // switch exhaustive if the prompt state changes later.
+                    break
+                }
+            }
+            guard !resolvedMappings.isEmpty else {
+                present("所有同名项目都已跳过")
+                return false
+            }
+            let selection = Set(resolvedMappings.map(\.destinationKey))
+            let operationResult = try await performCloudOperationSafely(
+                resolvedMappings,
+                mode: mode,
+                existingDestinations: conflictPolicy == .replace ? existing : [],
+                client: client
+            )
             noteBucketMutated()
-            if mode == .move {
+            if mode == .move, !changedMapping {
                 for pair in movedPrefixes {
                     favorites.replacePrefix(
                         accountID: accountID,
@@ -1431,8 +1656,9 @@ final class AppModel {
                     accountID: accountID,
                     bucketName: bucketName,
                     title: "撤销移动",
-                    mappings: mappings,
-                    favoriteMoves: movedPrefixes.map {
+                    mappings: resolvedMappings,
+                    committedDestinationIdentities: operationResult.committedDestinationIdentities,
+                    favoriteMoves: (changedMapping ? [] : movedPrefixes).map {
                         CloudFavoriteMove(
                             sourcePrefix: $0.source,
                             destinationPrefix: $0.destination
@@ -1443,8 +1669,11 @@ final class AppModel {
                 )
             }
             present(
-                mode == .move ? "已移动 \(count) 项" : "已复制 \(count) 项",
-                action: mode == .move ? .undoCloudOperation : nil
+                operationResult.cleanupFailures.isEmpty
+                    ? (mode == .move ? "已移动 \(count) 项" : "已复制 \(count) 项")
+                    : "操作已完成，但有 \(operationResult.cleanupFailures.count) 个临时安全备份未能清理",
+                error: !operationResult.cleanupFailures.isEmpty,
+                action: mode == .move && operationResult.cleanupFailures.isEmpty ? .undoCloudOperation : nil
             )
             return true
         } catch CloudObjectOperationError.sourceCleanupFailed {
@@ -1459,10 +1688,285 @@ final class AppModel {
         }
     }
 
+    func resolveCloudConflicts(_ policy: TransferConflictPolicy) {
+        guard policy != .ask, let prompt = cloudConflictPrompt else { return }
+        guard policy != .replace || prompt.canReplaceSafely else {
+            present("安全覆盖要求目标 Bucket 已开启版本控制", error: true)
+            return
+        }
+        cloudConflictPrompt = nil
+        guard selectedAccountID == prompt.destinationAccountID,
+              selectedBucketName == prompt.destinationBucketName
+        else {
+            present("目标账号或 Bucket 已改变，本次操作已取消", error: true)
+            return
+        }
+        Task {
+            let succeeded = await organizeCloud(
+                prompt.payload,
+                to: prompt.destinationPrefix,
+                mode: prompt.mode,
+                conflictPolicy: policy
+            )
+            if succeeded, prompt.mode == .move {
+                clearCloudClipboard()
+            }
+        }
+    }
+
+    func cancelCloudConflicts() {
+        cloudConflictPrompt = nil
+    }
+
+    private func availableCloudKey(
+        _ key: String,
+        reserved: Set<String>,
+        client: OSSClient
+    ) async throws -> String {
+        var occupied = reserved
+        var candidate = TransferConflictPlanner.availableKey(for: key, existing: occupied)
+        while try await client.objectExists(key: candidate) {
+            occupied.insert(candidate)
+            candidate = TransferConflictPlanner.availableKey(for: key, existing: occupied)
+        }
+        return candidate
+    }
+
+    /// Creates recoverable copies before replacing existing objects. OSS has no
+    /// multi-object transaction on unversioned buckets, so this is the only way
+    /// to restore the original destination if a later item fails.
+    private func performCloudOperationSafely(
+        _ mappings: [CloudObjectMapping],
+        mode: CloudOperationMode,
+        existingDestinations: Set<String>,
+        client: OSSClient
+    ) async throws -> (
+        cleanupFailures: [String],
+        committedDestinationIdentities: [String: OSSObjectIdentity]
+    ) {
+        let backupKeys = existingDestinations.intersection(mappings.map(\.destinationKey))
+        let backups = try await createDestinationBackups(keys: backupKeys, client: client)
+        let expectedDestinations = Dictionary(uniqueKeysWithValues: backups.map {
+            ($0.originalKey, $0.originalIdentity)
+        })
+        do {
+            let committedDestinationIdentities = try await client.performCloudOperation(
+                mappings,
+                mode: mode,
+                overwrite: false,
+                overwriteDestinations: backupKeys,
+                expectedDestinations: expectedDestinations
+            )
+            return (
+                await cleanupDestinationBackups(backups, client: client),
+                committedDestinationIdentities
+            )
+        } catch let operationError {
+            guard let cloudError = operationError as? CloudObjectOperationError else {
+                // Validation and destination preflight errors occur before the
+                // copy loop. Nothing was written, so restoring every backup
+                // would itself overwrite concurrent user changes.
+                let cleanupFailures = await cleanupDestinationBackups(backups, client: client)
+                if cleanupFailures.isEmpty { throw operationError }
+                throw CloudRollbackError.manualInspectionRequired(
+                    operation: operationError.localizedDescription,
+                    keys: cleanupFailures
+                )
+            }
+            let byDestination = backups.reduce(into: [String: CloudDestinationBackup]()) {
+                $0[$1.originalKey] = $1
+            }
+            var failures: [String] = []
+            var preserved: [String] = []
+            switch cloudError {
+            case .copyPhaseFailed(
+                _,
+                let modifiedExisting,
+                let residualDestinations,
+                let uncertainDestinations
+            ):
+                // Never restore a backup by copying it over the current key.
+                // OSS has no destination If-Match, so that could overwrite a
+                // newer concurrent value. The low-level operation already
+                // removes only exact version IDs created by this operation;
+                // anything left over is preserved for manual inspection.
+                let manualDestinations = modifiedExisting
+                    .union(residualDestinations)
+                    .union(uncertainDestinations)
+                let manualBackups = manualDestinations.compactMap { byDestination[$0] }
+                let manualBackupKeys = Set(manualBackups.map(\.backupKey))
+                failures.append(contentsOf: await cleanupDestinationBackups(
+                    backups.filter { !manualBackupKeys.contains($0.backupKey) },
+                    client: client
+                ))
+                preserved.append(contentsOf: manualDestinations)
+                preserved.append(contentsOf: manualBackups.map(\.backupKey))
+
+            case .sourceCleanupFailed(
+                _,
+                let removedSources,
+                let uncertainSources,
+                let residualDestinations
+            ):
+                let destinationBySource = mappings.reduce(into: [String: String]()) {
+                    $0[$1.sourceKey] = $1.destinationKey
+                }
+                let committedDestinations = Set(removedSources.compactMap { destinationBySource[$0] })
+                let uncertainDestinations = Set(uncertainSources.compactMap { destinationBySource[$0] })
+                let manualDestinations = residualDestinations.union(uncertainDestinations)
+                let manualBackups = manualDestinations.compactMap { byDestination[$0] }
+                let manualBackupKeys = Set(manualBackups.map(\.backupKey))
+                // Destinations whose exact source version was removed are the
+                // committed part of the move. All other destinations remain in
+                // place; copying a backup over them would introduce another
+                // unguarded write after source cleanup has begun.
+                let safeToClean = backups.filter {
+                    committedDestinations.contains($0.originalKey)
+                        || !manualBackupKeys.contains($0.backupKey)
+                }
+                failures.append(contentsOf: await cleanupDestinationBackups(
+                    safeToClean,
+                    client: client
+                ))
+                preserved.append(contentsOf: manualDestinations)
+                preserved.append(contentsOf: manualBackups.map(\.backupKey))
+
+            default:
+                // destinationExists and other pre-copy failures have not
+                // modified a destination. Only discard the unused backups.
+                failures.append(contentsOf: await cleanupDestinationBackups(backups, client: client))
+            }
+            let inspectionKeys = Array(Set(failures + preserved)).sorted()
+            if inspectionKeys.isEmpty { throw operationError }
+            throw CloudRollbackError.manualInspectionRequired(
+                operation: operationError.localizedDescription,
+                keys: inspectionKeys
+            )
+        }
+    }
+
+    private func createDestinationBackups(
+        keys: Set<String>,
+        client: OSSClient
+    ) async throws -> [CloudDestinationBackup] {
+        guard !keys.isEmpty else { return [] }
+        let root = ".lumen-rollback/\(UUID().uuidString)/"
+        var backups: [CloudDestinationBackup] = []
+        do {
+            for originalKey in keys.sorted() {
+                let snapshot = try await client.objectSnapshot(key: originalKey)
+                let head = snapshot.head
+                let acl = snapshot.acl
+                guard let originalIdentity = head.identity else {
+                    throw OSSServiceError(
+                        statusCode: 0,
+                        code: "MissingDestinationIdentity",
+                        message: "OSS 未返回目标对象的完整标识，无法安全覆盖：\(originalKey)",
+                        requestId: ""
+                    )
+                }
+                let backupKey = root + UUID().uuidString
+                let versionID: String?
+                do {
+                    versionID = try await client.copyObject(
+                        from: originalKey,
+                        to: backupKey,
+                        // The UUID key is owned by this operation. Treat it as an
+                        // explicit write so rollback also works in version-enabled
+                        // buckets where OSS ignores create-only headers.
+                        overwrite: true,
+                        // Rollback objects must never inherit a public source ACL.
+                        // The original ACL is stored separately and restored only
+                        // when copying the backup back to its user-visible key.
+                        acl: .private,
+                        sourceETag: head.etag,
+                        sourceVersionID: head.versionID,
+                        storageClass: head.storageClass,
+                        serverSideEncryption: head.serverSideEncryption,
+                        serverSideEncryptionKeyID: head.serverSideEncryptionKeyID,
+                        serverSideDataEncryption: head.serverSideDataEncryption,
+                        requireCommittedVersionID: true
+                    )
+                } catch let error {
+                    if let cloudError = error as? CloudObjectOperationError,
+                       case .copyOutcomeUncertain = cloudError {
+                        // The server may have committed the private backup even
+                        // though it omitted/lost the exact version response. Keep
+                        // its random key in the manual residual set and never issue
+                        // an unscoped DELETE in this versioned bucket.
+                        backups.append(
+                            CloudDestinationBackup(
+                                originalKey: originalKey,
+                                backupKey: backupKey,
+                                backupVersionID: nil,
+                                acl: acl,
+                                originalIdentity: originalIdentity
+                            )
+                        )
+                    }
+                    throw error
+                }
+                let backup = CloudDestinationBackup(
+                    originalKey: originalKey,
+                    backupKey: backupKey,
+                    backupVersionID: versionID,
+                    acl: acl,
+                    originalIdentity: originalIdentity
+                )
+                // Record the key before any further request can fail. In an
+                // Enabled bucket cleanup is safe only with the exact version
+                // returned for this write; an unscoped DELETE would merely add
+                // a marker and leave the private backup version behind.
+                backups.append(backup)
+                if Self.exactVersionID(versionID) == nil {
+                    let status = try await client.bucketVersioningStatus()
+                    guard status == .disabled else {
+                        throw CloudObjectOperationError.copyOutcomeUncertain(
+                            destination: backupKey
+                        )
+                    }
+                }
+            }
+            return backups
+        } catch let operationError {
+            let cleanupFailures = await cleanupDestinationBackups(backups, client: client)
+            if cleanupFailures.isEmpty { throw operationError }
+            throw CloudRollbackError.rollbackFailed(
+                operation: operationError.localizedDescription,
+                failures: cleanupFailures
+            )
+        }
+    }
+
+    private func cleanupDestinationBackups(
+        _ backups: [CloudDestinationBackup],
+        client: OSSClient
+    ) async -> [String] {
+        var failures: [String] = []
+        for backup in backups.reversed() {
+            do {
+                if Self.exactVersionID(backup.backupVersionID) == nil {
+                    guard try await client.bucketVersioningStatus() == .disabled else {
+                        failures.append(backup.backupKey)
+                        continue
+                    }
+                }
+                _ = try await client.deleteObject(
+                    key: backup.backupKey,
+                    versionID: backup.backupVersionID
+                )
+            } catch {
+                failures.append(backup.backupKey)
+            }
+        }
+        return failures
+    }
+
     private func prepareCrossBucketOperation(
         _ payload: CloudDragPayload,
         to destinationPrefix: String,
-        mode: CloudOperationMode
+        mode: CloudOperationMode,
+        conflictPolicy: TransferConflictPolicy
     ) async {
         guard let sourceAccount = accounts.first(where: { $0.id == payload.accountID }),
               let destinationAccount = selectedAccount,
@@ -1473,18 +1977,12 @@ final class AppModel {
             return
         }
         let sourceRegion = payload.sourceRegionID ?? sourceAccount.regionID
-        // Resolve the source bucket from the SOURCE account. Using the
-        // destination account's bucket list could pick a same-named bucket in
-        // a different region and route the source client to the wrong endpoint.
-        let sourceBucket: OSSBucket?
-        if sourceAccount.id == selectedAccountID {
-            sourceBucket = buckets.first(where: { $0.name == payload.bucketName })
-        } else {
-            sourceBucket = try? await clientProvider(sourceAccount, nil)
-                .listBuckets()
-                .first(where: { $0.name == payload.bucketName })
-        }
-        let resolvedSourceBucket = sourceBucket ?? OSSBucket(
+        // The drag payload already carries the source region. Re-listing the
+        // destination account's buckets here both hides errors and can resolve
+        // a same-named bucket in the wrong account.
+        let resolvedSourceBucket = (sourceAccount.id == selectedAccountID
+            ? buckets.first(where: { $0.name == payload.bucketName })
+            : nil) ?? OSSBucket(
             name: payload.bucketName,
             regionID: sourceRegion,
             location: sourceRegion,
@@ -1522,42 +2020,72 @@ final class AppModel {
                     key: plan.mappings[index].sourceKey
                 ).contentLength ?? 0
             }
-            plan.knownBytes = plan.mappings.reduce(0) { partial, mapping in
-                let (sum, overflow) = partial.addingReportingOverflow(max(0, mapping.expectedSize))
-                return overflow ? Int64.max : sum
+            plan.method = CrossBucketOperation.executionMethod(
+                preferred: plan.method,
+                mappings: plan.mappings
+            )
+            let existingDestinations = try await existingKeys(
+                among: plan.mappings.map(\.destinationKey),
+                client: destinationClient
+            )
+            let conflictVersioningStatus: OSSBucketVersioningStatus?
+            if !existingDestinations.isEmpty,
+               conflictPolicy == .ask || conflictPolicy == .replace {
+                do {
+                    conflictVersioningStatus = try await destinationClient.bucketVersioningStatus()
+                } catch {
+                    conflictVersioningStatus = nil
+                }
+            } else {
+                conflictVersioningStatus = nil
             }
-
+            if !existingDestinations.isEmpty,
+               conflictPolicy == .ask
+                || (conflictPolicy == .replace && conflictVersioningStatus != .enabled) {
+                cloudConflictPrompt = CloudConflictPrompt(
+                    payload: payload,
+                    destinationPrefix: destinationPrefix,
+                    mode: mode,
+                    conflictKeys: existingDestinations.sorted(),
+                    isCrossBucket: true,
+                    destinationAccountID: destinationAccount.id,
+                    destinationBucketName: destinationBucket.name,
+                    versioningStatus: conflictVersioningStatus
+                )
+                return
+            }
             var renamed = 0
             var filtered: [CrossBucketMapping] = []
-            var reserved = Set(plan.mappings.map { $0.destinationKey })
+            var reserved = Set(plan.mappings.map { $0.destinationKey }).union(existingDestinations)
             for var mapping in plan.mappings {
-                let exists = try await destinationClient.objectExists(key: mapping.destinationKey)
-                guard exists else { filtered.append(mapping); continue }
-                switch settings.transferConflictPolicy {
+                guard existingDestinations.contains(mapping.destinationKey) else {
+                    filtered.append(mapping)
+                    continue
+                }
+                switch conflictPolicy {
                 case .skip:
                     continue
                 case .replace:
                     filtered.append(mapping)
-                case .ask, .keepBoth:
-                    var candidate = TransferConflictPlanner.availableKey(
-                        for: mapping.destinationKey,
-                        existing: reserved
+                case .keepBoth:
+                    mapping.destinationKey = try await availableCloudKey(
+                        mapping.destinationKey,
+                        reserved: reserved,
+                        client: destinationClient
                     )
-                    while try await destinationClient.objectExists(key: candidate) {
-                        reserved.insert(candidate)
-                        candidate = TransferConflictPlanner.availableKey(
-                            for: mapping.destinationKey,
-                            existing: reserved
-                        )
-                    }
-                    mapping.destinationKey = candidate
-                    reserved.insert(candidate)
+                    reserved.insert(mapping.destinationKey)
                     renamed += 1
                     filtered.append(mapping)
+                case .ask:
+                    break
                 }
             }
             let hadMappings = !plan.mappings.isEmpty
             plan.mappings = filtered
+            plan.knownBytes = filtered.reduce(0) { partial, mapping in
+                let (sum, overflow) = partial.addingReportingOverflow(max(0, mapping.expectedSize))
+                return overflow ? Int64.max : sum
+            }
             guard !filtered.isEmpty else {
                 present(CrossBucketOperation.emptyResultMessage(hadMappings: hadMappings))
                 return
@@ -1571,8 +2099,9 @@ final class AppModel {
                 destinationBucket: destinationBucket,
                 sourceClient: sourceClient,
                 destinationClient: destinationClient,
-                overwrite: settings.transferConflictPolicy == .replace,
-                renamedConflicts: renamed
+                overwrite: conflictPolicy == .replace,
+                renamedConflicts: renamed,
+                existingDestinations: conflictPolicy == .replace ? existingDestinations : []
             )
             showCrossBucketPreflight = true
         } catch {
@@ -1593,61 +2122,264 @@ final class AppModel {
         var copied: [CrossBucketMapping] = []
         var destinationVersions: [String: String] = [:]
         var removedSources: Set<String> = []
+        var sourceSnapshots: [String: OSSObjectSnapshot] = [:]
+        var sourceCleanupStarted = false
+        var backups: [CloudDestinationBackup] = []
+        var stagingObjects: [CloudTemporaryObject] = []
+        var cleanupFailures: [String] = []
         let temporaryRoot = FileManager.default.temporaryDirectory.appending(
             path: "Lumen-CrossBucket-\(UUID().uuidString)",
             directoryHint: .isDirectory
         )
         defer { try? FileManager.default.removeItem(at: temporaryRoot) }
         do {
+            if preflight.mode == .move {
+                let sourceStatus = try await preflight.sourceClient.bucketVersioningStatus()
+                guard sourceStatus.supportsSafeMove else {
+                    throw OSSVersioningSafetyError(operation: .move, status: sourceStatus)
+                }
+                let destinationStatus = try await preflight.destinationClient.bucketVersioningStatus()
+                guard destinationStatus.supportsSafeMove else {
+                    throw OSSVersioningSafetyError(operation: .move, status: destinationStatus)
+                }
+            }
+            backups = try await createDestinationBackups(
+                keys: preflight.existingDestinations.intersection(
+                    Set(preflight.plan.mappings.map(\.destinationKey))
+                ),
+                client: preflight.destinationClient
+            )
             if preflight.plan.method == .relay {
                 try FileManager.default.createDirectory(at: temporaryRoot, withIntermediateDirectories: true)
             }
             for mapping in preflight.plan.mappings {
                 try Task.checkCancellation()
+                let sourceSnapshot = try await preflight.sourceClient.objectSnapshot(
+                    key: mapping.sourceKey
+                )
+                sourceSnapshots[mapping.sourceKey] = sourceSnapshot
+                let sourceHead = sourceSnapshot.head
+                let sourceACL = sourceSnapshot.acl
+                let shouldOverwrite = preflight.existingDestinations.contains(mapping.destinationKey)
+                let expectedDestination = backups.first {
+                    $0.originalKey == mapping.destinationKey
+                }?.originalIdentity
+                guard !shouldOverwrite || expectedDestination != nil else {
+                    throw OSSServiceError(
+                        statusCode: 0,
+                        code: "MissingDestinationIdentity",
+                        message: "没有可验证的目标安全副本，已取消覆盖：\(mapping.destinationKey)",
+                        requestId: ""
+                    )
+                }
                 if preflight.plan.method == .serverSide {
                     let versionID = try await preflight.destinationClient.copyObject(
                         fromBucket: preflight.sourceBucket.name,
                         sourceKey: mapping.sourceKey,
                         to: mapping.destinationKey,
-                        overwrite: preflight.overwrite
+                        overwrite: shouldOverwrite,
+                        acl: sourceACL,
+                        sourceETag: sourceHead.etag,
+                        sourceVersionID: sourceHead.versionID,
+                        storageClass: sourceHead.storageClass,
+                        serverSideEncryption: sourceHead.serverSideEncryption,
+                        serverSideEncryptionKeyID: sourceHead.serverSideEncryptionKeyID,
+                        serverSideDataEncryption: sourceHead.serverSideDataEncryption,
+                        allowVersionedCreate: !shouldOverwrite,
+                        requireCommittedVersionID: shouldOverwrite || preflight.mode == .move,
+                        expectedDestination: expectedDestination,
+                        preflightDestination: false
                     )
+                    if preflight.mode == .move {
+                        guard let versionID,
+                              !versionID.isEmpty,
+                              versionID.caseInsensitiveCompare("null") != .orderedSame
+                        else {
+                            throw CloudObjectOperationError.copyOutcomeUncertain(
+                                destination: mapping.destinationKey
+                            )
+                        }
+                    }
+                    copied.append(mapping)
                     if let versionID, !versionID.isEmpty {
                         destinationVersions[mapping.destinationKey] = versionID
                     }
                 } else {
                     let local = temporaryRoot.appending(path: UUID().uuidString)
-                    let head = try await preflight.sourceClient.head(key: mapping.sourceKey)
+                    let tags = sourceSnapshot.tags
                     _ = try await preflight.sourceClient.downloadResumable(
                         key: mapping.sourceKey,
                         to: local,
                         within: temporaryRoot,
-                        expectedSize: head.contentLength ?? mapping.expectedSize,
+                        expectedSize: sourceHead.contentLength ?? mapping.expectedSize,
+                        expectedETag: sourceHead.etag,
+                        expectedVersionID: sourceHead.versionID,
                         speedLimit: settings.downloadSpeedLimit
                     )
-                    _ = try await preflight.destinationClient.putObject(
-                        key: mapping.destinationKey,
+                    let stagingKey = ".lumen-staging/\(UUID().uuidString)"
+                    // Register the random key before starting the mutating
+                    // request. A lost response may mean OSS committed it; the
+                    // cleanup path will preserve a nil-version record instead
+                    // of issuing an unsafe key-scoped DELETE.
+                    let stagingIndex = stagingObjects.endIndex
+                    stagingObjects.append(
+                        CloudTemporaryObject(key: stagingKey, versionID: nil)
+                    )
+                    let receipt = try await preflight.destinationClient.putObjectWithReceipt(
+                        key: stagingKey,
                         fileURL: local,
-                        contentType: head.contentType ?? "application/octet-stream",
-                        acl: preflight.destinationAccount.defaultACL,
-                        overwrite: preflight.overwrite,
+                        contentType: sourceHead.contentType ?? "application/octet-stream",
+                        // Staging keys are implementation details. Keeping them
+                        // private prevents a public-read-write source ACL from
+                        // exposing a mutable relay object before final commit.
+                        acl: .private,
+                        properties: OSSObjectProperties(
+                            contentType: sourceHead.contentType ?? "application/octet-stream",
+                            cacheControl: sourceHead.cacheControl ?? "",
+                            contentDisposition: sourceHead.contentDisposition ?? "",
+                            contentLanguage: sourceHead.contentLanguage ?? "",
+                            expires: sourceHead.expires ?? "",
+                            userMetadata: sourceHead.userMetadata
+                        ),
+                        contentEncoding: sourceHead.contentEncoding,
+                        storageClass: sourceHead.storageClass,
+                        serverSideEncryption: sourceHead.serverSideEncryption,
+                        serverSideEncryptionKeyID: sourceHead.serverSideEncryptionKeyID,
+                        serverSideDataEncryption: sourceHead.serverSideDataEncryption,
+                        // The staging key is an unguessable, app-owned UUID. It
+                        // is still a create-only write: Disabled buckets enforce
+                        // forbid-overwrite, while Enabled buckets must return an
+                        // exact version ID before the relay may continue.
+                        allowVersionedCreate: true,
+                        overwrite: false,
                         speedLimit: settings.uploadSpeedLimit
                     )
-                    if let versionID = try? await preflight.destinationClient.head(key: mapping.destinationKey).versionID,
-                       !versionID.isEmpty {
+                    stagingObjects[stagingIndex].versionID = receipt.versionID
+                    if Self.exactVersionID(receipt.versionID) == nil {
+                        let status = try await preflight.destinationClient.bucketVersioningStatus()
+                        guard status == .disabled else {
+                            throw CloudObjectOperationError.copyOutcomeUncertain(
+                                destination: stagingKey
+                            )
+                        }
+                    }
+                    if !tags.isEmpty {
+                        try await preflight.destinationClient.putObjectTags(
+                            key: stagingKey,
+                            tags: tags,
+                            versionID: receipt.versionID
+                        )
+                    }
+                    let stagingHead = try await preflight.destinationClient.head(
+                        key: stagingKey,
+                        versionID: receipt.versionID
+                    )
+                    let versionID = try await preflight.destinationClient.copyObject(
+                        from: stagingKey,
+                        to: mapping.destinationKey,
+                        overwrite: shouldOverwrite,
+                        acl: sourceACL,
+                        sourceETag: stagingHead.etag,
+                        sourceVersionID: stagingHead.versionID,
+                        storageClass: sourceHead.storageClass,
+                        serverSideEncryption: sourceHead.serverSideEncryption,
+                        serverSideEncryptionKeyID: sourceHead.serverSideEncryptionKeyID,
+                        serverSideDataEncryption: sourceHead.serverSideDataEncryption,
+                        allowVersionedCreate: !shouldOverwrite,
+                        requireCommittedVersionID: shouldOverwrite || preflight.mode == .move,
+                        expectedDestination: expectedDestination,
+                        preflightDestination: false
+                    )
+                    if preflight.mode == .move {
+                        guard let versionID,
+                              !versionID.isEmpty,
+                              versionID.caseInsensitiveCompare("null") != .orderedSame
+                        else {
+                            throw CloudObjectOperationError.copyOutcomeUncertain(
+                                destination: mapping.destinationKey
+                            )
+                        }
+                    }
+                    // Record the committed destination before any cleanup which
+                    // can still fail, so rollback always includes this object.
+                    copied.append(mapping)
+                    if let versionID, !versionID.isEmpty {
                         destinationVersions[mapping.destinationKey] = versionID
                     }
-                    if let tags = try? await preflight.sourceClient.getObjectTags(key: mapping.sourceKey), !tags.isEmpty {
-                        try await preflight.destinationClient.putObjectTags(key: mapping.destinationKey, tags: tags)
+                    if let stageIndex = stagingObjects.firstIndex(where: { $0.key == stagingKey }) {
+                        let stage = stagingObjects[stageIndex]
+                        do {
+                            _ = try await preflight.destinationClient.deleteObject(
+                                key: stage.key,
+                                versionID: stage.versionID
+                            )
+                            stagingObjects.remove(at: stageIndex)
+                        } catch {
+                            // Keep it in stagingObjects and retry during the
+                            // operation-wide cleanup below.
+                        }
                     }
-                    try? FileManager.default.removeItem(at: local)
+                    do {
+                        try FileManager.default.removeItem(at: local)
+                    } catch {
+                        // The temporary root cleanup retries this recursively.
+                    }
                 }
-                copied.append(mapping)
             }
             if preflight.mode == .move {
+                sourceCleanupStarted = true
                 for mapping in preflight.plan.mappings {
-                    _ = try await preflight.sourceClient.deleteObject(key: mapping.sourceKey)
+                    guard let snapshot = sourceSnapshots[mapping.sourceKey] else {
+                        throw OSSServiceError(
+                            statusCode: 0,
+                            code: "MissingSourceIdentity",
+                            message: "无法确认源对象版本，已保留来源和目标：\(mapping.sourceKey)",
+                            requestId: ""
+                        )
+                    }
+                    guard let versionID = Self.exactVersionID(snapshot.head.versionID) else {
+                        throw OSSServiceError(
+                            statusCode: 0,
+                            code: "MissingSourceVersion",
+                            message: "源对象没有可精确删除的 versionId，已保留来源和目标：\(mapping.sourceKey)",
+                            requestId: ""
+                        )
+                    }
+                    guard try await preflight.sourceClient.objectMatchesSnapshot(
+                        key: mapping.sourceKey,
+                        expected: snapshot,
+                        versionID: versionID
+                    ) else {
+                        throw OSSServiceError(
+                            statusCode: 0,
+                            code: "SourceObjectChanged",
+                            message: "源对象属性或标签在复制后发生变化，已保留来源和目标：\(mapping.sourceKey)",
+                            requestId: ""
+                        )
+                    }
+                    // Delete the exact version that was copied. A newer
+                    // concurrent source version, if any, remains untouched.
+                    _ = try await preflight.sourceClient.deleteObject(
+                        key: mapping.sourceKey,
+                        versionID: versionID
+                    )
                     removedSources.insert(mapping.sourceKey)
                 }
+            }
+            cleanupFailures.append(contentsOf: await cleanupDestinationBackups(
+                backups,
+                client: preflight.destinationClient
+            ))
+            cleanupFailures.append(contentsOf: await cleanupTemporaryObjects(
+                stagingObjects,
+                client: preflight.destinationClient
+            ))
+            do {
+                if FileManager.default.fileExists(atPath: temporaryRoot.path) {
+                    try FileManager.default.removeItem(at: temporaryRoot)
+                }
+            } catch {
+                cleanupFailures.append(temporaryRoot.path)
             }
             noteBucketMutated(
                 accountID: preflight.sourceAccount.id,
@@ -1661,16 +2393,110 @@ final class AppModel {
             if preflight.mode == .move {
                 clearCloudClipboard()
             }
-            present(preflight.mode == .move ? "已移动 \(copied.count) 个对象" : "已复制 \(copied.count) 个对象")
-        } catch {
-            for mapping in CrossBucketOperation.rollbackDestinations(
+            if cleanupFailures.isEmpty {
+                present(preflight.mode == .move ? "已移动 \(copied.count) 个对象" : "已复制 \(copied.count) 个对象")
+            } else {
+                present("跨 Bucket 操作已完成，但有 \(cleanupFailures.count) 个临时文件未能清理", error: true)
+            }
+        } catch let operationError {
+            if sourceCleanupStarted {
+                // Once any source DELETE has begun, a missing response may mean
+                // it already committed. Never restore or delete a destination:
+                // that could remove the only remaining live copy. Keep private
+                // backups as well so a human can resolve every uncertain key.
+                cleanupFailures.append(contentsOf: backups.map(\.backupKey))
+                cleanupFailures.append(contentsOf: await cleanupTemporaryObjects(
+                    stagingObjects,
+                    client: preflight.destinationClient
+                ))
+                do {
+                    if FileManager.default.fileExists(atPath: temporaryRoot.path) {
+                        try FileManager.default.removeItem(at: temporaryRoot)
+                    }
+                } catch {
+                    cleanupFailures.append(temporaryRoot.path)
+                }
+                noteBucketMutated(
+                    accountID: preflight.sourceAccount.id,
+                    bucketName: preflight.sourceBucket.name
+                )
+                noteBucketMutated(
+                    accountID: preflight.destinationAccount.id,
+                    bucketName: preflight.destinationBucket.name
+                )
+                // The operation may have committed destinations and removed a
+                // subset of sources. Refresh the currently visible scope before
+                // reporting the manual-recovery state so the browser never keeps
+                // presenting the pre-operation listing as authoritative.
+                await refreshListing()
+                let manualKeys = Array(Set(cleanupFailures + copied.map(\.destinationKey))).sorted()
+                present(
+                    "跨 Bucket 移动的源清理未完成：\(operationError.localizedDescription)\n"
+                        + "为避免数据丢失，来源、目标和安全副本均已保留，请手动检查："
+                        + manualKeys.prefix(8).joined(separator: "、"),
+                    error: true
+                )
+                return
+            }
+            let uncertainDestinations: Set<String>
+            if let cloudError = operationError as? CloudObjectOperationError,
+               case .copyOutcomeUncertain(let destination) = cloudError {
+                uncertainDestinations = [destination]
+            } else {
+                uncertainDestinations = []
+            }
+            let rollbackMappings = CrossBucketOperation.rollbackDestinations(
                 copied: copied,
                 removedSources: removedSources
-            ) {
-                _ = try? await preflight.destinationClient.deleteObject(
-                    key: mapping.destinationKey,
-                    versionID: destinationVersions[mapping.destinationKey]
-                )
+            )
+            let rollbackKeys = Set(rollbackMappings.map(\.destinationKey))
+            var safelyRolledBack = Set<String>()
+            var manualDestinations = uncertainDestinations
+            for mapping in rollbackMappings {
+                guard !uncertainDestinations.contains(mapping.destinationKey),
+                      let versionID = destinationVersions[mapping.destinationKey],
+                      !versionID.isEmpty
+                else {
+                    manualDestinations.insert(mapping.destinationKey)
+                    continue
+                }
+                do {
+                    // This exact-version delete is safe for both newly created
+                    // and replaced keys. A later concurrent version remains the
+                    // current value; no backup is copied over it.
+                    _ = try await preflight.destinationClient.deleteObject(
+                        key: mapping.destinationKey,
+                        versionID: versionID
+                    )
+                    safelyRolledBack.insert(mapping.destinationKey)
+                } catch {
+                    manualDestinations.insert(mapping.destinationKey)
+                }
+            }
+            let backupsToPreserve = backups.filter {
+                manualDestinations.contains($0.originalKey)
+            }
+            let retainedBackupKeys = Set(backupsToPreserve.map(\.backupKey))
+            cleanupFailures.append(contentsOf: manualDestinations)
+            cleanupFailures.append(contentsOf: backupsToPreserve.map(\.backupKey))
+            cleanupFailures.append(contentsOf: await cleanupDestinationBackups(
+                backups.filter {
+                    !retainedBackupKeys.contains($0.backupKey)
+                        && (safelyRolledBack.contains($0.originalKey)
+                            || !rollbackKeys.contains($0.originalKey))
+                },
+                client: preflight.destinationClient
+            ))
+            cleanupFailures.append(contentsOf: await cleanupTemporaryObjects(
+                stagingObjects,
+                client: preflight.destinationClient
+            ))
+            do {
+                if FileManager.default.fileExists(atPath: temporaryRoot.path) {
+                    try FileManager.default.removeItem(at: temporaryRoot)
+                }
+            } catch {
+                cleanupFailures.append(temporaryRoot.path)
             }
             noteBucketMutated(
                 accountID: preflight.sourceAccount.id,
@@ -1680,8 +2506,43 @@ final class AppModel {
                 accountID: preflight.destinationAccount.id,
                 bucketName: preflight.destinationBucket.name
             )
-            present("跨 Bucket 操作未完成：\(error.localizedDescription)", error: true)
+            let rollbackDetail = cleanupFailures.isEmpty
+                ? "已恢复本次尚未提交的目标对象"
+                : "仍有 \(cleanupFailures.count) 项需要人工检查"
+            present(
+                "跨 Bucket 操作未完成：\(operationError.localizedDescription)\n\(rollbackDetail)",
+                error: true
+            )
         }
+    }
+
+    private func cleanupTemporaryObjects(
+        _ objects: [CloudTemporaryObject],
+        client: OSSClient
+    ) async -> [String] {
+        var failures: [String] = []
+        for object in objects.reversed() {
+            do {
+                if Self.exactVersionID(object.versionID) == nil {
+                    guard try await client.bucketVersioningStatus() == .disabled else {
+                        failures.append(object.key)
+                        continue
+                    }
+                }
+                _ = try await client.deleteObject(key: object.key, versionID: object.versionID)
+            } catch {
+                failures.append(object.key)
+            }
+        }
+        return failures
+    }
+
+    private static func exactVersionID(_ value: String?) -> String? {
+        guard let value = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !value.isEmpty,
+              value.caseInsensitiveCompare("null") != .orderedSame
+        else { return nil }
+        return value
     }
 
     func undoLastCloudOperation() async {
@@ -1714,12 +2575,18 @@ final class AppModel {
               isCurrentScope(for: operation)
         else { return }
 
+        guard operation.hasCompleteDestinationIdentities else {
+            present("撤销记录缺少目标对象的精确版本信息，已取消以避免误移动", error: true)
+            return
+        }
+
         isOrganizingCloud = true
         defer { isOrganizingCloud = false }
         do {
             try await client.performCloudOperation(
                 operation.inverseMappings,
-                mode: .move
+                mode: .move,
+                expectedSources: operation.committedDestinationIdentities
             )
             for move in operation.inverseFavoriteMoves {
                 favorites.replacePrefix(
@@ -1868,7 +2735,7 @@ final class AppModel {
             bucket: bucket,
             scopedRoot: dest,
             speedLimit: settings.downloadSpeedLimit,
-            allowOverwrite: resolved.allowOverwrite
+            overwriteDestinations: resolved.overwriteDestinations
         )
         if skippedLocal + skippedUnsafe > 0 {
             present("已加入 \(items.count) 个下载，跳过 \(skippedLocal + skippedUnsafe) 项")
@@ -1880,7 +2747,7 @@ final class AppModel {
     private func resolveDownloadConflicts(
         items: [(object: OSSObject, destination: URL)],
         root: URL
-    ) -> (items: [(object: OSSObject, destination: URL)], skipped: Int, allowOverwrite: Bool)? {
+    ) -> (items: [(object: OSSObject, destination: URL)], skipped: Int, overwriteDestinations: [URL: TransferEngine.LocalFileIdentity])? {
         let rootPath = root.standardizedFileURL.path
         let rootPrefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
         let relativePaths = items.map { item -> String in
@@ -1910,6 +2777,7 @@ final class AppModel {
             policy: policy
         )
         var resolved: [(object: OSSObject, destination: URL)] = []
+        var overwriteDestinations: [URL: TransferEngine.LocalFileIdentity] = [:]
         var skipped = 0
         for (index, resolution) in resolutions.enumerated() {
             let item = items[index]
@@ -1924,9 +2792,18 @@ final class AppModel {
                 resolved.append((item.object, destination))
             case .useOriginal:
                 resolved.append(item)
+                if policy == .replace, existing.contains(relativePaths[index]) {
+                    do {
+                        overwriteDestinations[item.destination.standardizedFileURL] =
+                            try TransferEngine.LocalFileIdentity.capture(item.destination)
+                    } catch {
+                        present(error.localizedDescription, error: true)
+                        return nil
+                    }
+                }
             }
         }
-        return (resolved, skipped, policy == .replace)
+        return (resolved, skipped, overwriteDestinations)
     }
 
     func copyURLs(style: LinkStyle = .plain) {
@@ -2162,6 +3039,15 @@ struct OverwritePrompt: Identifiable {
     var bucket: OSSBucket?
     var conflicts: [String]
     var skipSources: Set<URL>
+    /// Exact remote identities that existed when the prompt was shown.
+    /// Approval is scoped to these versions; a target that changes while a job
+    /// is queued must be confirmed again instead of inheriting a stale Bool.
+    var overwriteDestinations: [String: OSSObjectIdentity]
+    /// OSS offers no destination compare-and-swap for replacement. Exact,
+    /// recoverable overwrite therefore requires an Enabled versioned Bucket.
+    var versioningStatus: OSSBucketVersioningStatus? = nil
+
+    var canOverwriteSafely: Bool { versioningStatus == .enabled }
 
     var title: String {
         conflicts.count == 1 ? "“\(conflicts[0])”已存在" : "\(conflicts.count) 个文件已存在"
@@ -2173,7 +3059,47 @@ struct OverwritePrompt: Identifiable {
         if conflicts.count > shown.count {
             text += "\n以及另外 \(conflicts.count - shown.count) 个"
         }
-        text += "\n覆盖后无法恢复原来的对象。"
+        if canOverwriteSafely {
+            text += "\n只会替换上面已确认的精确版本；目标若发生变化会自动取消。"
+        } else if let versioningStatus {
+            text += "\nBucket 版本控制为 \(versioningStatus.rawValue)。为防止不可恢复的并发覆盖，请先启用版本控制，或跳过这些文件。"
+        } else {
+            text += "\n无法确认 Bucket 版本控制状态，覆盖已禁用；你仍可跳过这些文件。"
+        }
+        return text
+    }
+}
+
+struct CloudConflictPrompt: Identifiable {
+    let id = UUID()
+    var payload: CloudDragPayload
+    var destinationPrefix: String
+    var mode: CloudOperationMode
+    var conflictKeys: [String]
+    var isCrossBucket: Bool
+    var destinationAccountID: UUID
+    var destinationBucketName: String
+    var versioningStatus: OSSBucketVersioningStatus? = nil
+
+    var canReplaceSafely: Bool { versioningStatus == .enabled }
+
+    var title: String {
+        conflictKeys.count == 1 ? "目标已有同名项目" : "目标已有 \(conflictKeys.count) 个同名项目"
+    }
+
+    var message: String {
+        let shown = conflictKeys.prefix(10).map { PathTemplate.lastComponent($0) }
+        var text = shown.joined(separator: "\n")
+        if conflictKeys.count > shown.count {
+            text += "\n以及另外 \(conflictKeys.count - shown.count) 个"
+        }
+        if canReplaceSafely {
+            text += "\n目标已启用版本控制；可替换已确认版本，或选择保留/跳过。"
+        } else if let versioningStatus {
+            text += "\n目标 Bucket 版本控制为 \(versioningStatus.rawValue)，安全覆盖已禁用；请选择保留两者或跳过。"
+        } else {
+            text += "\n无法确认目标 Bucket 的版本控制状态，安全覆盖已禁用。"
+        }
         return text
     }
 }

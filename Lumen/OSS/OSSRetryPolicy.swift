@@ -27,12 +27,18 @@ struct OSSRetryPolicy: Sendable {
         self.jitter = jitter
     }
 
-    func delay(afterAttempt attempt: Int, outcome: OSSRetryOutcome) -> Duration? {
+    func delay(
+        afterAttempt attempt: Int,
+        outcome: OSSRetryOutcome,
+        retryAfter: Duration? = nil
+    ) -> Duration? {
         guard attempt > 0, attempt < maxAttempts, isRetryable(outcome) else { return nil }
         let baseMilliseconds = min(4_000, 500 * (1 << min(attempt - 1, 3)))
         let boundedJitter = min(0.2, max(-0.2, jitter()))
         let milliseconds = Int64((Double(baseMilliseconds) * (1 + boundedJitter)).rounded())
-        return .milliseconds(milliseconds)
+        let backoff = Duration.milliseconds(milliseconds)
+        guard let retryAfter else { return backoff }
+        return max(backoff, retryAfter)
     }
 
     func outcome(for error: any Error) -> OSSRetryOutcome? {

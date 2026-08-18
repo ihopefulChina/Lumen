@@ -43,6 +43,12 @@ struct ObjectListing: Sendable {
     var nextToken: String?
 }
 
+enum OSSBucketVersioningStatus: Equatable, Sendable {
+    case unconfigured
+    case enabled
+    case suspended
+}
+
 struct OSSServiceError: LocalizedError, Sendable {
     var statusCode: Int
     var code: String
@@ -94,7 +100,10 @@ enum OSSEndpoint {
             host = String(host[..<slash])
         }
         let parts = host.split(separator: ".")
-        if parts.count >= 4, parts[1].hasPrefix("oss-") {
+        // Strip an already-prefixed bucket only for genuine Aliyun endpoint
+        // suffixes. Custom hosts such as tenant.oss-proxy.example must stay
+        // byte-for-byte intact.
+        if isAliyunVirtualHost(host), parts.count >= 4, parts[1].hasPrefix("oss-") {
             return parts.dropFirst().joined(separator: ".")
         }
         return host
@@ -102,7 +111,8 @@ enum OSSEndpoint {
 
     static func isAliyunVirtualHost(_ host: String) -> Bool {
         let value = host.lowercased()
-        return value.contains("aliyuncs.com") || value.contains("aliyun-inc.com")
+        return value == "aliyuncs.com" || value.hasSuffix(".aliyuncs.com")
+            || value == "aliyun-inc.com" || value.hasSuffix(".aliyun-inc.com")
     }
 
     static func objectHost(endpoint: String, bucketName: String) -> String {

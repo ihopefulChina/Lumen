@@ -91,6 +91,7 @@ struct PathTemplateTests {
         #expect(crumbs.map(\.title) == ["studio", "assets", "2026"])
         #expect(crumbs.last?.prefix == "assets/2026/")
     }
+
 }
 
 struct SignerTests {
@@ -128,6 +129,11 @@ struct SignerTests {
         #expect(ImageKind.contentType(for: "notes.txt") == "text/plain")
         #expect(ImageKind.contentType(for: "data.json") == "application/json")
         #expect(ImageKind.displayKind(for: "data.json") == "JSON")
+        #expect(ImageKind.isText(key: "component.ts"))
+        #expect(!ImageKind.isVideo(key: "component.ts"))
+        #expect(ImageKind.contentType(for: "component.ts") == "text/plain")
+        #expect(ImageKind.isVideo(key: "camera.m2ts"))
+        #expect(ImageKind.contentType(for: "camera.m2ts") == "video/mp2t")
     }
 
     @Test func byteFormatterDoesNotSpellOutZero() {
@@ -192,11 +198,14 @@ struct EndpointTests {
         #expect(OSSEndpoint.normalize("https://mybucket.oss-cn-hangzhou.aliyuncs.com") == "oss-cn-hangzhou.aliyuncs.com")
         #expect(OSSEndpoint.normalize("oss-cn-hangzhou.aliyuncs.com") == "oss-cn-hangzhou.aliyuncs.com")
         #expect(OSSEndpoint.normalize("cdn.example.com") == "cdn.example.com")
+        #expect(OSSEndpoint.normalize("https://tenant.oss-proxy.example/path") == "tenant.oss-proxy.example")
     }
 
     @Test func virtualHostOnlyForAliyun() {
         #expect(OSSEndpoint.isAliyunVirtualHost("oss-cn-shanghai.aliyuncs.com"))
+        #expect(!OSSEndpoint.isAliyunVirtualHost("aliyuncs.com.evil.example"))
         #expect(OSSEndpoint.objectHost(endpoint: "oss-cn-shanghai.aliyuncs.com", bucketName: "studio") == "studio.oss-cn-shanghai.aliyuncs.com")
+        #expect(OSSEndpoint.objectHost(endpoint: "aliyuncs.com.evil.example", bucketName: "studio") == "aliyuncs.com.evil.example")
         #expect(OSSEndpoint.objectHost(endpoint: "img.example.com", bucketName: "studio") == "img.example.com")
     }
 }

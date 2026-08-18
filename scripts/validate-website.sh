@@ -8,13 +8,16 @@ readme="$repo_root/README.md"
 index="$site_root/index.html"
 privacy="$site_root/privacy.html"
 support="$site_root/support.html"
-version="1.0.2"
+mcp="$site_root/mcp.html"
+version_info="$("$repo_root/scripts/project-version.sh")"
+version="${version_info%% *}"
 download_url="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-$version.dmg"
 
 required_files=(
   "$index"
   "$privacy"
   "$support"
+  "$mcp"
   "$site_root/styles.css"
   "$site_root/site.webmanifest"
   "$site_root/sitemap.xml"
@@ -69,7 +72,8 @@ done
 
 for page_and_canonical in \
   "$privacy|https://ihopefulchina.github.io/Lumen/privacy.html" \
-  "$support|https://ihopefulchina.github.io/Lumen/support.html"; do
+  "$support|https://ihopefulchina.github.io/Lumen/support.html" \
+  "$mcp|https://ihopefulchina.github.io/Lumen/mcp.html"; do
   page="${page_and_canonical%%|*}"
   canonical="${page_and_canonical#*|}"
   for pattern in \
@@ -118,7 +122,7 @@ if ! grep -Fq -- '@media (prefers-reduced-motion: reduce)' "$site_root/styles.cs
   exit 1
 fi
 
-python3 - "$index" "$privacy" "$support" <<'PY'
+python3 - "$index" "$privacy" "$support" "$mcp" <<'PY'
 from html.parser import HTMLParser
 from pathlib import Path
 import sys

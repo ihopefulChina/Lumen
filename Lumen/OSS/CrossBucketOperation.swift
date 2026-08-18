@@ -31,9 +31,44 @@ struct CrossBucketPreflight: Identifiable, Sendable {
     var destinationClient: OSSClient
     var overwrite: Bool
     var renamedConflicts: Int
+    var existingDestinations: Set<String>
+}
+
+struct CloudDestinationBackup: Equatable, Sendable {
+    var originalKey: String
+    var backupKey: String
+    var backupVersionID: String?
+    var acl: ObjectACL
+    /// Identity of the user-visible destination at the instant its private
+    /// backup was created. The later replacement must still match this value.
+    var originalIdentity: OSSObjectIdentity
+}
+
+struct CloudTemporaryObject: Equatable, Sendable {
+    var key: String
+    var versionID: String?
+}
+
+enum CloudRollbackError: LocalizedError, Sendable {
+    case rollbackFailed(operation: String, failures: [String])
+    case cleanupFailed(keys: [String])
+    case manualInspectionRequired(operation: String, keys: [String])
+
+    var errorDescription: String? {
+        switch self {
+        case .rollbackFailed(let operation, let failures):
+            return "\(operation)；恢复原对象时仍有 \(failures.count) 项失败：\(failures.joined(separator: "、"))"
+        case .cleanupFailed(let keys):
+            return "操作已完成，但有 \(keys.count) 个临时安全备份未能清理：\(keys.joined(separator: "、"))"
+        case .manualInspectionRequired(let operation, let keys):
+            return "\(operation)；为避免误删或覆盖，已保留安全副本，请手动检查：\(keys.joined(separator: "、"))"
+        }
+    }
 }
 
 enum CrossBucketOperation {
+    static let maximumSingleCopyBytes: Int64 = 5 * 1024 * 1024 * 1024
+
     static func method(
         sourceAccountID: UUID,
         destinationAccountID: UUID,
@@ -91,13 +126,14 @@ enum CrossBucketOperation {
             let (sum, overflow) = bytes.addingReportingOverflow(max(0, mapping.expectedSize))
             bytes = overflow ? Int64.max : sum
         }
-        return CrossBucketPlan(
-            method: method(
+        let preferredMethod = method(
                 sourceAccountID: sourceAccountID,
                 destinationAccountID: destinationAccountID,
                 sourceRegion: sourceRegion,
                 destinationRegion: destinationRegion
-            ),
+            )
+        return CrossBucketPlan(
+            method: executionMethod(preferred: preferredMethod, mappings: mappings),
             mappings: mappings,
             knownBytes: bytes
         )
@@ -105,6 +141,19 @@ enum CrossBucketOperation {
 
     static func emptyResultMessage(hadMappings: Bool) -> String {
         hadMappings ? "所有同名项目都已跳过" : "源文件夹为空，没有可复制的对象"
+    }
+
+    /// OSS CopyObject cannot copy an object larger than 5 GiB between
+    /// different buckets. Fall back to the resumable Mac relay before any
+    /// writes start instead of failing halfway through a mixed batch.
+    static func executionMethod(
+        preferred: CrossBucketMethod,
+        mappings: [CrossBucketMapping]
+    ) -> CrossBucketMethod {
+        guard preferred == .serverSide else { return .relay }
+        return mappings.contains(where: { $0.expectedSize > maximumSingleCopyBytes })
+            ? .relay
+            : .serverSide
     }
 
     static func rollbackDestinations(

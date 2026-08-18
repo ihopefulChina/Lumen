@@ -105,6 +105,53 @@ struct TransferEngineTests {
         )
     }
 
+    @Test func pauseAllPausesRunningAndQueuedJobs() {
+        let engine = TransferEngine()
+        var running = Self.persistedJob(status: .running)
+        running.id = UUID()
+        var queued = Self.persistedJob(status: .queued)
+        queued.id = UUID()
+        engine.jobs = [running, queued]
+
+        engine.pauseAll()
+
+        #expect(engine.jobs.map(\.status) == [.paused, .paused])
+    }
+
+    @Test func explicitUploadIsNotFilteredByTheBrowserImagesOnlyPreference() async throws {
+        let source = try Self.temporaryFile(named: "archive.bin")
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let plan = await TransferEngine.planUploads(
+            urls: [source],
+            prefix: "uploads/",
+            template: "",
+            applyTemplate: false,
+            options: TransferEngine.UploadPreparationOptions(imagesOnly: true, convertHEIC: false)
+        )
+
+        #expect(plan.items.count == 1)
+        #expect(plan.items.first?.failure == nil)
+        #expect(plan.items.first?.objectKey.hasSuffix("archive.bin") == true)
+    }
+
+    @Test func journalLoadFailureIsReported() {
+        let engine = TransferEngine(journal: FailingTransferJournal(failLoad: true))
+
+        engine.restore(accounts: [])
+
+        #expect(engine.journalErrorMessage?.contains("无法恢复传输记录") == true)
+    }
+
+    @Test func journalSaveFailureIsReported() {
+        let engine = TransferEngine(journal: FailingTransferJournal(failSave: true))
+        engine.jobs = [Self.persistedJob(status: .completed)]
+
+        engine.clearFinished()
+
+        #expect(engine.journalErrorMessage?.contains("无法保存传输记录") == true)
+    }
+
     @Test func pausingPreservesCheckpointAndMakesJobResumable() throws {
         let journal = MemoryTransferJournal()
         let engine = TransferEngine(journal: journal)
@@ -427,7 +474,8 @@ struct TransferEngineTests {
             region: "cn-hangzhou",
             endpointHost: "oss-cn-hangzhou.aliyuncs.com",
             bucket: "bucket",
-            transport: transport
+            transport: transport,
+            testingVersioningStatusOverride: .disabled
         )
         let account = OSSAccount(
             id: UUID(),
@@ -642,9 +690,186 @@ struct TransferEngineTests {
         engine.retry(failedID)
         try await Self.waitUntil { engine.jobs.count == 2 && engine.jobs.last?.status == .completed }
 
-        let paths = await transport.requestPaths
+        let paths = await transport.uploadRequestPaths
         #expect(paths == ["/chosen/final-name.txt", "/chosen/final-name.txt"])
         #expect(await transport.forbidOverwrite == ["true", "true"])
+    }
+
+    @Test func uploadOverwriteApprovalIsScopedToExactKeys() async throws {
+        let first = try Self.temporaryFile(named: "approved.txt")
+        let second = try Self.temporaryFile(named: "unapproved.txt")
+        defer {
+            try? FileManager.default.removeItem(at: first)
+            try? FileManager.default.removeItem(at: second)
+        }
+        let transport = ScopedOverwriteTransport()
+        let client = Self.client(transport: transport, versioningStatus: .enabled)
+        let engine = TransferEngine()
+        let plan = TransferEngine.UploadPlan(
+            items: [
+                Self.item(url: first, key: "approved.txt", resource: TransferResource()),
+                Self.item(url: second, key: "unapproved.txt", resource: TransferResource())
+            ],
+            skipped: 0
+        )
+
+        engine.enqueue(
+            plan: plan,
+            client: client,
+            account: Self.fixedAccount,
+            bucket: nil,
+            settings: Self.settings(concurrency: 2),
+            overwriteDestinations: [
+                "approved.txt": OSSObjectIdentity(
+                    etag: "approved-etag",
+                    versionID: "approved-v1",
+                    size: 7
+                )
+            ]
+        )
+        try await Self.waitUntil {
+            engine.jobs.count == 2 && engine.jobs.allSatisfy { !$0.isActive }
+        }
+
+        let headers = await transport.putForbidOverwriteByPath
+        #expect(headers["/approved.txt"] == "")
+        #expect(headers["/unapproved.txt"] == "true")
+        #expect(engine.jobs.allSatisfy { $0.status == .completed })
+    }
+
+    @Test func retryNeverReusesASingleUseUploadOverwriteApproval() async throws {
+        let source = try Self.temporaryFile(named: "single-use-overwrite.txt")
+        defer { try? FileManager.default.removeItem(at: source) }
+        let transport = SingleUseOverwriteTransport(failFirstPut: true)
+        let engine = TransferEngine()
+        let plan = TransferEngine.UploadPlan(
+            items: [Self.item(url: source, key: "existing.txt", resource: TransferResource())],
+            skipped: 0
+        )
+
+        engine.enqueue(
+            plan: plan,
+            client: Self.client(transport: transport, versioningStatus: .enabled),
+            account: Self.fixedAccount,
+            bucket: nil,
+            settings: Self.settings(concurrency: 1),
+            overwriteDestinations: ["existing.txt": SingleUseOverwriteTransport.identity]
+        )
+        try await Self.waitUntil { engine.jobs.first?.status == .failed }
+        let failedID = try #require(engine.jobs.first?.id)
+
+        engine.retry(failedID)
+        try await Self.waitUntil {
+            engine.jobs.count == 2 && engine.jobs.last?.isActive == false
+        }
+
+        #expect(await transport.putCount == 1)
+        #expect(await transport.putForbidOverwriteHeaders == [nil])
+        #expect(engine.jobs.last?.status == .failed)
+        #expect(engine.jobs.last?.errorMessage?.contains("目标已有同名对象") == true)
+    }
+
+    @Test func restoredLegacyOverwriteFlagNeverRevivesUploadApproval() async throws {
+        let source = try Self.temporaryFile(named: "restored-overwrite.txt")
+        defer { try? FileManager.default.removeItem(at: source) }
+        let bookmark = Data([5, 4, 3, 2, 1])
+        let record = PersistedTransfer(
+            job: Self.persistedJob(status: .failed),
+            retry: .upload(
+                PersistedUploadRetry(
+                    accountID: Self.fixedAccount.id,
+                    bucket: nil,
+                    sourceBookmark: bookmark,
+                    objectKey: "exact/object.txt",
+                    imagesOnly: false,
+                    convertHEIC: false,
+                    playSound: false,
+                    allowOverwrite: true
+                )
+            )
+        )
+        let transport = SingleUseOverwriteTransport(failFirstPut: false)
+        let engine = TransferEngine(
+            journal: MemoryTransferJournal(records: [record]),
+            bookmarks: FixedTransferBookmarks(bookmark: bookmark, resolvedURL: source),
+            clientProvider: { _, _ in Self.client(transport: transport) }
+        )
+
+        engine.restore(accounts: [Self.fixedAccount])
+        let restoredID = try #require(engine.jobs.first?.id)
+        engine.retry(restoredID)
+        try await Self.waitUntil {
+            engine.jobs.count == 2 && engine.jobs.last?.isActive == false
+        }
+
+        #expect(await transport.putCount == 0)
+        #expect(engine.jobs.last?.status == .failed)
+        #expect(engine.jobs.last?.errorMessage?.contains("目标已有同名对象") == true)
+    }
+
+    @Test func enabledVersioningCreateRequiresACommittedVersionID() async throws {
+        let source = try Self.temporaryFile(named: "versioned-create.txt")
+        defer { try? FileManager.default.removeItem(at: source) }
+
+        let successfulTransport = VersionedCreateTransport(versionID: "committed-version")
+        let successfulEngine = TransferEngine()
+        successfulEngine.enqueue(
+            plan: TransferEngine.UploadPlan(
+                items: [Self.item(url: source, key: "new-success.txt", resource: TransferResource())],
+                skipped: 0
+            ),
+            client: Self.client(transport: successfulTransport, versioningStatus: .enabled),
+            account: Self.fixedAccount,
+            bucket: nil,
+            settings: Self.settings(concurrency: 1)
+        )
+        try await Self.waitUntil { successfulEngine.jobs.first?.isActive == false }
+
+        #expect(successfulEngine.jobs.first?.status == .completed)
+        #expect(await successfulTransport.putCount == 1)
+        #expect(await successfulTransport.putForbidOverwriteHeaders == ["true"])
+
+        let missingVersionTransport = VersionedCreateTransport(versionID: nil)
+        let missingVersionEngine = TransferEngine()
+        missingVersionEngine.enqueue(
+            plan: TransferEngine.UploadPlan(
+                items: [Self.item(url: source, key: "new-uncertain.txt", resource: TransferResource())],
+                skipped: 0
+            ),
+            client: Self.client(transport: missingVersionTransport, versioningStatus: .enabled),
+            account: Self.fixedAccount,
+            bucket: nil,
+            settings: Self.settings(concurrency: 1)
+        )
+        try await Self.waitUntil { missingVersionEngine.jobs.first?.isActive == false }
+
+        #expect(missingVersionEngine.jobs.first?.status == .failed)
+        #expect(missingVersionEngine.jobs.first?.errorMessage?.contains("无法确认对象是否已提交") == true)
+        #expect(await missingVersionTransport.putCount == 1)
+    }
+
+    @Test func suspendedVersioningRejectsNewUploadBeforeAnyRequest() async throws {
+        let source = try Self.temporaryFile(named: "suspended-create.txt")
+        defer { try? FileManager.default.removeItem(at: source) }
+        let transport = VersionedCreateTransport(versionID: "must-not-be-used")
+        let engine = TransferEngine()
+
+        engine.enqueue(
+            plan: TransferEngine.UploadPlan(
+                items: [Self.item(url: source, key: "blocked.txt", resource: TransferResource())],
+                skipped: 0
+            ),
+            client: Self.client(transport: transport, versioningStatus: .suspended),
+            account: Self.fixedAccount,
+            bucket: nil,
+            settings: Self.settings(concurrency: 1)
+        )
+        try await Self.waitUntil { engine.jobs.first?.isActive == false }
+
+        #expect(engine.jobs.first?.status == .failed)
+        #expect(engine.jobs.first?.errorMessage?.contains("Suspended") == true)
+        #expect(await transport.headCount == 0)
+        #expect(await transport.putCount == 0)
     }
 
     @Test func failedDownloadCanRetryToTheSameDestination() async throws {
@@ -661,7 +886,7 @@ struct TransferEngineTests {
         let object = OSSObject(
             key: "remote/download.txt",
             size: 10,
-            etag: "etag",
+            etag: "stable-etag",
             lastModified: nil,
             storageClass: "Standard"
         )
@@ -679,6 +904,94 @@ struct TransferEngineTests {
         #expect(try Data(contentsOf: destination) == Data("downloaded".utf8))
         let paths = await transport.requestPaths
         #expect(paths == Array(repeating: "/remote/download.txt", count: 4))
+    }
+
+    @Test func unapprovedDownloadDestinationAppearingAfterPlanningIsPreserved() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-download-scope-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let approved = directory.appending(path: "approved.txt")
+        let unapproved = directory.appending(path: "unapproved.txt")
+        try Data("old-approved".utf8).write(to: approved)
+        let approvedIdentity = try TransferEngine.LocalFileIdentity.capture(approved)
+        // This file represents another process creating the second destination
+        // after conflict planning but before its queued download starts.
+        try Data("must-survive".utf8).write(to: unapproved)
+        let downloaded = directory.appending(path: "remote.tmp")
+        try Data("remote-data".utf8).write(to: downloaded)
+        let transport = RetryTransport(downloadURL: downloaded, failFirstDownloadRange: false)
+        let client = Self.client(transport: transport)
+        let engine = TransferEngine()
+        engine.downloadConcurrency = 1
+        let objects = [
+            OSSObject(key: "remote/approved.txt", size: 11, etag: "stable-etag", lastModified: nil, storageClass: "Standard"),
+            OSSObject(key: "remote/unapproved.txt", size: 11, etag: "stable-etag", lastModified: nil, storageClass: "Standard")
+        ]
+
+        engine.enqueueDownloadJobs(
+            items: [(objects[0], approved), (objects[1], unapproved)],
+            client: client,
+            scopedRoot: directory,
+            overwriteDestinations: [approved.standardizedFileURL: approvedIdentity]
+        )
+        try await Self.waitUntil {
+            engine.jobs.count == 2 && engine.jobs.allSatisfy { !$0.isActive }
+        }
+
+        #expect(try Data(contentsOf: unapproved) == Data("must-survive".utf8))
+        #expect(engine.jobs.first(where: { $0.objectKey == "remote/unapproved.txt" })?.status == .failed)
+    }
+
+    @Test func localFileIdentityChangesWhenTheSamePathIsRewritten() throws {
+        let destination = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-local-identity-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: destination) }
+        try Data("old".utf8).write(to: destination)
+        let before = try TransferEngine.LocalFileIdentity.capture(destination)
+
+        try Data("changed-after-prompt".utf8).write(to: destination)
+        let after = try TransferEngine.LocalFileIdentity.capture(destination)
+
+        #expect(after != before)
+        #expect(after.size == 20)
+    }
+
+    @Test func approvedLocalFileChangingBeforeCommitIsPreserved() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-download-identity-\(UUID().uuidString)", directoryHint: .isDirectory)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let destination = directory.appending(path: "changed.txt")
+        try Data("old".utf8).write(to: destination)
+        let approvedIdentity = try TransferEngine.LocalFileIdentity.capture(destination)
+        try Data("changed-after-prompt".utf8).write(to: destination)
+        #expect(try TransferEngine.LocalFileIdentity.capture(destination) != approvedIdentity)
+        let downloaded = directory.appending(path: "remote.tmp")
+        try Data("remote-data".utf8).write(to: downloaded)
+        let transport = RetryTransport(downloadURL: downloaded, failFirstDownloadRange: false)
+        let engine = TransferEngine()
+
+        engine.enqueueDownloadJobs(
+            items: [(
+                OSSObject(
+                    key: "remote/changed.txt",
+                    size: 11,
+                    etag: "stable-etag",
+                    lastModified: nil,
+                    storageClass: "Standard"
+                ),
+                destination
+            )],
+            client: Self.client(transport: transport),
+            scopedRoot: directory,
+            overwriteDestinations: [destination.standardizedFileURL: approvedIdentity]
+        )
+        try await Self.waitUntil { engine.jobs.first?.isActive == false }
+
+        #expect(engine.jobs.first?.status == .failed)
+        #expect(try Data(contentsOf: destination) == Data("changed-after-prompt".utf8))
+        #expect(engine.jobs.first?.errorMessage?.contains("发生了变化") == true)
     }
 
     @Test func finishingOneUploadNeverExceedsConfiguredConcurrency() async throws {
@@ -750,7 +1063,23 @@ struct TransferEngineTests {
             endpointHost: "oss-cn-hangzhou.aliyuncs.com",
             bucket: "bucket",
             transport: transport,
-            retryPolicy: OSSRetryPolicy(maxAttempts: 1, jitter: { 0 })
+            retryPolicy: OSSRetryPolicy(maxAttempts: 1, jitter: { 0 }),
+            testingVersioningStatusOverride: .disabled
+        )
+    }
+
+    private static func client(
+        transport: some OSSHTTPTransport,
+        versioningStatus: OSSBucketVersioningStatus
+    ) -> OSSClient {
+        OSSClient(
+            credentials: OSSCredentials(accessKeyId: "test", accessKeySecret: "secret", securityToken: nil),
+            region: "cn-hangzhou",
+            endpointHost: "oss-cn-hangzhou.aliyuncs.com",
+            bucket: "bucket",
+            transport: transport,
+            retryPolicy: OSSRetryPolicy(maxAttempts: 1, jitter: { 0 }),
+            testingVersioningStatusOverride: versioningStatus
         )
     }
 
@@ -850,6 +1179,20 @@ private final class MemoryTransferJournal: TransferJournaling, @unchecked Sendab
     }
 }
 
+private struct FailingTransferJournal: TransferJournaling {
+    var failLoad = false
+    var failSave = false
+
+    func load() throws -> [PersistedTransfer] {
+        if failLoad { throw CocoaError(.fileReadCorruptFile) }
+        return []
+    }
+
+    func save(_ records: [PersistedTransfer]) throws {
+        if failSave { throw CocoaError(.fileWriteNoPermission) }
+    }
+}
+
 private final class CountingTransferJournal: TransferJournaling, @unchecked Sendable {
     private(set) var records: [PersistedTransfer] = []
     private(set) var saveCount = 0
@@ -926,7 +1269,34 @@ private actor BlockingUploadTransport: OSSHTTPTransport {
         download: Bool,
         onProgress: (@Sendable (Int64, Int64) -> Void)?
     ) async throws -> OSSHTTPResult {
-        await withCheckedContinuation { continuation in
+        if request.url?.query?.contains("versioning") == true {
+            return OSSHTTPResult(
+                status: 200,
+                headers: [:],
+                data: Data("<VersioningConfiguration/>".utf8),
+                temporaryDownloadURL: nil
+            )
+        }
+        if request.httpMethod == "HEAD" {
+            if request.url?.path == "/approved.txt" {
+                return OSSHTTPResult(
+                    status: 200,
+                    headers: [
+                        "ETag": "\"approved-etag\"",
+                        "Content-Length": "7"
+                    ],
+                    data: Data(),
+                    temporaryDownloadURL: nil
+                )
+            }
+            return OSSHTTPResult(
+                status: 404,
+                headers: [:],
+                data: Data("<Error><Code>NoSuchKey</Code></Error>".utf8),
+                temporaryDownloadURL: nil
+            )
+        }
+        return await withCheckedContinuation { continuation in
             self.continuation = continuation
         }
     }
@@ -944,14 +1314,71 @@ private actor BlockingUploadTransport: OSSHTTPTransport {
     }
 }
 
-private actor RetryTransport: OSSHTTPTransport {
-    private(set) var requestPaths: [String] = []
-    private(set) var forbidOverwrite: [String?] = []
-    private let downloadURL: URL?
-    private var didFailDownloadRange = false
+private actor ScopedOverwriteTransport: OSSHTTPTransport {
+    private(set) var putForbidOverwriteByPath: [String: String] = [:]
 
-    init(downloadURL: URL? = nil) {
-        self.downloadURL = downloadURL
+    func send(
+        _ request: URLRequest,
+        body: OSSHTTPBody,
+        download: Bool,
+        onProgress: (@Sendable (Int64, Int64) -> Void)?
+    ) async throws -> OSSHTTPResult {
+        if request.url?.query?.contains("versioning") == true {
+            return OSSHTTPResult(
+                status: 200,
+                headers: [:],
+                data: Data(
+                    "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>".utf8
+                ),
+                temporaryDownloadURL: nil
+            )
+        }
+        if request.httpMethod == "HEAD" {
+            if request.url?.path == "/approved.txt" {
+                return OSSHTTPResult(
+                    status: 200,
+                    headers: [
+                        "Content-Length": "7",
+                        "ETag": "\"approved-etag\"",
+                        "x-oss-version-id": "approved-v1"
+                    ],
+                    data: Data(),
+                    temporaryDownloadURL: nil
+                )
+            }
+            return OSSHTTPResult(
+                status: 404,
+                headers: [:],
+                data: Data("<Error><Code>NoSuchKey</Code></Error>".utf8),
+                temporaryDownloadURL: nil
+            )
+        }
+        if request.httpMethod == "PUT", request.url?.query == nil {
+            putForbidOverwriteByPath[request.url?.path ?? ""] =
+                request.value(forHTTPHeaderField: "x-oss-forbid-overwrite") ?? ""
+        }
+        return OSSHTTPResult(
+            status: 200,
+            headers: ["x-oss-version-id": "committed-v1"],
+            data: Data(),
+            temporaryDownloadURL: nil
+        )
+    }
+}
+
+private actor SingleUseOverwriteTransport: OSSHTTPTransport {
+    static let identity = OSSObjectIdentity(
+        etag: "existing-etag",
+        versionID: "existing-v1",
+        size: 9
+    )
+
+    private let failFirstPut: Bool
+    private(set) var putCount = 0
+    private(set) var putForbidOverwriteHeaders: [String?] = []
+
+    init(failFirstPut: Bool) {
+        self.failFirstPut = failFirstPut
     }
 
     func send(
@@ -960,13 +1387,137 @@ private actor RetryTransport: OSSHTTPTransport {
         download: Bool,
         onProgress: (@Sendable (Int64, Int64) -> Void)?
     ) async throws -> OSSHTTPResult {
+        if request.url?.query?.contains("versioning") == true {
+            return OSSHTTPResult(
+                status: 200,
+                headers: [:],
+                data: Data(
+                    "<VersioningConfiguration><Status>Enabled</Status></VersioningConfiguration>".utf8
+                ),
+                temporaryDownloadURL: nil
+            )
+        }
+        if request.httpMethod == "HEAD" {
+            return OSSHTTPResult(
+                status: 200,
+                headers: [
+                    "Content-Length": String(Self.identity.size),
+                    "ETag": "\"\(Self.identity.etag)\"",
+                    "x-oss-version-id": "existing-v1"
+                ],
+                data: Data(),
+                temporaryDownloadURL: nil
+            )
+        }
+        if request.httpMethod == "PUT" {
+            putCount += 1
+            putForbidOverwriteHeaders.append(
+                request.value(forHTTPHeaderField: "x-oss-forbid-overwrite")
+            )
+            if failFirstPut, putCount == 1 {
+                return OSSHTTPResult(
+                    status: 500,
+                    headers: [:],
+                    data: Data(
+                        "<Error><Code>InternalError</Code><Message>uncertain</Message></Error>".utf8
+                    ),
+                    temporaryDownloadURL: nil
+                )
+            }
+        }
+        return OSSHTTPResult(
+            status: 200,
+            headers: ["x-oss-version-id": "committed-v1"],
+            data: Data(),
+            temporaryDownloadURL: nil
+        )
+    }
+}
+
+private actor VersionedCreateTransport: OSSHTTPTransport {
+    private let versionID: String?
+    private(set) var headCount = 0
+    private(set) var putCount = 0
+    private(set) var putForbidOverwriteHeaders: [String?] = []
+
+    init(versionID: String?) {
+        self.versionID = versionID
+    }
+
+    func send(
+        _ request: URLRequest,
+        body: OSSHTTPBody,
+        download: Bool,
+        onProgress: (@Sendable (Int64, Int64) -> Void)?
+    ) async throws -> OSSHTTPResult {
+        if request.httpMethod == "HEAD" {
+            headCount += 1
+            return OSSHTTPResult(
+                status: 404,
+                headers: [:],
+                data: Data("<Error><Code>NoSuchKey</Code></Error>".utf8),
+                temporaryDownloadURL: nil
+            )
+        }
+        if request.httpMethod == "PUT" {
+            putCount += 1
+            putForbidOverwriteHeaders.append(
+                request.value(forHTTPHeaderField: "x-oss-forbid-overwrite")
+            )
+            let headers = versionID.map { ["x-oss-version-id": $0] } ?? [:]
+            return OSSHTTPResult(
+                status: 200,
+                headers: headers,
+                data: Data(),
+                temporaryDownloadURL: nil
+            )
+        }
+        return OSSHTTPResult(
+            status: 200,
+            headers: [:],
+            data: Data(),
+            temporaryDownloadURL: nil
+        )
+    }
+}
+
+private actor RetryTransport: OSSHTTPTransport {
+    private(set) var requestPaths: [String] = []
+    private(set) var uploadRequestPaths: [String] = []
+    private(set) var forbidOverwrite: [String?] = []
+    private let downloadURL: URL?
+    private let failFirstDownloadRange: Bool
+    private var didFailDownloadRange = false
+    private var didFailUpload = false
+
+    init(downloadURL: URL? = nil, failFirstDownloadRange: Bool = true) {
+        self.downloadURL = downloadURL
+        self.failFirstDownloadRange = failFirstDownloadRange
+    }
+
+    func send(
+        _ request: URLRequest,
+        body: OSSHTTPBody,
+        download: Bool,
+        onProgress: (@Sendable (Int64, Int64) -> Void)?
+    ) async throws -> OSSHTTPResult {
+        if request.url?.query?.contains("versioning") == true {
+            return OSSHTTPResult(
+                status: 200,
+                headers: [:],
+                data: Data("<VersioningConfiguration/>".utf8),
+                temporaryDownloadURL: nil
+            )
+        }
         requestPaths.append(request.url?.path ?? "")
-        forbidOverwrite.append(request.value(forHTTPHeaderField: "x-oss-forbid-overwrite"))
         if let downloadURL {
             if request.httpMethod == "HEAD" {
                 let count = (try? downloadURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
                 let checksum = ((try? Data(contentsOf: downloadURL)).map(CRC64XZ.checksum)).map(String.init)
-                var headers = ["Content-Length": "\(count)"]
+                var headers = [
+                    "Content-Length": "\(count)",
+                    "ETag": "\"stable-etag\""
+                ]
                 if let checksum {
                     headers["x-oss-hash-crc64ecma"] = checksum
                 }
@@ -978,7 +1529,7 @@ private actor RetryTransport: OSSHTTPTransport {
                 )
             }
             if request.value(forHTTPHeaderField: "Range") != nil {
-                if !didFailDownloadRange {
+                if failFirstDownloadRange, !didFailDownloadRange {
                     didFailDownloadRange = true
                     return OSSHTTPResult(
                         status: 500,
@@ -989,13 +1540,30 @@ private actor RetryTransport: OSSHTTPTransport {
                 }
                 return OSSHTTPResult(
                     status: 206,
-                    headers: [:],
+                    headers: [
+                        "ETag": "\"stable-etag\"",
+                        "Content-Range": request.value(forHTTPHeaderField: "Range")?
+                            .replacingOccurrences(of: "=", with: " ")
+                            .appending("/\((try? downloadURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0)")
+                            ?? ""
+                    ],
                     data: (try? Data(contentsOf: downloadURL)) ?? Data(),
                     temporaryDownloadURL: nil
                 )
             }
         }
-        if requestPaths.count == 1 {
+        if request.httpMethod == "HEAD" {
+            return OSSHTTPResult(
+                status: 404,
+                headers: [:],
+                data: Data("<Error><Code>NoSuchKey</Code></Error>".utf8),
+                temporaryDownloadURL: nil
+            )
+        }
+        uploadRequestPaths.append(request.url?.path ?? "")
+        forbidOverwrite.append(request.value(forHTTPHeaderField: "x-oss-forbid-overwrite"))
+        if !didFailUpload {
+            didFailUpload = true
             return OSSHTTPResult(
                 status: 500,
                 headers: [:],
@@ -1024,6 +1592,22 @@ private actor ControllableUploadTransport: OSSHTTPTransport {
         download: Bool,
         onProgress: (@Sendable (Int64, Int64) -> Void)?
     ) async throws -> OSSHTTPResult {
+        if request.url?.query?.contains("versioning") == true {
+            return OSSHTTPResult(
+                status: 200,
+                headers: [:],
+                data: Data("<VersioningConfiguration/>".utf8),
+                temporaryDownloadURL: nil
+            )
+        }
+        if request.httpMethod == "HEAD" {
+            return OSSHTTPResult(
+                status: 404,
+                headers: [:],
+                data: Data("<Error><Code>NoSuchKey</Code></Error>".utf8),
+                temporaryDownloadURL: nil
+            )
+        }
         let path = request.url?.path ?? UUID().uuidString
         requestPaths.append(path)
         return await withCheckedContinuation { continuation in

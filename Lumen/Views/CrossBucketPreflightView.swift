@@ -27,6 +27,8 @@ struct CrossBucketPreflightView: View {
                 row("方式", preflight.plan.method.title)
                 if preflight.renamedConflicts > 0 {
                     row("同名项目", "保留两者（\(preflight.renamedConflicts) 项已重新命名）")
+                } else if preflight.overwrite, !preflight.existingDestinations.isEmpty {
+                    row("同名项目", "覆盖 \(preflight.existingDestinations.count) 项（失败时自动恢复）")
                 }
             }
 

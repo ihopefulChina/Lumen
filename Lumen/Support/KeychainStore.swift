@@ -71,12 +71,41 @@ struct KeychainSecretBackend: SecureSecretBackend {
         case .dataProtection: modes = [true]
         case .fileBased: modes = [false]
         }
+
+        // Snapshot every reachable backend before mutating either one. Public
+        // and locally signed builds can resolve `automatic` to different
+        // Keychains; a failure deleting the second copy must not silently lose
+        // the first copy and leave the account impossible to roll back.
+        var snapshots: [(modern: Bool, value: String?)] = []
         for modern in modes {
             do {
-                try access.delete(account: account, modern: modern)
+                snapshots.append((modern, try access.read(account: account, modern: modern)))
             } catch KeychainStoreError.status(errSecMissingEntitlement) where modern {
                 continue
             }
+        }
+
+        var deleted: [(modern: Bool, value: String?)] = []
+        do {
+            for snapshot in snapshots {
+                try access.delete(account: account, modern: snapshot.modern)
+                deleted.append(snapshot)
+            }
+        } catch {
+            let primary = error
+            do {
+                for snapshot in deleted.reversed() {
+                    if let value = snapshot.value {
+                        try access.set(value, for: account, modern: snapshot.modern)
+                    }
+                }
+            } catch let rollbackError {
+                throw KeychainStoreError.rollbackFailed(
+                    primary: primary.localizedDescription,
+                    rollback: rollbackError.localizedDescription
+                )
+            }
+            throw primary
         }
     }
 }
@@ -129,16 +158,53 @@ enum KeychainStore {
     static let service = "studio.lumen.oss"
     private static let backend = KeychainSecretBackend()
 
-    static func recover(account: String) -> String? {
-        try? backend.get(account)
+    static func recover(account: String) throws -> String? {
+        try backend.get(account)
     }
 
     static func store(_ value: String, account: String) throws {
         try backend.set(value, for: account)
     }
 
-    static func delete(account: String) {
-        try? backend.delete(account)
+    static func delete(account: String) throws {
+        try backend.delete(account)
+    }
+
+    static func allAccounts() throws -> Set<String> {
+        var result = Set<String>()
+        for modern in [true, false] {
+            do {
+                result.formUnion(try accounts(modern: modern))
+            } catch KeychainStoreError.status(errSecMissingEntitlement) where modern {
+                continue
+            }
+        }
+        return result
+    }
+
+    private static func accounts(modern: Bool) throws -> Set<String> {
+        var lookup: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        if modern {
+            lookup[kSecUseDataProtectionKeychain as String] = true
+        }
+        var items: CFTypeRef?
+        let status = SecItemCopyMatching(lookup as CFDictionary, &items)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess else { throw KeychainStoreError(status: status) }
+        let dictionaries: [[String: Any]]
+        if let many = items as? [[String: Any]] {
+            dictionaries = many
+        } else if let one = items as? [String: Any] {
+            dictionaries = [one]
+        } else {
+            throw KeychainStoreError.invalidData
+        }
+        return Set(dictionaries.compactMap { $0[kSecAttrAccount as String] as? String })
     }
 
     fileprivate static func query(account: String, modern: Bool) -> [String: Any] {
@@ -157,6 +223,7 @@ enum KeychainStore {
 enum KeychainStoreError: LocalizedError {
     case status(OSStatus)
     case invalidData
+    case rollbackFailed(primary: String, rollback: String)
 
     init(status: OSStatus) {
         self = .status(status)
@@ -169,6 +236,8 @@ enum KeychainStoreError: LocalizedError {
             return "无法访问 macOS 钥匙串：\(detail)"
         case .invalidData:
             return "钥匙串中的凭证格式无效"
+        case .rollbackFailed(let primary, let rollback):
+            return "钥匙串删除失败：\(primary)；恢复原凭证也失败：\(rollback)"
         }
     }
 }

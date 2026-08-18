@@ -56,6 +56,7 @@ final class BrowserModel {
     var prefix = "" {
         didSet {
             guard prefix != oldValue else { return }
+            transientlyRevealedKey = nil
             searchText = ""
             clearSelection()
         }
@@ -84,6 +85,7 @@ final class BrowserModel {
     var searchText = "" {
         didSet {
             guard searchText != oldValue else { return }
+            transientlyRevealedKey = nil
             reconcileVisibleState()
         }
     }
@@ -106,12 +108,19 @@ final class BrowserModel {
     var backStack: [String] = []
     var forwardStack: [String] = []
 
-    var imagesOnly = true {
+    /// Optional media-focused browser filter. OSS itself can contain arbitrary
+    /// object types, so a new browser must never hide objects by default.
+    var imagesOnly = false {
         didSet {
             guard imagesOnly != oldValue else { return }
+            transientlyRevealedKey = nil
             reconcileVisibleState()
         }
     }
+    /// A search result outside the optional material filter remains visible in
+    /// its containing folder long enough to be located and acted on. This is a
+    /// session-only exception and never changes the persisted filter setting.
+    private(set) var transientlyRevealedKey: String?
     var canGoBack: Bool { !backStack.isEmpty }
     var canGoForward: Bool { !forwardStack.isEmpty }
 
@@ -130,7 +139,9 @@ final class BrowserModel {
     }
 
     var visibleObjects: [OSSObject] {
-        let source = imagesOnly ? objects.filter(\.isSupported) : objects
+        let source = imagesOnly
+            ? objects.filter { $0.isSupported || $0.key == transientlyRevealedKey }
+            : objects
         return filtered(source, name: \.name).sorted(by: objectsAreOrdered)
     }
 
@@ -245,6 +256,11 @@ final class BrowserModel {
         focusedKey = nil
     }
 
+    func revealObjectTemporarily(_ key: String) {
+        transientlyRevealedKey = key
+        reconcileVisibleState()
+    }
+
     @discardableResult
     func beginRenaming(key requestedKey: String? = nil) -> Bool {
         guard !isLoading else { return false }
@@ -289,6 +305,7 @@ final class BrowserModel {
     }
 
     func reset() {
+        transientlyRevealedKey = nil
         prefix = ""
         folders = []
         objects = []

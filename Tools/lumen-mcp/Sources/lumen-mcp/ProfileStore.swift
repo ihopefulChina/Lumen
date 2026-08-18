@@ -20,7 +20,10 @@ struct MCPOSSProfile: Codable, Sendable {
 
     var apiEndpoint: String {
         if let endpoint, !endpoint.trimmingCharacters(in: .whitespaces).isEmpty {
-            return OSSEndpoint.normalize(endpoint)
+            // Keep an explicitly configured scheme and port. Normalizing this
+            // to a bare host used to turn http:// localhost/S3-compatible
+            // endpoints into HTTPS later in MCPOSSClient.
+            return endpoint.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         return "oss-\(signingRegion).aliyuncs.com"
     }
@@ -39,12 +42,16 @@ enum ProfileStore {
             kSecAttrService as String: service,
             kSecAttrAccount as String: profile.name,
         ]
-        let attributes: [String: Any] = [kSecValueData as String: data]
+        let attributes: [String: Any] = [
+            kSecValueData as String: data,
+            // Credentials must not migrate to another Mac through backups.
+            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
+        ]
         let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if status == errSecItemNotFound {
             var add = query
             add[kSecValueData as String] = data
-            add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
+            add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
             let addStatus = SecItemAdd(add as CFDictionary, nil)
             guard addStatus == errSecSuccess else {
                 throw ProfileStoreError.keychain(addStatus)

@@ -26,7 +26,9 @@ enum MCPServerCommand {
         \(defaultBucketLine)
         - 先浏览确认再操作：不确定路径就用 list_objects 逐层看。
         - 上传后报告 bucket、key 与 URL；私有 Bucket 分享用 presign_url 生成的临时链接。
+        - upload_file 默认拒绝覆盖远端同名对象；只有用户明确确认后才能传 overwrite=true。
         - 下载不覆盖本地同名文件，遇到报错时与用户确认新路径。
+        - 本地文件仅允许访问 LUMEN_MCP_ALLOWED_ROOTS 配置的目录；默认是桌面、文稿、下载和临时目录。
         - 删除、覆盖、批量操作前，先向用户复述范围并确认。
         - GB 级大文件建议用户改用 Lumen App（分片上传、断点续传更完整）。
         """
@@ -35,7 +37,7 @@ enum MCPServerCommand {
     static func run() async -> Int32 {
         let server = Server(
             name: "lumen-mcp",
-            version: "1.0.1",
+            version: LumenMCPVersion.current,
             instructions: serverInstructions,
             capabilities: .init(
                 prompts: .init(listChanged: false),
@@ -65,14 +67,16 @@ enum MCPServerCommand {
             // start() is non-blocking; wait until the message loop ends (stdin EOF).
             await server.waitUntilCompleted()
         } catch {
-            // Transport failure — still a normal shutdown path for stdio servers.
+            let message = "lumen-mcp 服务启动或传输失败：\(error.localizedDescription)\n"
+            FileHandle.standardError.write(Data(message.utf8))
+            return 1
         }
         return 0
     }
 
     // MARK: - Tool definitions
 
-    private static func toolDefinitions() -> [Tool] {
+    static func toolDefinitions() -> [Tool] {
         func schema(_ properties: [String: Value], required: [String]) -> Value {
             .object([
                 "type": .string("object"),
@@ -88,6 +92,13 @@ enum MCPServerCommand {
                 "type": .string("integer"),
                 "description": .string(describe),
                 "default": .int(`default`),
+            ])
+        }
+        func boolProp(_ describe: String, _ default: Bool) -> Value {
+            .object([
+                "type": .string("boolean"),
+                "description": .string(describe),
+                "default": .bool(`default`),
             ])
         }
 
@@ -118,19 +129,21 @@ enum MCPServerCommand {
                     "prefix": stringProp("对象前缀（文件夹路径），可选"),
                     "delimiter": stringProp("分隔符，默认 '/'；空字符串表示递归列出"),
                     "max_keys": intProp("最多返回条数（1-1000），默认 200", 200),
+                    "continuation_token": stringProp("上一页返回的 next_continuation_token；获取下一页时原样传入"),
                 ], required: requiredBucket([])),
                 annotations: .init(readOnlyHint: true)
             ),
             Tool(
                 name: "upload_file",
-                description: "上传本机文件到 OSS。适合图片、文档等任意文件；大文件建议使用 Lumen App 获得分片续传。返回对象 URL。",
+                description: "上传允许目录内的本机普通文件到 OSS。默认查询 Bucket 版本控制状态并拒绝覆盖；版本控制为 Enabled/Suspended 或状态无法确认时安全拒绝。只有用户明确确认覆盖后才能传 overwrite=true。大文件建议使用 Lumen App。",
                 inputSchema: schema([
                     "bucket": bucketProp("目标 Bucket 名称"),
-                    "local_path": stringProp("本地文件的绝对路径"),
+                    "local_path": stringProp("允许目录内、且不经过符号链接的本地普通文件绝对路径"),
                     "key": stringProp("目标对象 Key（含路径），缺省使用本地文件名"),
                     "content_type": stringProp("Content-Type，缺省按扩展名推断"),
+                    "overwrite": boolProp("是否覆盖远端同名对象，默认 false；true 会跳过版本状态与存在性保护。仅在用户明确确认覆盖后设为 true，版本控制为 Suspended 时覆盖可能不可逆", false),
                 ], required: requiredBucket(["local_path"])),
-                annotations: .init(idempotentHint: true)
+                annotations: .init(destructiveHint: true, idempotentHint: false)
             ),
             Tool(
                 name: "download_file",
@@ -138,7 +151,7 @@ enum MCPServerCommand {
                 inputSchema: schema([
                     "bucket": bucketProp("Bucket 名称"),
                     "key": stringProp("对象 Key"),
-                    "local_path": stringProp("本地保存的绝对路径"),
+                    "local_path": stringProp("允许目录内、且不经过符号链接的本地保存绝对路径"),
                 ], required: requiredBucket(["key", "local_path"]))
             ),
             Tool(
@@ -233,12 +246,14 @@ enum MCPServerCommand {
             delimiter = "/"
         }
         let maxKeys = arguments["max_keys"]?.mcpInt ?? 200
+        let continuationToken = arguments["continuation_token"]?.mcpString
 
         let listing = try await client.listObjects(
             bucket: bucket,
             prefix: prefix,
             delimiter: delimiter,
-            maxKeys: maxKeys
+            maxKeys: maxKeys,
+            token: continuationToken
         )
         let formatter = ISO8601DateFormatter()
         let folders = listing.folders.map { folder -> [String: Value] in
@@ -275,24 +290,26 @@ enum MCPServerCommand {
         guard let localPath = arguments["local_path"]?.mcpString, !localPath.isEmpty else {
             throw MissingArgumentError("local_path")
         }
-        let fileURL = URL(fileURLWithPath: NSString(string: localPath).expandingTildeInPath)
-        var isDirectory: ObjCBool = false
-        guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory), !isDirectory.boolValue else {
-            throw MissingArgumentError("local_path（文件不存在或不是普通文件：\(fileURL.path)）")
-        }
+        let pathPolicy = try MCPPathPolicy()
+        let fileURL = try pathPolicy.validateUploadPath(localPath)
         var key = arguments["key"]?.mcpString ?? ""
         if key.isEmpty {
             key = fileURL.lastPathComponent
         }
         key = key.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-        let contentType = arguments["content_type"]?.mcpString
-            ?? contentTypeHint(forExtension: fileURL.pathExtension)
+        guard !key.isEmpty else { throw MissingArgumentError("key（对象 Key 不能为空）") }
+        let contentType = try MCPHTTPSafety.validatedContentType(
+            arguments["content_type"]?.mcpString
+                ?? contentTypeHint(forExtension: fileURL.pathExtension)
+        )
+        let overwrite = arguments["overwrite"]?.mcpBool ?? false
 
         let result = try await client.uploadFile(
             bucket: bucket,
             key: key,
             fileURL: fileURL,
-            contentType: contentType
+            contentType: contentType,
+            overwrite: overwrite
         )
         return textResult(Self.encodeJSON([
             "bucket": .string(result.bucket),
@@ -312,7 +329,8 @@ enum MCPServerCommand {
         guard let localPath = arguments["local_path"]?.mcpString, !localPath.isEmpty else {
             throw MissingArgumentError("local_path")
         }
-        let destination = URL(fileURLWithPath: NSString(string: localPath).expandingTildeInPath)
+        let pathPolicy = try MCPPathPolicy()
+        let destination = try pathPolicy.validateDownloadPath(localPath)
         let result = try await client.downloadFile(bucket: bucket, key: key, to: destination)
         return textResult(Self.encodeJSON([
             "bucket": .string(result.bucket),
@@ -420,10 +438,12 @@ enum MCPServerCommand {
                     工作规则：
                     1. 先弄清目标再动手：不确定 Bucket 时先 list_buckets；不确定路径时用 list_objects 逐层浏览（delimiter 默认 '/'，传空可递归）。
                     2. 上传后报告 bucket、key 和对象 URL；若 Bucket 为私有读，主动用 presign_url 生成临时链接再交给用户。
-                    3. 下载前确认保存路径；本地已有同名文件会报错，此时与用户确认新路径，不建议直接覆盖。
-                    4. 删除、覆盖、批量操作，先向用户复述范围并获得确认。
-                    5. GB 级大文件提醒用户改用 Lumen App（分片上传、断点续传更完整）。
-                    6. 回答简洁：给关键结果（key、URL、大小），不堆砌原始 JSON。
+                    3. upload_file 默认拒绝远端覆盖。只有用户明确确认要替换同名对象并理解版本控制暂停时可能不可逆后，才传 overwrite=true。
+                    4. 下载前确认保存路径；本地已有同名文件会报错，此时与用户确认新路径，不建议直接覆盖。
+                    5. 本地路径必须位于允许目录内，不得尝试绕过目录或符号链接限制。
+                    6. 删除、覆盖、批量操作，先向用户复述范围并获得确认。
+                    7. GB 级大文件提醒用户改用 Lumen App（分片上传、断点续传更完整）。
+                    8. 回答简洁：给关键结果（key、URL、大小），不堆砌原始 JSON。
                     """))
                 ]
             )
@@ -460,7 +480,17 @@ extension Value {
 
     var mcpInt: Int? {
         if case .int(let value) = self { return value }
-        if case .double(let value) = self { return Int(value) }
+        if case .double(let value) = self,
+           value.isFinite,
+           value >= Double(Int.min),
+           value < Double(Int.max) {
+            return Int(value)
+        }
+        return nil
+    }
+
+    var mcpBool: Bool? {
+        if case .bool(let value) = self { return value }
         return nil
     }
 }

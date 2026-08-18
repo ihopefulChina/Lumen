@@ -20,8 +20,8 @@ npx lumen-mcp install  # 2. 一键注册到本机已安装的 AI 客户端
 | 工具 | 说明 |
 | --- | --- |
 | `list_buckets` | 列出账号下所有 Bucket |
-| `list_objects` | 按文件夹层级浏览对象，也可递归列举 |
-| `upload_file` | 上传本机文件，返回对象 URL |
+| `list_objects` | 按文件夹层级浏览对象，也可用 continuation token 连续翻页 |
+| `upload_file` | 上传本机文件，默认拒绝覆盖远端同名对象 |
 | `download_file` | 下载对象；本地同名文件不覆盖 |
 | `presign_url` | 为私有 Bucket 生成带签名的临时下载链接 |
 
@@ -29,7 +29,7 @@ npx lumen-mcp install  # 2. 一键注册到本机已安装的 AI 客户端
 
 ## 支持的客户端
 
-`install` 自动检测并注册：Codex、Claude Desktop、Claude Code、Cursor、Windsurf。其他 stdio 客户端（VS Code Copilot、Cline、Qoder 等）手动配置：
+`install` 自动检测并注册：Codex、Claude Desktop、Claude Code、Cursor、Trae、Windsurf。其他 stdio 客户端（VS Code Copilot、Cline、Qoder 等）手动配置：
 
 ```json
 {
@@ -55,9 +55,31 @@ npx lumen-mcp install  # 2. 一键注册到本机已安装的 AI 客户端
 }
 ```
 
+### 本地文件允许目录
+
+为避免 AI 意外读取凭证或写入任意位置，上传、下载只允许访问指定目录，且拒绝符号链接。默认允许桌面、文稿、下载和系统临时目录。可在服务条目的 `env` 中覆盖，使用冒号分隔绝对路径：
+
+```json
+{
+  "mcpServers": {
+    "lumen": {
+      "command": "npx",
+      "args": ["-y", "lumen-mcp"],
+      "env": {
+        "LUMEN_MCP_ALLOWED_ROOTS": "/Users/me/projects:/Users/me/Downloads"
+      }
+    }
+  }
+}
+```
+
+`upload_file` 默认先调用 GetBucketVersioning，再做远端存在性检查并发送 OSS 禁止覆盖请求头。只有版本控制未配置（响应不含 Status）时才继续执行保护流程；Enabled 与 Suspended 状态下 OSS 都会忽略禁止覆盖请求头，因此工具会安全拒绝上传。版本状态查询失败同样拒绝，不会降级成不安全上传。只有用户明确确认覆盖后，Agent 才应传 `overwrite=true`；此时会跳过版本状态与存在性预检，直接执行授权覆盖。
+
+最小权限策略除 `oss:PutObject` 外，默认安全上传还需要 `oss:GetBucketVersioning` 与用于 HEAD 存在性检查的 `oss:GetObject`。若账号缺少这些读取权限，`overwrite=false` 会 fail-closed；请补充权限，不要让 Agent 自动改用 `overwrite=true` 绕过保护。
+
 ## 安全
 
-AccessKey Secret 只存 macOS 钥匙串，AI 客户端接触不到凭证；建议使用最小权限 RAM 子账号；下载不覆盖本地同名文件。详见[安全边界](https://ihopefulchina.github.io/Lumen/mcp.html)。
+AccessKey Secret 只存 macOS 钥匙串，AI 客户端接触不到凭证；建议使用最小权限 RAM 子账号；本地路径受允许目录约束，上传默认不覆盖远端对象，下载不覆盖本地同名文件。签名请求也不会自动跟随重定向。详见[安全边界](https://ihopefulchina.github.io/Lumen/mcp.html)。
 
 ## 常见问题
 

@@ -3,20 +3,19 @@ import Foundation
 enum Formatters {
     static func bytes(_ value: Int64) -> String {
         if value == 0 { return "0 KB" }
-        let formatter = ByteCountFormatter()
-        formatter.countStyle = .file
-        formatter.allowedUnits = [.useBytes, .useKB, .useMB, .useGB]
-        formatter.includesUnit = true
-        formatter.isAdaptive = true
-        return formatter.string(fromByteCount: value)
+        return value.formatted(
+            .byteCount(
+                style: .file,
+                allowedUnits: [.bytes, .kb, .mb, .gb],
+                spellsOutZero: false,
+                includesActualByteCount: false
+            )
+        )
     }
 
     static func date(_ value: Date?) -> String {
         guard let value else { return "—" }
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-        return formatter.string(from: value)
+        return value.formatted(date: .abbreviated, time: .shortened)
     }
 }
 
@@ -37,7 +36,14 @@ enum ImageKind {
     ]
 
     static let textExtensions: Set<String> = [
-        "json", "txt", "text"
+        "txt", "text", "log",
+        "json", "jsonl", "ndjson", "csv", "tsv",
+        "md", "markdown", "html", "htm", "css", "scss", "sass", "less",
+        "js", "mjs", "cjs", "jsx", "ts", "tsx", "vue", "svelte",
+        "xml", "yaml", "yml", "toml", "ini", "conf", "config", "env", "properties", "plist",
+        "sql", "graphql", "gql",
+        "sh", "bash", "zsh", "fish", "swift", "m", "mm", "h", "hpp", "c", "cc", "cpp",
+        "java", "kt", "kts", "py", "rb", "php", "go", "rs", "dart", "lua", "gradle"
     ]
 
     /// 「只显示素材文件」浏览过滤覆盖的素材类型全集。
@@ -46,7 +52,7 @@ enum ImageKind {
         // 视频
         "mp4", "m4v", "mov", "avi", "mkv", "webm", "wmv", "flv", "f4v",
         "mpg", "mpeg", "mpe", "3gp", "3g2", "rm", "rmvb",
-        "ts", "mts", "m2ts", "asf",
+        "mts", "m2ts", "m2t", "asf",
         // 音频
         "mp3", "wav", "aac", "m4a", "flac", "ogg", "oga", "wma",
         "aiff", "aif", "mid", "midi", "opus", "caf",
@@ -72,7 +78,7 @@ enum ImageKind {
     static let videoExtensions: Set<String> = [
         "mp4", "m4v", "mov", "avi", "mkv", "webm", "wmv", "flv", "f4v",
         "mpg", "mpeg", "mpe", "3gp", "3g2", "rm", "rmvb",
-        "ts", "mts", "m2ts", "asf"
+        "mts", "m2ts", "m2t", "asf"
     ]
 
     static let audioExtensions: Set<String> = [
@@ -147,7 +153,7 @@ enum ImageKind {
         case "3gp": "video/3gpp"
         case "3g2": "video/3gpp2"
         case "rm", "rmvb": "application/vnd.rn-realmedia"
-        case "ts", "mts", "m2ts": "video/mp2t"
+        case "mts", "m2ts", "m2t": "video/mp2t"
         case "asf": "video/x-ms-asf"
         // 音频
         case "mp3": "audio/mpeg"
@@ -196,11 +202,11 @@ enum ImageKind {
         case "woff": "font/woff"
         case "woff2": "font/woff2"
         // 文本 / 网页 / 配置
-        case "json": "application/json"
-        case "txt", "text": "text/plain"
+        case "json", "jsonl", "ndjson": "application/json"
+        case "txt", "text", "log": "text/plain"
         case "html", "htm": "text/html"
         case "css": "text/css"
-        case "js", "mjs", "jsx": "text/javascript"
+        case "js", "mjs", "cjs", "jsx": "text/javascript"
         case "ts", "tsx": "text/plain"
         case "xml": "application/xml"
         case "yaml", "yml": "application/yaml"

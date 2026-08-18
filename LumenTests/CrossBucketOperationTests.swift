@@ -10,6 +10,23 @@ struct CrossBucketOperationTests {
         #expect(CrossBucketOperation.method(sourceAccountID: account, destinationAccountID: UUID(), sourceRegion: "cn-hangzhou", destinationRegion: "cn-hangzhou") == .relay)
     }
 
+    @Test func objectsLargerThanSingleCopyLimitUseRelay() {
+        let small = CrossBucketMapping(
+            sourceKey: "small.bin",
+            destinationKey: "archive/small.bin",
+            expectedSize: CrossBucketOperation.maximumSingleCopyBytes
+        )
+        let large = CrossBucketMapping(
+            sourceKey: "large.bin",
+            destinationKey: "archive/large.bin",
+            expectedSize: CrossBucketOperation.maximumSingleCopyBytes + 1
+        )
+
+        #expect(CrossBucketOperation.executionMethod(preferred: .serverSide, mappings: [small]) == .serverSide)
+        #expect(CrossBucketOperation.executionMethod(preferred: .serverSide, mappings: [small, large]) == .relay)
+        #expect(CrossBucketOperation.executionMethod(preferred: .relay, mappings: [small]) == .relay)
+    }
+
     @Test func folderMappingsPreserveRelativePathsAndKnownBytes() throws {
         let plan = try CrossBucketOperation.plan(
             sourceAccountID: UUID(),

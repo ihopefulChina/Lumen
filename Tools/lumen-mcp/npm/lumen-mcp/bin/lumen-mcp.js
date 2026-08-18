@@ -35,4 +35,10 @@ const result = spawnSync(binaryPath, process.argv.slice(2), {
     LUMEN_MCP_INSTALLED_VIA: viaNpx ? 'npx' : 'global',
   }),
 });
+if (result.error) {
+  console.error(`启动 lumen-mcp 失败：${result.error.message}`);
+}
+if (result.signal) {
+  console.error(`lumen-mcp 被信号 ${result.signal} 终止。`);
+}
 process.exit(result.status === null ? 1 : result.status);

@@ -37,6 +37,8 @@ final class AppServices {
     weak var focused: AppModel?
 
     private var didBootstrap = false
+    private let managesPersistedAccounts: Bool
+    private let permitsCredentialCleanup: Bool
     private var sessionBoxes: [WeakSession] = []
     private var pendingIncomingURLs: [URL] = []
     private var didPresentAccountRecovery = false
@@ -48,9 +50,17 @@ final class AppServices {
         updates: AppUpdater = AppUpdater(),
         favorites: FavoriteStore = FavoriteStore()
     ) {
-        let loaded = accounts.map { AccountLoadResult(accounts: $0, recovery: nil) } ?? AccountStore.load()
+        self.managesPersistedAccounts = accounts == nil
+        let loaded = accounts.map {
+            AccountLoadResult(
+                accounts: $0,
+                recovery: nil,
+                permitsCredentialCleanup: false
+            )
+        } ?? AccountStore.load()
         self.accounts = loaded.accounts
         self.accountRecovery = loaded.recovery
+        self.permitsCredentialCleanup = loaded.permitsCredentialCleanup
         self.settings = settings
         self.transfers = transfers
         self.updates = updates
@@ -84,10 +94,28 @@ final class AppServices {
     func bootstrapIfNeeded() {
         guard !didBootstrap else { return }
         didBootstrap = true
+        // Never infer orphans from a recovered/corrupt account list: a backup
+        // may legitimately omit newer accounts whose Keychain credentials are
+        // still the only recoverable copy.
+        let isRunningTests = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
+        if managesPersistedAccounts, permitsCredentialCleanup, !isRunningTests {
+            do {
+                try SecretStore.removeOrphanedCredentials(validAccountIDs: Set(accounts.map(\.id)))
+            } catch {
+                sessions.forEach {
+                    $0.present("无法清理已删除账号留下的钥匙串凭证：\(error.localizedDescription)", error: true)
+                }
+            }
+        }
         transfers.concurrency = settings.concurrentUploads
         transfers.downloadConcurrency = settings.concurrentDownloads
         transfers.uploadSpeedLimit = settings.uploadSpeedLimit
         transfers.downloadSpeedLimit = settings.downloadSpeedLimit
+        transfers.onJournalError = { [weak self] message in
+            self?.sessions.forEach { session in
+                session.present(message, error: true)
+            }
+        }
         transfers.restore(accounts: accounts)
         updates.automaticallyChecksForUpdates = settings.checkUpdatesAutomatically
         transfers.onUploadFinished = { [weak self] in

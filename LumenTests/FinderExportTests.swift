@@ -72,7 +72,7 @@ struct FinderExportTests {
         try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-60)], ofItemAtPath: fresh.path)
         try FileManager.default.setAttributes([.modificationDate: now.addingTimeInterval(-90_000)], ofItemAtPath: foreign.path)
 
-        try FinderExportCoordinator.pruneOwnedExports(in: root, now: now)
+        FinderExportCoordinator.pruneOwnedExports(in: root, now: now)
 
         #expect(!FileManager.default.fileExists(atPath: stale.path))
         #expect(FileManager.default.fileExists(atPath: fresh.path))

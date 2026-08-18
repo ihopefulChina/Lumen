@@ -19,18 +19,98 @@ struct SafetyAndVersionTests {
 
         let loaded = repository.load()
 
-        #expect(loaded.accounts == [original])
+        #expect(loaded.accounts == [updated])
         #expect(loaded.recovery?.kind == .restoredBackup)
         let restored = try JSONDecoder().decode(
             [OSSAccount].self,
             from: Data(contentsOf: repository.primaryURL)
         )
-        #expect(restored == [original])
+        #expect(restored == [updated])
         let preservedCorruptFiles = try FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: nil
         ).filter { $0.lastPathComponent.hasPrefix("accounts.corrupt-") }
         #expect(preservedCorruptFiles.count == 1)
+        #expect(repository.load().permitsCredentialCleanup)
+    }
+
+    @Test func accountTransactionRollbackDoesNotPromoteTheFailedVersionToBackup() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-account-rollback-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = AccountRepository(directory: directory)
+        let original = Self.account(name: "Original")
+        var failedUpdate = original
+        failedUpdate.name = "Failed update"
+
+        try repository.save([original])
+        try repository.save([failedUpdate])
+        // Mirrors AppModel's compensating save after a Keychain update fails.
+        try repository.save([original])
+        try Data("not-json".utf8).write(to: repository.primaryURL, options: .atomic)
+
+        let loaded = repository.load()
+
+        #expect(loaded.accounts == [original])
+        #expect(loaded.recovery?.kind == .restoredBackup)
+    }
+
+    @Test func firstAccountSaveCreatesARecoverableBackup() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-account-first-save-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = AccountRepository(directory: directory)
+        let original = Self.account(name: "Original")
+        try repository.save([original])
+        try FileManager.default.removeItem(at: repository.primaryURL)
+
+        let loaded = repository.load()
+
+        #expect(loaded.accounts == [original])
+        #expect(loaded.recovery?.kind == .restoredBackup)
+        #expect(!loaded.permitsCredentialCleanup)
+        // This backup is byte-for-byte the last committed configuration, so
+        // the authority snapshot can safely recognize it on the next launch.
+        #expect(repository.load().permitsCredentialCleanup)
+    }
+
+    @Test func authoritySnapshotRecoversWhenBothAccountFilesAreMissing() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-account-authority-recovery-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = AccountRepository(directory: directory)
+        let original = Self.account(name: "Original")
+        try repository.save([original])
+        try FileManager.default.removeItem(at: repository.primaryURL)
+        try FileManager.default.removeItem(at: repository.backupURL)
+
+        let loaded = repository.load()
+
+        #expect(loaded.accounts == [original])
+        #expect(loaded.recovery?.kind == .restoredBackup)
+        #expect(!loaded.permitsCredentialCleanup)
+        #expect(repository.load().permitsCredentialCleanup)
+    }
+
+    @Test func legacyBackupRecoveryStaysNonAuthoritativeAcrossRelaunches() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-account-legacy-recovery-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = AccountRepository(directory: directory)
+        let original = Self.account(name: "Original")
+        var newer = original
+        newer.name = "Newer"
+        try repository.save([original])
+        try repository.save([newer])
+        // Simulates an installation created before cleanup authority existed.
+        try FileManager.default.removeItem(at: repository.cleanupAuthorityURL)
+        try Data("not-json".utf8).write(to: repository.primaryURL, options: .atomic)
+
+        let recovered = repository.load()
+
+        #expect(recovered.accounts == [original])
+        #expect(!recovered.permitsCredentialCleanup)
+        #expect(!repository.load().permitsCredentialCleanup)
     }
 
     @Test func twoCorruptAccountFilesArePreservedAndReported() throws {
@@ -48,6 +128,49 @@ struct SafetyAndVersionTests {
         #expect(loaded.recovery?.kind == .unrecoverable)
         #expect(try Data(contentsOf: repository.primaryURL) == Data("broken-primary".utf8))
         #expect(try Data(contentsOf: repository.backupURL) == Data("broken-backup".utf8))
+        #expect(!loaded.permitsCredentialCleanup)
+    }
+
+    @Test func missingAccountConfigurationNeverAuthorizesKeychainCleanup() {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-account-missing-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = AccountRepository(directory: directory)
+
+        let loaded = repository.load()
+
+        #expect(loaded.accounts.isEmpty)
+        #expect(loaded.recovery == nil)
+        #expect(!loaded.permitsCredentialCleanup)
+    }
+
+    @Test func onlyAValidPrimaryAccountFileAuthorizesKeychainCleanup() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-account-authoritative-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = AccountRepository(directory: directory)
+        try repository.save([])
+
+        let loaded = repository.load()
+
+        #expect(loaded.accounts.isEmpty)
+        #expect(loaded.recovery == nil)
+        #expect(loaded.permitsCredentialCleanup)
+    }
+
+    @Test func externallyReplacedValidAccountFileDoesNotAuthorizeKeychainCleanup() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appending(path: "lumen-account-replaced-\(UUID().uuidString)", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let repository = AccountRepository(directory: directory)
+        try repository.save([Self.account(name: "Original")])
+        try JSONEncoder().encode([OSSAccount]()).write(to: repository.primaryURL, options: .atomic)
+
+        let loaded = repository.load()
+
+        #expect(loaded.accounts.isEmpty)
+        #expect(loaded.recovery == nil)
+        #expect(!loaded.permitsCredentialCleanup)
     }
 
     @Test func aNewAccountInheritsItsBucketPermission() {
@@ -312,6 +435,36 @@ struct SafetyAndVersionTests {
         #expect(result.migratedAccounts.isEmpty)
     }
 
+    @Test func orphanCleanupOnlyTargetsUUIDCredentialsForDeletedAccounts() {
+        let kept = UUID(uuidString: "0A3DB3D9-5721-46B9-AC8A-4D17CA76093B")!
+        let removed = UUID(uuidString: "9A910925-62B0-42D2-8B83-2E371F145B95")!
+        let stored: Set<String> = [
+            kept.uuidString,
+            kept.uuidString + ".sts",
+            removed.uuidString,
+            removed.uuidString + ".sts",
+            "future-format-entry"
+        ]
+
+        #expect(
+            SecretStore.orphanedCredentialAccounts(
+                stored,
+                validAccountIDs: [kept],
+                configurationIsAuthoritative: true
+            ) == [
+                removed.uuidString,
+                removed.uuidString + ".sts"
+            ]
+        )
+        #expect(
+            SecretStore.orphanedCredentialAccounts(
+                stored,
+                validAccountIDs: [],
+                configurationIsAuthoritative: false
+            ).isEmpty
+        )
+    }
+
     @Test func automaticKeychainFallsBackWhenDataProtectionNeedsEntitlement() throws {
         let access = RecordingKeychainAccess(modernFailure: errSecMissingEntitlement)
         let backend = KeychainSecretBackend(access: access)
@@ -322,9 +475,25 @@ struct SafetyAndVersionTests {
         try backend.delete(account)
 
         #expect(access.setModes == [true, false])
-        #expect(access.readModes == [true, false])
-        #expect(access.deleteModes == [true, false])
+        #expect(access.readModes == [true, false, true, false])
+        #expect(access.deleteModes == [false])
         #expect(access.values.isEmpty)
+    }
+
+    @Test func automaticKeychainDeleteRestoresTheFirstBackendWhenTheSecondFails() throws {
+        let access = RecordingKeychainAccess(deleteFailureModes: [false])
+        let backend = KeychainSecretBackend(access: access)
+        let account = "account"
+        try access.set("same-secret", for: account, modern: true)
+        try access.set("same-secret", for: account, modern: false)
+
+        #expect(throws: KeychainStoreError.self) {
+            try backend.delete(account)
+        }
+
+        #expect(access.deleteModes == [true, false])
+        #expect(try access.read(account: account, modern: true) == "same-secret")
+        #expect(try access.read(account: account, modern: false) == "same-secret")
     }
 
     private static func account(name: String) -> OSSAccount {
@@ -382,9 +551,14 @@ private final class RecordingKeychainAccess: KeychainItemAccessing, @unchecked S
     var readModes: [Bool] = []
     var deleteModes: [Bool] = []
     private let modernFailure: OSStatus?
+    private let deleteFailureModes: Set<Bool>
 
-    init(modernFailure: OSStatus? = nil) {
+    init(
+        modernFailure: OSStatus? = nil,
+        deleteFailureModes: Set<Bool> = []
+    ) {
         self.modernFailure = modernFailure
+        self.deleteFailureModes = deleteFailureModes
     }
 
     func read(account: String, modern: Bool) throws -> String? {
@@ -402,6 +576,9 @@ private final class RecordingKeychainAccess: KeychainItemAccessing, @unchecked S
     func delete(account: String, modern: Bool) throws {
         deleteModes.append(modern)
         try failIfNeeded(modern)
+        if deleteFailureModes.contains(modern) {
+            throw KeychainStoreError(status: errSecAuthFailed)
+        }
         values.removeValue(forKey: key(account, modern: modern))
     }
 

@@ -46,6 +46,7 @@ struct CloudUndoOperationTests {
             bucketName: "设计-assets",
             title: "撤销移动",
             mappings: [],
+            committedDestinationIdentities: [:],
             favoriteMoves: [],
             sourceSelection: ["素材/", "顶层 文件.txt"],
             destinationSelection: ["归档/素材/", "归档/顶层 文件.txt"]
@@ -54,6 +55,7 @@ struct CloudUndoOperationTests {
         #expect(operation.accountID == accountID)
         #expect(operation.bucketName == "设计-assets")
         #expect(operation.title == "撤销移动")
+        #expect(!operation.hasCompleteDestinationIdentities)
         #expect(operation.sourceSelection == ["素材/", "顶层 文件.txt"])
         #expect(operation.destinationSelection == ["归档/素材/", "归档/顶层 文件.txt"])
     }
@@ -62,11 +64,22 @@ struct CloudUndoOperationTests {
         mappings: [CloudObjectMapping] = [],
         favoriteMoves: [CloudFavoriteMove] = []
     ) -> CloudUndoOperation {
-        CloudUndoOperation(
+        let identities = Dictionary(uniqueKeysWithValues: mappings.map {
+            (
+                $0.destinationKey,
+                OSSObjectIdentity(
+                    etag: "etag-\($0.destinationKey)",
+                    versionID: "version-\($0.destinationKey)",
+                    size: 1
+                )
+            )
+        })
+        return CloudUndoOperation(
             accountID: UUID(uuidString: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE")!,
             bucketName: "bucket",
             title: "撤销移动",
             mappings: mappings,
+            committedDestinationIdentities: identities,
             favoriteMoves: favoriteMoves,
             sourceSelection: ["素材/"],
             destinationSelection: ["归档/素材/"]

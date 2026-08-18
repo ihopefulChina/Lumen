@@ -91,7 +91,8 @@ struct ListNavigationProbeTests {
                     region: "cn-hangzhou",
                     endpointHost: "oss-cn-hangzhou.aliyuncs.com",
                     bucket: bucket?.name,
-                    transport: transport
+                    transport: transport,
+                    testingVersioningStatusOverride: .disabled
                 )
             }
         )

@@ -209,7 +209,7 @@ final class BrowserItemHitRegistry: @unchecked Sendable {
             guard BrowserMenuHitResolver.isCellSized(frame.size) else { continue }
             guard let hit = BrowserMenuHit.parseIdentifier(record.id) else { continue }
             let area = frame.width * frame.height
-            if best == nil || area < best!.area {
+            if best.map({ area < $0.area }) ?? true {
                 best = (hit, area)
             }
         }
@@ -581,8 +581,14 @@ private final class RetainedMenu: NSMenu {
         target.populate(self)
     }
 
-    required init(coder: NSCoder) {
-        target = MenuTarget(actions: .disabled, hit: .empty)
+    nonisolated required init(coder: NSCoder) {
+        // NSMenu's NSCoder initializer is imported as nonisolated even though
+        // AppKit constructs menus on the main thread. State that invariant
+        // explicitly so Swift 6 does not treat MenuTarget initialization as a
+        // cross-actor call.
+        target = MainActor.assumeIsolated {
+            MenuTarget(actions: .disabled, hit: .empty)
+        }
         super.init(coder: coder)
     }
 }

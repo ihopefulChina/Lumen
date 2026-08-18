@@ -3,6 +3,20 @@ import Foundation
 import Observation
 import UniformTypeIdentifiers
 
+enum LocalFileReplacementError: LocalizedError, Sendable, Equatable {
+    case unavailable(String)
+    case changed(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .unavailable(let name):
+            "无法确认本地文件“\(name)”的当前状态，未执行替换"
+        case .changed(let name):
+            "本地文件“\(name)”在确认替换后发生了变化，请重新确认"
+        }
+    }
+}
+
 @MainActor
 @Observable
 final class TransferEngine {
@@ -13,6 +27,8 @@ final class TransferEngine {
     var downloadSpeedLimit = TransferSpeedLimit.unlimited
     var onUploadFinished: (@MainActor () -> Void)?
     var onAllFinished: (@MainActor () -> Void)?
+    var onJournalError: (@MainActor (String) -> Void)?
+    private(set) var journalErrorMessage: String?
 
     private var tasks: [UUID: Task<Void, Never>] = [:]
     private var resources: [UUID: TransferResource] = [:]
@@ -84,6 +100,36 @@ final class TransferEngine {
         var ownedTemporaryURLs: Set<URL> = []
     }
 
+    struct LocalFileIdentity: Equatable, Sendable {
+        var size: Int64
+        var modifiedAt: Date?
+        var resourceIdentifier: String?
+
+        static func capture(_ url: URL) throws -> LocalFileIdentity {
+            // URLResourceValues is cached by Foundation for a URL instance. A
+            // destination can therefore change after the overwrite prompt while
+            // a second read still returns the old size/date. FileManager asks the
+            // filesystem for a fresh stat snapshot every time.
+            let path = URL(fileURLWithPath: url.path).standardizedFileURL.path
+            let attributes = try FileManager.default.attributesOfItem(atPath: path)
+            guard attributes[.type] as? FileAttributeType == .typeRegular,
+                  let size = (attributes[.size] as? NSNumber)?.int64Value
+            else {
+                throw LocalFileReplacementError.unavailable(url.lastPathComponent)
+            }
+            let device = (attributes[.systemNumber] as? NSNumber)?.uint64Value
+            let inode = (attributes[.systemFileNumber] as? NSNumber)?.uint64Value
+            let identifier = device.flatMap { device in
+                inode.map { inode in "\(device):\(inode)" }
+            }
+            return LocalFileIdentity(
+                size: size,
+                modifiedAt: attributes[.modificationDate] as? Date,
+                resourceIdentifier: identifier
+            )
+        }
+    }
+
     @discardableResult
     func enqueueUploads(
         urls: [URL],
@@ -95,7 +141,9 @@ final class TransferEngine {
         applyTemplate: Bool = true
     ) async -> Int {
         let options = UploadPreparationOptions(
-            imagesOnly: settings.imagesOnly,
+            // imagesOnly is a browser display preference. It must never filter
+            // files the user explicitly selected for upload.
+            imagesOnly: false,
             convertHEIC: settings.convertHEIC
         )
         let plan = await Self.planUploads(
@@ -185,7 +233,7 @@ final class TransferEngine {
         bucket: OSSBucket?,
         settings: AppSettings,
         excludingSources: Set<URL> = [],
-        allowOverwrite: Bool = false
+        overwriteDestinations: [String: OSSObjectIdentity] = [:]
     ) {
         enqueue(
             plan: plan,
@@ -196,7 +244,7 @@ final class TransferEngine {
             speedLimit: settings.uploadSpeedLimit,
             playCompleteSound: settings.playCompleteSound,
             excludingSources: excludingSources,
-            allowOverwrite: allowOverwrite
+            overwriteDestinations: overwriteDestinations
         )
     }
 
@@ -211,7 +259,7 @@ final class TransferEngine {
         bucket: OSSBucket? = nil,
         scopedRoot: URL,
         speedLimit: TransferSpeedLimit? = nil,
-        allowOverwrite: Bool = false
+        overwriteDestinations: [URL: LocalFileIdentity] = [:]
     ) {
         guard !items.isEmpty else { return }
         let rootLease = SecurityScopeLease(url: scopedRoot)
@@ -241,7 +289,7 @@ final class TransferEngine {
                     destination: dest,
                     scopedRoot: scopedRoot,
                     speedLimit: speedLimit ?? downloadSpeedLimit,
-                    allowOverwrite: allowOverwrite
+                    overwriteIdentity: overwriteDestinations[dest.standardizedFileURL]
                 )
             )
             if let account,
@@ -253,8 +301,7 @@ final class TransferEngine {
                         bucket: bucket,
                         rootBookmark: rootBookmark,
                         object: item.object,
-                        relativeDestination: relativeDestination,
-                        allowOverwrite: allowOverwrite
+                        relativeDestination: relativeDestination
                     )
                 )
             }
@@ -296,7 +343,7 @@ final class TransferEngine {
     }
 
     func pauseAll() {
-        jobs.filter { $0.status == .running }.forEach { pause($0.id) }
+        jobs.filter(\.isActive).forEach { pause($0.id) }
     }
 
     func resumeAll() {
@@ -420,7 +467,10 @@ final class TransferEngine {
                     concurrentUploads: concurrency,
                     speedLimit: upload.speedLimit,
                     playCompleteSound: upload.playSound,
-                    allowOverwrite: upload.allowOverwrite
+                    // An overwrite approval is single-use. A retry occurs after
+                    // time and remote state may have changed, so it must return
+                    // to create-only behavior and ask again through a new plan.
+                    overwriteDestinations: [:]
                 )
             }
         case .download(let download):
@@ -430,14 +480,20 @@ final class TransferEngine {
                 account: download.account,
                 bucket: download.bucket,
                 scopedRoot: download.scopedRoot,
-                speedLimit: download.speedLimit,
-                allowOverwrite: download.allowOverwrite
+                speedLimit: download.speedLimit
             )
         }
     }
 
     func restore(accounts: [OSSAccount]) {
-        guard let records = try? journal.load() else { return }
+        let records: [PersistedTransfer]
+        do {
+            records = try journal.load()
+            journalErrorMessage = nil
+        } catch {
+            reportJournalError("无法恢复传输记录：\(error.localizedDescription)")
+            return
+        }
         jobs = records.map(\.job)
         retryDescriptors.removeAll()
         persistedRetries.removeAll()
@@ -484,7 +540,7 @@ final class TransferEngine {
         speedLimit: TransferSpeedLimit,
         playCompleteSound: Bool,
         excludingSources: Set<URL> = [],
-        allowOverwrite: Bool = false
+        overwriteDestinations: [String: OSSObjectIdentity] = [:]
     ) {
         concurrency = concurrentUploads
         uploadSpeedLimit = speedLimit
@@ -543,7 +599,7 @@ final class TransferEngine {
                     options: plan.options,
                     speedLimit: speedLimit,
                     playSound: playCompleteSound,
-                    allowOverwrite: allowOverwrite
+                    expectedDestination: overwriteDestinations[item.objectKey]
                 )
             )
             if let sourceBookmark = try? bookmarks.makeBookmark(for: item.sourceURL) {
@@ -562,7 +618,6 @@ final class TransferEngine {
                         imagesOnly: plan.options.imagesOnly,
                         convertHEIC: plan.options.convertHEIC,
                         playSound: playCompleteSound,
-                        allowOverwrite: allowOverwrite,
                         preparedBookmark: preparedBookmark
                     )
                 )
@@ -583,7 +638,7 @@ final class TransferEngine {
         acl: ObjectACL,
         speedLimit: TransferSpeedLimit,
         playSound: Bool,
-        allowOverwrite: Bool
+        expectedDestination: OSSObjectIdentity?
     ) async {
         guard await waitForSlot(id: id, kind: .upload) else {
             if jobs.first(where: { $0.id == id })?.status == .cancelled {
@@ -607,7 +662,12 @@ final class TransferEngine {
                 fileURL: fileURL,
                 contentType: contentType,
                 acl: acl,
-                overwrite: allowOverwrite,
+                expectedDestination: expectedDestination,
+                // A version-enabled Bucket can safely retain a concurrently
+                // created value as an older version. Suspended/unknown states
+                // remain blocked by OSSClient.
+                allowVersionedCreate: expectedDestination == nil,
+                overwrite: expectedDestination != nil,
                 speedLimit: speedLimit,
                 checkpoint: suppliedCheckpoint,
                 onCheckpoint: { [weak self] checkpoint in
@@ -671,10 +731,11 @@ final class TransferEngine {
                     id: id,
                     client: download.client,
                     key: download.object.key,
+                    expectedETag: download.object.etag,
                     destination: download.destination,
                     root: download.scopedRoot,
                     speedLimit: download.speedLimit,
-                    overwrite: download.allowOverwrite
+                    overwriteIdentity: download.overwriteIdentity
                 )
             }
         }
@@ -729,7 +790,7 @@ final class TransferEngine {
             acl: upload.acl,
             speedLimit: upload.speedLimit,
             playSound: upload.playSound,
-            allowOverwrite: upload.allowOverwrite
+            expectedDestination: upload.expectedDestination
         )
     }
 
@@ -778,10 +839,11 @@ final class TransferEngine {
         id: UUID,
         client: OSSClient,
         key: String,
+        expectedETag: String,
         destination: URL,
         root: URL,
         speedLimit: TransferSpeedLimit,
-        overwrite: Bool
+        overwriteIdentity: LocalFileIdentity?
     ) async {
         guard await waitForSlot(id: id, kind: .download) else {
             if jobs.first(where: { $0.id == id })?.status == .cancelled {
@@ -806,9 +868,18 @@ final class TransferEngine {
                 to: destination,
                 within: root,
                 expectedSize: expectedSize,
-                overwrite: overwrite,
+                expectedETag: expectedETag,
+                overwrite: overwriteIdentity != nil,
                 speedLimit: speedLimit,
                 checkpoint: suppliedCheckpoint,
+                beforeReplacingExisting: overwriteIdentity.map { expected in
+                    { @Sendable in
+                        let current = try LocalFileIdentity.capture(destination)
+                        guard current == expected else {
+                            throw LocalFileReplacementError.changed(destination.lastPathComponent)
+                        }
+                    }
+                },
                 onCheckpoint: { [weak self] checkpoint in
                     Task { @MainActor in
                         self?.recordCheckpoint(
@@ -970,7 +1041,7 @@ final class TransferEngine {
         var options: UploadPreparationOptions
         var speedLimit: TransferSpeedLimit
         var playSound: Bool
-        var allowOverwrite: Bool
+        var expectedDestination: OSSObjectIdentity?
         var needsPreparation: Bool = false
     }
 
@@ -982,7 +1053,7 @@ final class TransferEngine {
         var destination: URL
         var scopedRoot: URL
         var speedLimit: TransferSpeedLimit
-        var allowOverwrite: Bool = false
+        var overwriteIdentity: LocalFileIdentity?
     }
 
     private func restore(
@@ -1035,12 +1106,15 @@ final class TransferEngine {
                             ?? "application/octet-stream"),
                     acl: account.defaultACL,
                     options: UploadPreparationOptions(
-                        imagesOnly: upload.imagesOnly,
+                        imagesOnly: false,
                         convertHEIC: upload.convertHEIC
                     ),
                     speedLimit: uploadSpeedLimit,
                     playSound: upload.playSound,
-                    allowOverwrite: upload.allowOverwrite == true,
+                    // Legacy journals may contain a broad overwrite flag. Never
+                    // revive it after restart because it was not bound to a
+                    // destination identity and may now authorize stale writes.
+                    expectedDestination: nil,
                     needsPreparation: needsPreparation
                 )
             )
@@ -1070,7 +1144,7 @@ final class TransferEngine {
                     destination: destination,
                     scopedRoot: root,
                     speedLimit: downloadSpeedLimit,
-                    allowOverwrite: download.allowOverwrite == true
+                    overwriteIdentity: nil
                 )
             )
         }
@@ -1110,7 +1184,17 @@ final class TransferEngine {
                 checkpoint: checkpoints[job.id]
             )
         }
-        try? journal.save(records)
+        do {
+            try journal.save(records)
+            journalErrorMessage = nil
+        } catch {
+            reportJournalError("无法保存传输记录：\(error.localizedDescription)")
+        }
+    }
+
+    private func reportJournalError(_ message: String) {
+        journalErrorMessage = message
+        onJournalError?(message)
     }
 
     nonisolated private static func relativePath(from root: URL, to destination: URL) -> String? {
