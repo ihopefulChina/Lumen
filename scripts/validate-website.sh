@@ -11,7 +11,8 @@ support="$site_root/support.html"
 mcp="$site_root/mcp.html"
 version_info="$("$repo_root/scripts/project-version.sh")"
 version="${version_info%% *}"
-download_url="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-$version.dmg"
+arm64_download_url="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-$version-arm64.dmg"
+x86_64_download_url="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-$version-x86_64.dmg"
 
 required_files=(
   "$index"
@@ -19,6 +20,7 @@ required_files=(
   "$support"
   "$mcp"
   "$site_root/styles.css"
+  "$site_root/download.js"
   "$site_root/site.webmanifest"
   "$site_root/sitemap.xml"
   "$site_root/robots.txt"
@@ -75,13 +77,18 @@ required_html=(
   '<details>'
   'alt="在 Ossuno 中浏览阿里云 OSS"'
   'alt="在 Ossuno 中添加阿里云 OSS 账号"'
-  "$download_url"
+  "$arm64_download_url"
+  "$x86_64_download_url"
+  'src="download.js" defer'
+  'data-auto-download'
+  'data-download-status'
   'href="privacy.html"'
   'href="support.html"'
   'href="mcp.html"'
   'npx ossuno-mcp install'
   'macOS 15'
   'Apple Silicon'
+  'Intel'
   'MIT License'
 )
 
@@ -140,15 +147,22 @@ if [[ -n "$unexpected_versions" ]]; then
   exit 1
 fi
 
-if ! grep -Fq -- "$download_url" "$readme"; then
-  echo "README download URL does not match website version $version." >&2
-  exit 1
-fi
+for download_url in "$arm64_download_url" "$x86_64_download_url"; do
+  if ! grep -Fq -- "$download_url" "$readme"; then
+    echo "README is missing a website download URL for version $version: $download_url" >&2
+    exit 1
+  fi
+done
 
-unexpected_downloads="$(grep -RhoE --include='*.html' 'https://github\.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-[0-9.]+\.dmg' "$site_root" | grep -Fvx -- "$download_url" || true)"
+unexpected_downloads="$(grep -RhoE --include='*.html' 'https://github\.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-[0-9.]+-(arm64|x86_64)\.dmg' "$site_root" | grep -Fvx -- "$arm64_download_url" | grep -Fvx -- "$x86_64_download_url" || true)"
 if [[ -n "$unexpected_downloads" ]]; then
   echo "Website contains mismatched download URLs:" >&2
   echo "$unexpected_downloads" >&2
+  exit 1
+fi
+
+if grep -RhoE --include='*.html' 'https://github\.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-[0-9.]+\.dmg' "$site_root" | grep -q .; then
+  echo "Website still contains a legacy architecture-neutral DMG URL." >&2
   exit 1
 fi
 
@@ -190,7 +204,8 @@ class SiteParser(HTMLParser):
         if tag == "a" and "href" in values:
             self.links.append(values["href"])
         if tag == "script" and values.get("type") != "application/ld+json":
-            self.errors.append("runtime JavaScript is not allowed")
+            if values.get("src") != "download.js" or "defer" not in values:
+                self.errors.append("only the deferred local architecture detector is allowed")
         if tag == "img":
             self.images.append(values)
             for required in ("src", "alt", "width", "height"):
@@ -227,5 +242,155 @@ for raw_path in sys.argv[1:]:
 
 print(f"Validated {totals[0]} links, {totals[1]} images, and {totals[2]} unique IDs across {len(sys.argv) - 1} pages.")
 PY
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "Node.js is required to validate download architecture detection." >&2
+  exit 1
+fi
+
+node - "$site_root/download.js" <<'JS'
+const assert = require("node:assert/strict");
+const download = require(process.argv[2]);
+
+class FakeClassList {
+  constructor(initial) {
+    this.values = new Set(initial || []);
+  }
+
+  toggle(value, enabled) {
+    if (enabled) this.values.add(value);
+    else this.values.delete(value);
+  }
+
+  contains(value) {
+    return this.values.has(value);
+  }
+}
+
+class FakeElement {
+  constructor({ dataset = {}, href = "", classes = [] } = {}) {
+    this.dataset = dataset;
+    this.href = href;
+    this.classList = new FakeClassList(classes);
+    this.attributes = new Map();
+    this.listeners = new Map();
+    this.mark = { textContent: "" };
+    this.textContent = "";
+  }
+
+  addEventListener(type, listener) {
+    this.listeners.set(type, listener);
+  }
+
+  setAttribute(name, value) {
+    this.attributes.set(name, value);
+  }
+
+  removeAttribute(name) {
+    this.attributes.delete(name);
+  }
+
+  querySelector(selector) {
+    return selector === ".download-choice-mark" ? this.mark : null;
+  }
+}
+
+(async () => {
+  assert.equal(download.normalizeArchitecture("arm", "64"), "arm64");
+  assert.equal(download.normalizeArchitecture("aarch64", ""), "arm64");
+  assert.equal(download.normalizeArchitecture("x86", "64"), "x86_64");
+  assert.equal(download.normalizeArchitecture("x86", "32"), null);
+
+  const armResult = await download.detectArchitecture({
+    userAgentData: {
+      platform: "macOS",
+      getHighEntropyValues: async () => ({ architecture: "arm", bitness: "64" }),
+    },
+  });
+  assert.deepEqual(armResult, { kind: "detected", architecture: "arm64" });
+
+  const intelResult = await download.detectArchitecture({
+    userAgentData: {
+      platform: "macOS",
+      getHighEntropyValues: async () => ({ architecture: "x86", bitness: "64" }),
+    },
+  });
+  assert.deepEqual(intelResult, { kind: "detected", architecture: "x86_64" });
+
+  const safariResult = await download.detectArchitecture({
+    platform: "MacIntel",
+    userAgent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)",
+  });
+  assert.deepEqual(safariResult, { kind: "ambiguous", architecture: null });
+
+  let resolveHints;
+  const hints = new Promise((resolve) => { resolveHints = resolve; });
+  const armChoice = new FakeElement({
+    dataset: { downloadChoice: "arm64" },
+    href: "https://example.test/Ossuno-1.0.0-arm64.dmg",
+    classes: ["is-selected"],
+  });
+  const intelChoice = new FakeElement({
+    dataset: { downloadChoice: "x86_64" },
+    href: "https://example.test/Ossuno-1.0.0-x86_64.dmg",
+  });
+  const automaticLink = new FakeElement({
+    dataset: {
+      labelArm64: "下载 Apple Silicon 版",
+      labelX86_64: "下载 Intel 版",
+    },
+    href: armChoice.href,
+  });
+  const status = new FakeElement({ dataset: { state: "checking" } });
+  const statusCopy = { textContent: "" };
+  const fakeDocument = {
+    querySelectorAll(selector) {
+      if (selector === "[data-download-choice]") return [armChoice, intelChoice];
+      if (selector === "[data-auto-download]") return [automaticLink];
+      return [];
+    },
+    querySelector(selector) {
+      if (selector === "[data-download-status]") return status;
+      if (selector === "[data-download-status-copy]") return statusCopy;
+      return null;
+    },
+  };
+  const navigations = [];
+  const controller = download.enhanceDownloads(
+    fakeDocument,
+    {
+      userAgentData: {
+        platform: "macOS",
+        getHighEntropyValues: () => hints,
+      },
+    },
+    {
+      detectionTimeoutMilliseconds: 5000,
+      navigate: (url) => navigations.push(url),
+    }
+  );
+
+  let prevented = false;
+  const clickCompletion = automaticLink.listeners.get("click")({
+    preventDefault() { prevented = true; },
+  });
+  assert.equal(prevented, true, "an early click must wait for architecture detection");
+  assert.deepEqual(navigations, [], "an early click must not navigate to the arm64 fallback");
+
+  resolveHints({ architecture: "x86", bitness: "64" });
+  await controller.detectionPromise;
+  await clickCompletion;
+
+  assert.equal(automaticLink.href, intelChoice.href);
+  assert.equal(automaticLink.textContent, "下载 Intel 版");
+  assert.equal(intelChoice.classList.contains("is-selected"), true);
+  assert.deepEqual(navigations, [intelChoice.href]);
+
+  console.log("Download architecture detection tests passed.");
+})().catch((error) => {
+  console.error(error);
+  process.exitCode = 1;
+});
+JS
 
 echo "Website validation passed."

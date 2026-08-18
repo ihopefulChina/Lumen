@@ -12,6 +12,7 @@
   <link rel="apple-touch-icon" href="assets/ossuno-icon.png">
   <link rel="manifest" href="site.webmanifest">
   <link rel="stylesheet" href="styles.css">
+  <script src="download.js" defer></script>
 
   <meta property="og:type" content="website">
   <meta property="og:title" content="Ossuno — 阿里云 OSS，像访达一样用">
@@ -31,7 +32,11 @@
     "applicationCategory": "UtilitiesApplication",
     "operatingSystem": "macOS 15 or later",
     "softwareVersion": "1.0.0",
-    "downloadUrl": "https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg",
+    "downloadUrl": [
+      "https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg",
+      "https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-x86_64.dmg"
+    ],
+    "processorRequirements": "Apple Silicon (arm64) or Intel (x86_64)",
     "url": "https://ihopefulchina.github.io/Ossuno/",
     "description": "一款为 Mac 打造的阿里云 OSS 客户端"
   }
@@ -52,7 +57,7 @@
         <a href="support.html">支持</a>
         <a href="privacy.html">隐私</a>
       </nav>
-      <a class="header-download" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg">下载</a>
+      <a class="header-download" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg" data-auto-download>下载</a>
     </div>
   </header>
 
@@ -64,13 +69,39 @@
         <h1 id="hero-title" data-load style="--d: 200ms">阿里云 OSS，<br><em>像访达一样</em>用。</h1>
         <p class="hero-lead" data-load style="--d: 340ms">用原生 Mac 窗口浏览、整理与传输；需要自动化时，用 <span class="product-name">ossuno-mcp</span> 把常用的 OSS 工作交给 AI。</p>
         <div class="hero-actions" data-load style="--d: 460ms">
-          <a class="btn btn-primary" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg">下载 Ossuno 1.0.0</a>
+          <a class="btn btn-primary" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg" data-auto-download data-label-arm64="下载 Apple Silicon 版" data-label-x86_64="下载 Intel 版">下载 Apple Silicon 版</a>
           <a class="btn btn-ghost" href="mcp.html">使用 ossuno-mcp</a>
         </div>
-        <p class="hero-meta" data-load style="--d: 560ms">App · Apple Silicon · macOS 15+　/　MCP · npm 1.0.0 · Node.js 18+</p>
+        <p class="hero-meta" data-load style="--d: 560ms">App · macOS 15+ · 手动下载：<a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg">Apple Silicon</a><span aria-hidden="true"> / </span><a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-x86_64.dmg">Intel</a></p>
+
+        <div class="download-panel" id="download" data-load style="--d: 620ms" aria-labelledby="download-title">
+          <div class="download-panel-head">
+            <div>
+              <p class="download-eyebrow">选择安装包</p>
+              <h2 id="download-title">Ossuno 1.0.0</h2>
+            </div>
+            <p class="download-status" role="status" aria-live="polite" data-download-status data-state="checking">
+              <span class="download-status-dot" aria-hidden="true"></span>
+              <span data-download-status-copy>正在识别这台 Mac 的芯片；识别受限时将保留 Apple Silicon 默认项。</span>
+            </p>
+          </div>
+          <div class="download-choices" role="group" aria-label="手动选择 Mac 芯片版本">
+            <a class="download-choice is-selected" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg" data-download-choice="arm64" aria-current="true">
+              <span class="download-choice-icon" aria-hidden="true">M</span>
+              <span><strong>Apple Silicon</strong><small>M1、M2、M3、M4 及后续 M 系列</small></span>
+              <span class="download-choice-mark">默认</span>
+            </a>
+            <a class="download-choice" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-x86_64.dmg" data-download-choice="x86_64">
+              <span class="download-choice-icon" aria-hidden="true">i</span>
+              <span><strong>Intel</strong><small>配备 Intel Core 处理器的 Mac</small></span>
+              <span class="download-choice-mark">选择</span>
+            </a>
+          </div>
+          <p class="download-help">自动检测可能被 Safari、Firefox 或隐私设置限制。拿不准时，请在苹果菜单的「关于本机」中查看“芯片”或“处理器”，再手动选择。</p>
+        </div>
       </div>
 
-      <figure class="hero-shot" data-load style="--d: 640ms">
+      <figure class="hero-shot" data-load style="--d: 700ms">
         <div class="hero-shot-frame">
           <picture>
             <source srcset="assets/browser-dark.png" media="(prefers-color-scheme: dark)">
@@ -298,7 +329,8 @@
                 </div>
               </li>
             </ol>
-            <p style="margin-top: 34px" data-reveal><a class="link-arrow" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg">下载 Ossuno 1.0.0</a></p>
+            <p style="margin-top: 34px" data-reveal><a class="link-arrow" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg" data-auto-download data-label-arm64="下载 Apple Silicon 版" data-label-x86_64="下载 Intel 版">下载 Apple Silicon 版</a></p>
+            <p class="architecture-links" data-reveal>手动选择：<a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg">Apple Silicon</a><span aria-hidden="true">·</span><a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-x86_64.dmg">Intel</a></p>
             <p class="install-note" data-reveal>建议使用权限最小化的 RAM 子账号。Ossuno 是独立开源项目（MIT License），并非阿里云官方产品。</p>
           </div>
           <figure class="account-shot" data-reveal="scale">
@@ -326,7 +358,7 @@
             </details>
             <details>
               <summary>支持哪些 Mac？<span class="faq-toggle" aria-hidden="true"></span></summary>
-              <p>Ossuno 1.0.0 支持 Apple Silicon Mac，需要 macOS 15 或更高版本。</p>
+              <p>Ossuno 1.0.0 同时提供 Apple Silicon（M 系列）和 Intel（x86_64）安装包，都需要 macOS 15 或更高版本。首页会在浏览器可靠报告芯片时自动推荐；无法识别时可手动选择。</p>
             </details>
             <details>
               <summary>账号凭证保存在哪里？<span class="faq-toggle" aria-hidden="true"></span></summary>
@@ -364,9 +396,10 @@
         <p class="eyebrow-line" data-reveal>Ossuno 1.0.0</p>
         <h2 id="final-title" data-reveal>现在，打开<br>你的 Bucket。</h2>
         <div class="hero-actions" data-reveal>
-          <a class="btn btn-primary" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg">下载 Ossuno 1.0.0</a>
+          <a class="btn btn-primary" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg" data-auto-download data-label-arm64="下载 Apple Silicon 版" data-label-x86_64="下载 Intel 版">下载 Apple Silicon 版</a>
           <a class="btn btn-ghost" href="mcp.html">使用 ossuno-mcp</a>
         </div>
+        <p class="architecture-links" data-reveal>手动选择：<a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg">Apple Silicon</a><span aria-hidden="true">·</span><a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-x86_64.dmg">Intel</a></p>
       </div>
     </section>
   </main>

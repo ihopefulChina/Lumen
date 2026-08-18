@@ -1,7 +1,7 @@
 /* ==========================================================================
    Ossuno — 官网设计系统
    参考 Apple 产品页体系：安静的大留白、精确字阶、材质与克制的动效。
-   全站零运行时 JavaScript；动效由 CSS 滚动驱动（优雅降级）。
+   动效由 CSS 滚动驱动；仅下载芯片识别使用渐进增强 JavaScript。
    ========================================================================== */
 
 /* ---------------------------------------------------------------
@@ -445,6 +445,200 @@ h3 {
   margin: 22px 0 0;
   color: var(--ink-3);
   font-size: 13px;
+}
+
+.hero-meta a {
+  color: var(--accent-ink);
+  font-weight: 590;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 102, 204, 0.28);
+  text-underline-offset: 3px;
+}
+
+/* 双架构下载 — 自动推荐不取代明确的手动选择 */
+.download-panel {
+  width: min(800px, 100%);
+  margin: 38px auto 0;
+  padding: 22px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--card-border);
+  border-radius: 22px;
+  box-shadow: 0 16px 42px rgba(29, 29, 31, 0.08), 0 2px 8px rgba(29, 29, 31, 0.04);
+  text-align: left;
+}
+
+.download-panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22px;
+}
+
+.download-eyebrow {
+  margin: 0 0 2px;
+  color: var(--ink-3);
+  font-size: 11px;
+  font-weight: 650;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.download-panel h2 {
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1.2;
+  letter-spacing: -0.025em;
+}
+
+.download-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  max-width: 430px;
+  margin: 0;
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.download-status-dot {
+  flex: 0 0 auto;
+  width: 8px;
+  height: 8px;
+  margin-top: 0.42em;
+  background: var(--accent);
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px var(--accent-soft);
+}
+
+.download-status[data-state="detected"] .download-status-dot {
+  background: var(--ok);
+  box-shadow: 0 0 0 4px var(--ok-soft);
+}
+
+.download-status[data-state="ambiguous"] .download-status-dot {
+  background: #d77a00;
+  box-shadow: 0 0 0 4px rgba(215, 122, 0, 0.12);
+}
+
+.download-status[data-state="not-macos"] .download-status-dot {
+  background: var(--ink-3);
+  box-shadow: 0 0 0 4px var(--hairline);
+}
+
+.download-choices {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 18px;
+}
+
+.download-choice {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 13px;
+  min-height: 76px;
+  padding: 12px 14px;
+  background: var(--bg);
+  border: 1px solid var(--card-border);
+  border-radius: 15px;
+  transition: border-color 0.2s ease, background 0.2s ease, transform 0.2s var(--ease-apple),
+    box-shadow 0.2s ease;
+}
+
+.download-choice:hover {
+  border-color: var(--hairline-strong);
+  box-shadow: 0 8px 20px rgba(29, 29, 31, 0.08);
+  transform: translateY(-1px);
+}
+
+.download-choice:active {
+  transform: scale(0.985);
+}
+
+.download-choice.is-selected {
+  background: var(--accent-soft);
+  border-color: rgba(0, 113, 227, 0.36);
+}
+
+.download-choice-icon {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  color: var(--accent-ink);
+  background: var(--surface);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(29, 29, 31, 0.06);
+}
+
+.download-choice strong,
+.download-choice small {
+  display: block;
+}
+
+.download-choice strong {
+  font-size: 14px;
+  font-weight: 680;
+  letter-spacing: -0.012em;
+}
+
+.download-choice small {
+  margin-top: 2px;
+  color: var(--ink-3);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.download-choice-mark {
+  padding: 3px 8px;
+  color: var(--ink-3);
+  background: var(--surface);
+  border: 1px solid var(--card-border);
+  border-radius: 999px;
+  font-size: 10px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.download-choice.is-selected .download-choice-mark {
+  color: var(--accent-ink);
+  border-color: rgba(0, 113, 227, 0.22);
+}
+
+.download-help {
+  margin: 14px 2px 0;
+  color: var(--ink-3);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.architecture-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  margin: 13px 0 0;
+  color: var(--ink-3);
+  font-size: 12px;
+}
+
+.architecture-links a {
+  color: var(--accent-ink);
+  font-weight: 590;
+  text-decoration: underline;
+  text-decoration-color: rgba(0, 102, 204, 0.28);
+  text-underline-offset: 3px;
+}
+
+.final .architecture-links {
+  justify-content: center;
 }
 
 /* 主截图 — 深阴影窗口 + 底部辉光 */
@@ -2368,6 +2562,21 @@ h3 {
   .hero-lead {
     margin-top: 22px;
     font-size: 17.5px;
+  }
+
+  .download-panel {
+    padding: 18px;
+    border-radius: 18px;
+  }
+
+  .download-panel-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .download-choices {
+    grid-template-columns: 1fr;
   }
 
   .btn {

@@ -1,8 +1,8 @@
 #!/bin/zsh
 set -euo pipefail
 
-if [[ "$#" != "4" ]]; then
-    print -u2 "Usage: scripts/verify-release.sh <dmg> <version> <build> <appcast>"
+if [[ "$#" != "5" ]]; then
+    print -u2 "Usage: scripts/verify-release.sh <dmg> <version> <build> <appcast> <arm64|x86_64>"
     exit 64
 fi
 
@@ -10,6 +10,7 @@ dmg_path="${1:A}"
 expected_version="$2"
 expected_build="$3"
 appcast_path="${4:A}"
+expected_architecture="$5"
 expected_team="${OSSUNO_DEVELOPMENT_TEAM:-}"
 sign_update="${OSSUNO_SPARKLE_SIGN_UPDATE:-}"
 sparkle_key_file="${OSSUNO_SPARKLE_KEY_FILE:-}"
@@ -20,6 +21,8 @@ fail() {
     exit 1
 }
 
+[[ "$expected_architecture" == "arm64" || "$expected_architecture" == "x86_64" ]] \
+    || fail "expected architecture must be arm64 or x86_64"
 [[ -f "$dmg_path" ]] || fail "DMG does not exist"
 [[ -f "$appcast_path" ]] || fail "appcast does not exist"
 if [[ "$adhoc" != "1" ]]; then
@@ -43,7 +46,6 @@ trap cleanup EXIT
 
 hdiutil verify "$dmg_path" >/dev/null
 if [[ "$adhoc" == "1" ]]; then
-    # Ad-hoc artifacts carry no Developer ID and are not notarized.
     print 'Ad-hoc build: skipping notarization and Gatekeeper checks.'
 else
     codesign --verify --strict --verbose=2 "$dmg_path"
@@ -65,8 +67,21 @@ actual_build="$(plutil -extract CFBundleVersion raw "$app_path/Contents/Info.pli
 executable_name="$(plutil -extract CFBundleExecutable raw "$app_path/Contents/Info.plist")"
 executable_path="$app_path/Contents/MacOS/$executable_name"
 [[ -x "$executable_path" ]] || fail "app executable is missing"
-architectures="$(lipo -archs "$executable_path")"
-[[ "$architectures" == "arm64" ]] || fail "expected arm64-only executable, found: $architectures"
+
+# Check every Mach-O, including Sparkle's framework, updater app, XPC services,
+# and Autoupdate helper. A thin release must not quietly embed the other slice.
+macho_count=0
+while IFS= read -r -d $'\0' candidate; do
+    description="$(file -b "$candidate")"
+    if [[ "$description" == Mach-O* ]]; then
+        architectures="$(lipo -archs "$candidate" 2>/dev/null)" \
+            || fail "unable to inspect Mach-O architectures: $candidate"
+        [[ "$architectures" == "$expected_architecture" ]] \
+            || fail "expected only $expected_architecture in $candidate, found: $architectures"
+        macho_count=$((macho_count + 1))
+    fi
+done < <(find "$app_path" -type f -print0)
+(( macho_count > 0 )) || fail "mounted app contains no Mach-O files"
 
 codesign --verify --deep --strict --verbose=2 "$app_path"
 signature_details="$(codesign -dv --verbose=4 "$app_path" 2>&1)"
@@ -88,12 +103,31 @@ else
     spctl --assess --type execute --verbose=2 "$app_path"
 fi
 
-declared_length="$(xmllint --xpath "string(//*[local-name()='item' and *[local-name()='version' and text()='$expected_build']]/*[local-name()='enclosure']/@length)" "$appcast_path")"
-signature="$(xmllint --xpath "string(//*[local-name()='item' and *[local-name()='version' and text()='$expected_build']]/*[local-name()='enclosure']/@*[local-name()='edSignature'])" "$appcast_path")"
-short_version="$(xmllint --xpath "string(//*[local-name()='item' and *[local-name()='version' and text()='$expected_build']]/*[local-name()='shortVersionString'])" "$appcast_path")"
+item_xpath="//*[local-name()='item' and *[local-name()='version' and text()='$expected_build']]"
+item_count="$(xmllint --xpath "count($item_xpath)" "$appcast_path")"
+[[ "$item_count" == "1" ]] || fail "appcast must contain exactly one item for build $expected_build"
+
+declared_length="$(xmllint --xpath "string($item_xpath/*[local-name()='enclosure']/@length)" "$appcast_path")"
+signature="$(xmllint --xpath "string($item_xpath/*[local-name()='enclosure']/@*[local-name()='edSignature'])" "$appcast_path")"
+download_url="$(xmllint --xpath "string($item_xpath/*[local-name()='enclosure']/@url)" "$appcast_path")"
+short_version="$(xmllint --xpath "string($item_xpath/*[local-name()='shortVersionString'])" "$appcast_path")"
+hardware_requirements="$(xmllint --xpath "string($item_xpath/*[local-name()='hardwareRequirements'])" "$appcast_path")"
+expected_artifact_name="${dmg_path:t}"
+
 [[ "$short_version" == "$expected_version" ]] || fail "appcast version does not match"
+[[ "${download_url##*/}" == "$expected_artifact_name" ]] \
+    || fail "appcast URL does not select $expected_artifact_name"
 [[ -n "$signature" ]] || fail "Sparkle signature is missing"
 [[ "$declared_length" == "$(stat -f %z "$dmg_path")" ]] || fail "appcast file length does not match DMG"
+
+if [[ "$expected_architecture" == "arm64" ]]; then
+    [[ "${hardware_requirements:l}" == "arm64" ]] \
+        || fail "arm64 item must declare sparkle:hardwareRequirements=arm64"
+else
+    [[ -z "$hardware_requirements" ]] \
+        || fail "x86_64 item must not declare hardware requirements"
+fi
+
 "$sign_update" --verify --ed-key-file "$sparkle_key_file" "$dmg_path" "$signature"
 
-print "Release verification passed for Ossuno $expected_version ($expected_build)."
+print "Release verification passed for Ossuno $expected_version ($expected_build, $expected_architecture)."

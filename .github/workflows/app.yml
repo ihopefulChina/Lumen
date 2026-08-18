@@ -16,7 +16,7 @@ concurrency:
 jobs:
   verify:
     runs-on: macos-15
-    timeout-minutes: 35
+    timeout-minutes: 55
     env:
       DEVELOPER_DIR: /Applications/Xcode_26.2.app/Contents/Developer
       REAL_OSS_SMOKE: "0"
@@ -36,31 +36,62 @@ jobs:
             -skipPackageUpdates
           git diff --exit-code -- Ossuno.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
-      - name: Run tests
+      - name: Run Apple Silicon tests
         run: |
           xcodebuild \
             -project Ossuno.xcodeproj \
             -scheme Ossuno \
+            -configuration Debug \
             -destination 'platform=macOS,arch=arm64' \
             -onlyUsePackageVersionsFromResolvedFile \
             -skipPackageUpdates \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            GCC_TREAT_WARNINGS_AS_ERRORS=YES \
+            test
+
+      - name: Run Intel tests with Rosetta
+        run: |
+          xcodebuild \
+            -project Ossuno.xcodeproj \
+            -scheme Ossuno \
+            -configuration Debug \
+            -destination 'platform=macOS,arch=x86_64' \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -skipPackageUpdates \
+            ONLY_ACTIVE_ARCH=YES \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            GCC_TREAT_WARNINGS_AS_ERRORS=YES \
             test
 
       - name: Run ossuno-mcp tests
         working-directory: Tools/ossuno-mcp
         run: swift test --disable-sandbox -Xswiftc -warnings-as-errors
 
-      - name: Build Release
+      - name: Build Universal Release
         run: |
+          universal_derived_data="$RUNNER_TEMP/Ossuno-universal"
           xcodebuild \
             -project Ossuno.xcodeproj \
             -scheme Ossuno \
             -configuration Release \
-            -destination 'platform=macOS,arch=arm64' \
+            -destination 'generic/platform=macOS' \
+            -derivedDataPath "$universal_derived_data" \
             -onlyUsePackageVersionsFromResolvedFile \
             -skipPackageUpdates \
             CODE_SIGNING_ALLOWED=NO \
+            ARCHS='arm64 x86_64' \
+            ONLY_ACTIVE_ARCH=NO \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            GCC_TREAT_WARNINGS_AS_ERRORS=YES \
             build
+
+          app_executable="$universal_derived_data/Build/Products/Release/Ossuno.app/Contents/MacOS/Ossuno"
+          app_info="$universal_derived_data/Build/Products/Release/Ossuno.app/Contents/Info.plist"
+          lipo "$app_executable" -verify_arch arm64 x86_64
+          test "$(lipo -archs "$app_executable")" = "x86_64 arm64" || \
+            test "$(lipo -archs "$app_executable")" = "arm64 x86_64"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app_info")" = "1.0.0"
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$app_info")" = "3"
 
       - name: Analyze
         run: |
@@ -72,6 +103,8 @@ jobs:
             -onlyUsePackageVersionsFromResolvedFile \
             -skipPackageUpdates \
             CODE_SIGNING_ALLOWED=NO \
+            SWIFT_TREAT_WARNINGS_AS_ERRORS=YES \
+            GCC_TREAT_WARNINGS_AS_ERRORS=YES \
             analyze
 
       - name: Validate repository metadata
