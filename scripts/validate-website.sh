@@ -32,6 +32,7 @@ required_files=(
   "$site_root/assets/browser-dark.png"
   "$site_root/assets/account.png"
   "$site_root/assets/account-dark.png"
+  "$site_root/assets/author-blog.png"
 )
 
 for file in "${required_files[@]}"; do
