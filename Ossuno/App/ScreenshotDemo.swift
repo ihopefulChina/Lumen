@@ -1,6 +1,7 @@
 #if DEBUG
 import AppKit
 import Foundation
+import Security
 
 @MainActor
 enum ScreenshotDemo {
@@ -20,6 +21,20 @@ enum ScreenshotDemo {
         guard currentMode != nil else { return nil }
         return NSAppearance(
             named: ProcessInfo.processInfo.arguments.contains("--ossuno-screenshot-dark") ? .darkAqua : .aqua
+        )
+    }
+
+    static var accountFailure: AccountFormFailure? {
+        accountFailure(arguments: ProcessInfo.processInfo.arguments)
+    }
+
+    static func accountFailure(arguments: [String]) -> AccountFormFailure? {
+        guard arguments.contains("--ossuno-screenshot-account"),
+              arguments.contains("--ossuno-screenshot-account-error")
+        else { return nil }
+        return AccountFormFailure(
+            operation: .savingAccount,
+            error: KeychainStoreError(status: errSecInteractionNotAllowed)
         )
     }
 

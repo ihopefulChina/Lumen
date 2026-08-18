@@ -13,6 +13,8 @@
   &nbsp;·&nbsp;
   <a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg"><strong>下载 Ossuno 1.0.0</strong></a>
   &nbsp;·&nbsp;
+  <a href="https://www.npmjs.com/package/ossuno-mcp"><strong>使用 ossuno-mcp</strong></a>
+  &nbsp;·&nbsp;
   <a href="https://ihopefulchina.github.io/Ossuno/support.html">使用支持</a>
   &nbsp;·&nbsp;
   <a href="https://github.com/ihopefulChina/Ossuno/releases">版本记录</a>
@@ -25,6 +27,21 @@
 </p>
 
 Ossuno 是一个原生的 macOS OSS 客户端。它不打算把控制台搬进桌面，只做日常最常用的事：查找、预览、整理、传输和恢复，都在一个安静、熟悉的 Mac 窗口里完成。
+
+## 让 AI 直接操作 OSS（ossuno-mcp）
+
+[`ossuno-mcp` 1.0.0](https://www.npmjs.com/package/ossuno-mcp) 已发布到 npm。它是一个可独立使用的 MCP 服务器：配置到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接。
+
+```bash
+npx ossuno-mcp auth     # 配置 OSS 凭证，只保存到 macOS 钥匙串
+npx ossuno-mcp install  # 一键注册到本机已安装的 AI 客户端
+```
+
+需要 macOS 与 Node.js 18 或更高版本。npm 包会按 Mac 架构安装 arm64 或 x64 预编译二进制。服务器提供 5 个工具和 2 个提示词（OSS 专家模式、批量上传工作流），凭证与 Ossuno App 账号相互独立。
+
+> 把桌面上的 hero.png 上传到 ossuno-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接。
+
+完整命令、客户端配置与安全边界见 [MCP 使用指南](docs/mcp.md)和[官网 AI · MCP 页面](https://ihopefulchina.github.io/Ossuno/mcp.html)。
 
 ## 从找到文件开始
 
@@ -127,21 +144,6 @@ xcodebuild -project Ossuno.xcodeproj \
 ```
 
 项目使用 Swift 6、SwiftUI、AppKit、Swift Testing 和固定版本的 Sparkle，没有其他运行时依赖。
-
-## 让 AI 直接操作 OSS（ossuno-mcp）
-
-仓库内置一个独立的 MCP 服务器 `ossuno-mcp`，配置到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接：
-
-> 把桌面上的 hero.png 上传到 ossuno-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接。
-
-服务器提供 5 个工具和 2 个提示词（OSS 专家模式、批量上传工作流），握手时自带 Agent 使用说明。凭证保存在 macOS 钥匙串，与 Ossuno App 账号相互独立。npm 1.0.0 包尚未发布；发布后的快速开始命令如下（需 Node ≥ 18）：
-
-```bash
-npx ossuno-mcp auth     # 配置 OSS 凭证（钥匙串）
-npx ossuno-mcp install  # 一键注册到本机已安装的 AI 客户端
-```
-
-`ossuno-mcp` 计划随 1.0.0 发布到 npm，并提供 macOS arm64/x64 预编译二进制。正式发布前请从源码构建；详见 [docs/mcp.md](docs/mcp.md) 与[网站上的 AI · MCP 页面](https://ihopefulchina.github.io/Ossuno/mcp.html)。
 
 ## 参与与支持
 

@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct AccountSheet: View {
@@ -6,12 +7,17 @@ struct AccountSheet: View {
 
     @State var draft: AccountDraft
     @State private var isTesting = false
-    @State private var errorText: String?
+    @State private var failure: AccountFormFailure?
     @State private var showAdvanced = false
     @State private var showSecret = false
     @State private var showToken = false
     @State private var pendingACL: ObjectACL?
     @State private var showACLConfirmation = false
+    @FocusState private var focusedFailureAction: FailureAction?
+
+    private enum FailureAction: Hashable {
+        case retry
+    }
 
     /// Editing must start with the persisted account identity before any
     /// Keychain lookup. A Keychain error must never leave an edit sheet backed
@@ -115,15 +121,14 @@ struct AccountSheet: View {
                     }
                 }
 
-                if let errorText {
-                    Section {
-                        Label(errorText, systemImage: "exclamationmark.circle.fill")
-                            .foregroundStyle(.red)
-                            .font(.callout)
-                    }
-                }
             }
             .formStyle(.grouped)
+
+            if let failure {
+                failureFeedback(failure)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+            }
 
             Divider()
 
@@ -175,6 +180,12 @@ struct AccountSheet: View {
             }
         }
         .task(id: model.editingAccount?.id) {
+            #if DEBUG
+            if let screenshotFailure = ScreenshotDemo.accountFailure {
+                failure = screenshotFailure
+                return
+            }
+            #endif
             if let account = model.editingAccount {
                 // Keep this defensive assignment even though every production
                 // caller uses initialDraft(editing:). It preserves the existing
@@ -184,11 +195,11 @@ struct AccountSheet: View {
                 }
                 do {
                     let secret = try SecretStore.read(account: AccountStore.secretAccount(account.id)) ?? ""
-                    draft.secret = secret
                     let token = try SecretStore.read(account: AccountStore.tokenAccount(account.id)) ?? ""
+                    draft.secret = secret
                     draft.token = token
                 } catch {
-                    errorText = error.localizedDescription
+                    presentFailure(error, operation: .loadingCredentials)
                 }
             }
         }
@@ -219,6 +230,63 @@ struct AccountSheet: View {
         draft.isReadyToSave
     }
 
+    private func failureFeedback(_ failure: AccountFormFailure) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "exclamationmark.octagon.fill")
+                    .font(.system(size: 24, weight: .semibold))
+                    .foregroundStyle(.red)
+                    .accessibilityHidden(true)
+
+                VStack(alignment: .leading, spacing: 5) {
+                    Text(failure.title)
+                        .font(.headline)
+                        .foregroundStyle(.primary)
+                    Text(failure.message)
+                        .font(.callout)
+                        .foregroundStyle(.primary)
+                        .textSelection(.enabled)
+                    Text(failure.recoverySuggestion)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(failure.accessibilityAnnouncement)
+
+            HStack(spacing: 10) {
+                if failure.shouldOfferKeychainAccess,
+                   NSWorkspace.shared.urlForApplication(withBundleIdentifier: "com.apple.keychainaccess") != nil {
+                    Button {
+                        openKeychainAccess()
+                    } label: {
+                        Label("打开钥匙串访问", systemImage: "key.fill")
+                    }
+                    .help("打开“钥匙串访问”，检查登录钥匙串是否已解锁")
+                }
+
+                Spacer()
+
+                Button {
+                    retry(failure.operation)
+                } label: {
+                    Label(failure.retryTitle, systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .focused($focusedFailureAction, equals: .retry)
+                .help(failure.retryHelp)
+            }
+        }
+        .padding(14)
+        .background(.red.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .stroke(.red.opacity(0.45), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+    }
+
     private var commonACLs: [ObjectACL] {
         var values: [ObjectACL] = [.default, .private, .publicRead]
         if draft.defaultACL == .publicReadWrite {
@@ -245,13 +313,61 @@ struct AccountSheet: View {
 
     private func save() async {
         isTesting = true
-        errorText = nil
+        clearFailure()
         do {
             try await model.saveAccount(draft)
             dismiss()
         } catch {
-            errorText = error.localizedDescription
+            presentFailure(error, operation: .savingAccount)
         }
         isTesting = false
+    }
+
+    private func retry(_ operation: AccountFormFailure.Operation) {
+        switch operation {
+        case .savingAccount:
+            Task { await save() }
+        case .loadingCredentials:
+            clearFailure()
+            guard let account = model.editingAccount else { return }
+            do {
+                let secret = try SecretStore.read(account: AccountStore.secretAccount(account.id)) ?? ""
+                let token = try SecretStore.read(account: AccountStore.tokenAccount(account.id)) ?? ""
+                draft.secret = secret
+                draft.token = token
+            } catch {
+                presentFailure(error, operation: .loadingCredentials)
+            }
+        }
+    }
+
+    private func presentFailure(_ error: Error, operation: AccountFormFailure.Operation) {
+        let failure = AccountFormFailure(operation: operation, error: error)
+        self.failure = failure
+
+        Task { @MainActor in
+            await Task.yield()
+            focusedFailureAction = .retry
+            NSAccessibility.post(
+                element: NSApp as Any,
+                notification: .announcementRequested,
+                userInfo: [
+                    .announcement: failure.accessibilityAnnouncement,
+                    .priority: NSAccessibilityPriorityLevel.high.rawValue
+                ]
+            )
+        }
+    }
+
+    private func clearFailure() {
+        failure = nil
+        focusedFailureAction = nil
+    }
+
+    private func openKeychainAccess() {
+        guard let url = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: "com.apple.keychainaccess"
+        ) else { return }
+        NSWorkspace.shared.open(url)
     }
 }

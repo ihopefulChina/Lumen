@@ -67,6 +67,7 @@ required_html=(
   '<a class="skip-link" href="#main">'
   '<main id="main">'
   'aria-label="主导航"'
+  'id="mcp"'
   'id="features"'
   'id="security"'
   'id="start"'
@@ -77,6 +78,8 @@ required_html=(
   "$download_url"
   'href="privacy.html"'
   'href="support.html"'
+  'href="mcp.html"'
+  'npx ossuno-mcp install'
   'macOS 15'
   'Apple Silicon'
   'MIT License'
@@ -100,6 +103,7 @@ for page_and_canonical in \
     '<a class="skip-link" href="#main">' \
     '<main id="main"' \
     'href="index.html"' \
+    'href="mcp.html"' \
     'href="privacy.html"' \
     'href="support.html"'; do
     if ! grep -Fq -- "$pattern" "$page"; then
@@ -108,6 +112,20 @@ for page_and_canonical in \
     fi
   done
 done
+
+for page in "$index" "$privacy" "$support" "$mcp"; do
+  if ! grep -Fq -- '>ossuno-mcp</a>' "$page"; then
+    echo "Missing prominent ossuno-mcp navigation label in ${page#"$repo_root/"}." >&2
+    exit 1
+  fi
+done
+
+if grep -Eini -- \
+  'npm.{0,24}(尚未发布|未发布)|发布后.{0,24}(可用|可运行)|计划.{0,24}发布到 npm|正式发布前|not yet published|coming soon' \
+  "$readme" "$repo_root/docs/mcp.md" "$site_root"/*.html; then
+  echo "MCP documentation still contains pre-release transition copy." >&2
+  exit 1
+fi
 
 previous_brand="$(printf '\154\165\155\145\156')"
 if grep -RIni --include='*.html' -- "$previous_brand" "$site_root"; then
@@ -184,7 +202,11 @@ totals = [0, 0, 0]
 for raw_path in sys.argv[1:]:
     page = Path(raw_path)
     parser = SiteParser()
-    parser.feed(page.read_text(encoding="utf-8"))
+    source = page.read_text(encoding="utf-8")
+    parser.feed(source)
+
+    if page.name == "index.html" and source.find('id="mcp"') > source.find('id="features"'):
+        parser.errors.append("ossuno-mcp must appear before the App feature chapters")
 
     for href in parser.links:
         if href.startswith("#") and href[1:] not in parser.ids:

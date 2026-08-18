@@ -470,6 +470,48 @@ struct SafetyAndVersionTests {
         #expect(try access.read(account: account, modern: false) == "same-secret")
     }
 
+    @Test func automaticKeychainDeleteContinuesWhenAnEmptyModernLookupNeedsEntitlementToDelete() throws {
+        let access = RecordingKeychainAccess(modernDeleteFailure: errSecMissingEntitlement)
+        let backend = KeychainSecretBackend(access: access)
+        let account = "account"
+        try access.set("legacy-secret", for: account, modern: false)
+
+        try backend.delete(account)
+
+        #expect(access.readModes == [true, false])
+        #expect(access.deleteModes == [true, false])
+        #expect(try access.read(account: account, modern: false) == nil)
+    }
+
+    @Test func automaticKeychainDeleteDoesNotHideAnEntitlementFailureForAnObservedModernValue() throws {
+        let access = RecordingKeychainAccess(modernDeleteFailure: errSecMissingEntitlement)
+        let backend = KeychainSecretBackend(access: access)
+        let account = "account"
+        try access.set("modern-secret", for: account, modern: true)
+
+        #expect(throws: KeychainStoreError.self) {
+            try backend.delete(account)
+        }
+
+        #expect(access.deleteModes == [true])
+        #expect(try access.read(account: account, modern: true) == "modern-secret")
+    }
+
+    @Test func commonKeychainErrorsProvideChineseRecoveryGuidance() {
+        #expect(
+            KeychainStoreError(status: errSecMissingEntitlement)
+                .localizedDescription.contains("已签名的最新版本")
+        )
+        #expect(
+            KeychainStoreError(status: errSecInteractionNotAllowed)
+                .localizedDescription.contains("解锁")
+        )
+        #expect(
+            KeychainStoreError(status: errSecAuthFailed)
+                .localizedDescription.contains("允许访问")
+        )
+    }
+
     private static func account(name: String) -> OSSAccount {
         OSSAccount(
             id: UUID(uuidString: "0A3DB3D9-5721-46B9-AC8A-4D17CA76093B")!,
@@ -492,13 +534,16 @@ private final class RecordingKeychainAccess: KeychainItemAccessing, @unchecked S
     var readModes: [Bool] = []
     var deleteModes: [Bool] = []
     private let modernFailure: OSStatus?
+    private let modernDeleteFailure: OSStatus?
     private let deleteFailureModes: Set<Bool>
 
     init(
         modernFailure: OSStatus? = nil,
+        modernDeleteFailure: OSStatus? = nil,
         deleteFailureModes: Set<Bool> = []
     ) {
         self.modernFailure = modernFailure
+        self.modernDeleteFailure = modernDeleteFailure
         self.deleteFailureModes = deleteFailureModes
     }
 
@@ -517,6 +562,9 @@ private final class RecordingKeychainAccess: KeychainItemAccessing, @unchecked S
     func delete(account: String, modern: Bool) throws {
         deleteModes.append(modern)
         try failIfNeeded(modern)
+        if modern, let modernDeleteFailure {
+            throw KeychainStoreError(status: modernDeleteFailure)
+        }
         if deleteFailureModes.contains(modern) {
             throw KeychainStoreError(status: errSecAuthFailed)
         }

@@ -1,6 +1,6 @@
 # ossuno-mcp — 让 AI 直接操作你的阿里云 OSS
 
-`ossuno-mcp` 是 Ossuno 附带的 MCP（Model Context Protocol）服务器。配置到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言完成常见的 OSS 操作：
+`ossuno-mcp` 是 Ossuno 项目提供、可独立使用的 MCP（Model Context Protocol）服务器。配置到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言完成常见的 OSS 操作：
 
 - 「看看我有哪些 Bucket」
 - 「把这个截图上传到 ossuno-assets 的 2026/08 文件夹」
@@ -31,7 +31,7 @@
 
 ## 安装
 
-> `ossuno-mcp` 1.0.0 的 npm 包尚未发布。以下 `npx` / `npm` 命令在正式发布后可用；现在请使用下方“从源码构建”方案。
+[`ossuno-mcp` 1.0.0](https://www.npmjs.com/package/ossuno-mcp) 已发布到 npm。需要 macOS 与 Node.js 18 或更高版本；`npx` 会按 Mac 架构下载 arm64 或 x64 预编译二进制。
 
 ### 第一步：配置凭证
 
@@ -70,7 +70,7 @@ npx ossuno-mcp uninstall                # 移除注册
 
 ### 替代方案
 
-- **全局安装**（npm 发布后）：`npm install -g ossuno-mcp` 后直接用 `ossuno-mcp auth` / `ossuno-mcp install`，客户端配置里写的是 PATH 上的 `ossuno-mcp`。
+- **全局安装**：`npm install -g ossuno-mcp` 后直接用 `ossuno-mcp auth` / `ossuno-mcp install`，客户端配置里写的是 PATH 上的 `ossuno-mcp`。
 - **从源码构建**（开发者 / 无 Node 环境）：克隆仓库后 `cd Tools/ossuno-mcp && swift build -c release`，用 `.build/release/ossuno-mcp` 绝对路径运行。在 Terminal.app 中执行（IDE 内置终端可能有沙箱限制）。
 
 ## 手动配置（可选）
@@ -200,4 +200,4 @@ cd Tools/ossuno-mcp
 ./npm/publish.sh <version>    # 例如 1.0.0
 ```
 
-脚本会：构建 arm64 与 x86_64 双架构 release 二进制 → 同步三个包的版本号 → 依次发布 `ossuno-mcp-darwin-arm64`、`ossuno-mcp-darwin-x64`、`ossuno-mcp`。前置条件：`npm login` 已完成、Xcode 命令行工具可用。发布后记得把 `npm/` 下 package.json 的版本变更提交进仓库。
+脚本会：构建 arm64 与 x86_64 双架构 release 二进制 → 同步三个包的版本号 → 依次发布 `ossuno-mcp-darwin-arm64`、`ossuno-mcp-darwin-x64`、`ossuno-mcp`。前置条件：`npm login` 已完成、Xcode 命令行工具可用。发布完成时，把 `npm/` 下 package.json 的版本变更提交进仓库。

@@ -22,3 +22,4 @@ secrets.json
 dist/
 icon-compare.jpg
 .icon-compare.jpg
+.codegraph/

@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI 集成（MCP）— Ossuno</title>
-  <meta name="description" content="ossuno-mcp 是 Ossuno 内置的 MCP 服务器。两行命令注册到 Codex、Claude Desktop、Cursor、Trae 等 AI 客户端，用一句话浏览 Bucket、上传下载文件、生成临时下载链接。凭证留在 macOS 钥匙串。">
+  <title>ossuno-mcp — 让 AI 直接操作阿里云 OSS</title>
+  <meta name="description" content="ossuno-mcp 是可独立使用的阿里云 OSS MCP 服务器。两行命令注册到 Codex、Claude Desktop、Cursor、Trae 等 AI 客户端，用一句话浏览 Bucket、上传下载文件、生成临时下载链接。">
   <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#101013" media="(prefers-color-scheme: dark)">
   <link rel="canonical" href="https://ihopefulchina.github.io/Ossuno/mcp.html">
@@ -12,8 +12,8 @@
   <link rel="stylesheet" href="styles.css">
 
   <meta property="og:type" content="website">
-  <meta property="og:title" content="AI 集成（MCP）— Ossuno">
-  <meta property="og:description" content="两行命令，让 Codex、Claude、Cursor 等 AI 直接操作你的阿里云 OSS。">
+  <meta property="og:title" content="ossuno-mcp — 让 AI 直接操作阿里云 OSS">
+  <meta property="og:description" content="ossuno-mcp 1.0.0 已发布到 npm。两行命令，让 Codex、Claude、Cursor 等 AI 直接操作你的阿里云 OSS。">
   <meta property="og:url" content="https://ihopefulchina.github.io/Ossuno/mcp.html">
   <meta property="og:locale" content="zh_CN">
 </head>
@@ -27,7 +27,7 @@
       </a>
       <nav class="main-nav" aria-label="主导航">
         <a href="index.html">首页</a>
-        <a href="mcp.html" aria-current="page">AI · MCP</a>
+        <a href="mcp.html" aria-current="page">ossuno-mcp</a>
         <a href="support.html">支持</a>
         <a href="privacy.html">隐私</a>
       </nav>
@@ -38,20 +38,21 @@
   <main id="main" class="document-main">
     <!-- ============ 首屏：一行注册 + 一次配置 ============ -->
     <section class="mcp-hero" aria-labelledby="mcp-hero-title">
-      <p class="document-eyebrow" data-load style="--d: 40ms">AI · MCP</p>
+      <p class="document-eyebrow" data-load style="--d: 40ms">ossuno-mcp · npm 1.0.0</p>
       <h1 id="mcp-hero-title" data-load style="--d: 140ms">两行命令，<br>AI 接管你的 OSS。</h1>
-      <p class="document-lead" data-load style="--d: 260ms"><code>ossuno-mcp</code> 是 Ossuno 内置的 MCP（Model Context Protocol）服务器。注册之后，对你的 AI 助手说一句话，就能浏览 Bucket、上传下载文件、生成临时下载链接。</p>
-      <p data-load style="--d: 320ms"><strong>npm 1.0.0 包尚未发布。</strong>以下 <code>npx</code> 命令将在正式发布后可用；现在可从源码构建。</p>
+      <p class="document-lead" data-load style="--d: 260ms"><code>ossuno-mcp</code> 是可独立使用的 MCP（Model Context Protocol）服务器。注册之后，对你的 AI 助手说一句话，就能浏览 Bucket、上传下载文件、生成临时下载链接。</p>
+      <p data-load style="--d: 320ms"><strong>ossuno-mcp 1.0.0 已发布到 npm。</strong><code>npx</code> 会自动安装与你的 Mac 架构匹配的预编译二进制。</p>
 
-      <pre class="code-block" aria-label="npm 发布后安装 ossuno-mcp 的两条命令" data-load style="--d: 380ms"><code><span class="c-prompt">$</span> npx ossuno-mcp install
-<span class="c-cm"># 检测到 Codex · Claude Desktop · Cursor · Trae — 已注册 ✓</span>
+      <pre class="code-block" aria-label="安装并配置 ossuno-mcp 的两条命令" data-load style="--d: 380ms"><code><span class="c-prompt">$</span> npx ossuno-mcp auth
+<span class="c-cm"># 一次性配置 AccessKey — 只存进 macOS 钥匙串</span>
 
-<span class="c-prompt">$</span> npx ossuno-mcp auth
-<span class="c-cm"># 一次性配置 AccessKey — 只存进 macOS 钥匙串</span></code></pre>
+<span class="c-prompt">$</span> npx ossuno-mcp install
+<span class="c-cm"># 检测到 Codex · Claude Desktop · Cursor · Trae — 已注册 ✓</span></code></pre>
 
       <p class="mcp-hero-meta" data-load style="--d: 480ms">
         <span>需要 macOS 与 Node ≥ 18</span>
         <span>凭证不经过 AI 客户端</span>
+        <a href="https://www.npmjs.com/package/ossuno-mcp" rel="noopener">在 npm 查看 1.0.0</a>
         <a href="#advanced">没有 Node？从源码构建</a>
       </p>
     </section>
@@ -272,10 +273,10 @@
   <footer class="site-footer">
     <div class="footer-inner">
       <div class="footer-brand"><img src="assets/ossuno-favicon.png" width="64" height="64" alt=""><span>Ossuno</span></div>
-      <p>为 Mac 打造的阿里云 OSS 客户端 · 独立开源，非阿里云官方产品</p>
+      <p>原生 Mac 客户端与 ossuno-mcp · 独立开源，非阿里云官方产品</p>
       <nav aria-label="页脚导航">
         <a href="index.html">首页</a>
-        <a href="mcp.html">AI · MCP</a>
+        <a href="mcp.html">ossuno-mcp</a>
         <a href="support.html">支持</a>
         <a href="privacy.html">隐私</a>
         <a href="https://github.com/ihopefulChina/Ossuno" rel="noopener">GitHub</a>

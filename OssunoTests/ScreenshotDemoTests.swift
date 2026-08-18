@@ -35,5 +35,24 @@ struct ScreenshotDemoTests {
         #expect(draft.defaultACL.title == "继承存储空间")
         #expect(draft.prefixTemplate == "assets/{yyyy}/{MM}/{dd}/")
     }
+
+    @Test func accountErrorFixtureRequiresAnExplicitDebugArgument() {
+        #expect(ScreenshotDemo.accountFailure(arguments: []) == nil)
+        #expect(ScreenshotDemo.accountFailure(
+            arguments: ["Ossuno", "--ossuno-screenshot-account-error"]
+        ) == nil)
+
+        let failure = ScreenshotDemo.accountFailure(
+            arguments: [
+                "Ossuno",
+                "--ossuno-screenshot-account",
+                "--ossuno-screenshot-account-error"
+            ]
+        )
+
+        #expect(failure?.operation == .savingAccount)
+        #expect(failure?.isKeychainFailure == true)
+        #expect(failure?.message.contains("错误码 -25308") == true)
+    }
 }
 #endif

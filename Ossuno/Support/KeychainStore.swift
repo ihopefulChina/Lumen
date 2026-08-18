@@ -66,10 +66,17 @@ struct KeychainSecretBackend: SecureSecretBackend {
 
     func delete(_ account: String) throws {
         let modes: [Bool]
+        let toleratesUnavailableDataProtection: Bool
         switch storage {
-        case .automatic: modes = [true, false]
-        case .dataProtection: modes = [true]
-        case .fileBased: modes = [false]
+        case .automatic:
+            modes = [true, false]
+            toleratesUnavailableDataProtection = true
+        case .dataProtection:
+            modes = [true]
+            toleratesUnavailableDataProtection = false
+        case .fileBased:
+            modes = [false]
+            toleratesUnavailableDataProtection = false
         }
 
         // Snapshot every reachable backend before mutating either one. Public
@@ -88,8 +95,21 @@ struct KeychainSecretBackend: SecureSecretBackend {
         var deleted: [(modern: Bool, value: String?)] = []
         do {
             for snapshot in snapshots {
-                try access.delete(account: account, modern: snapshot.modern)
-                deleted.append(snapshot)
+                do {
+                    try access.delete(account: account, modern: snapshot.modern)
+                    deleted.append(snapshot)
+                } catch KeychainStoreError.status(errSecMissingEntitlement)
+                    where toleratesUnavailableDataProtection
+                        && snapshot.modern
+                        && snapshot.value == nil {
+                    // An unsigned/ad-hoc macOS build can report item-not-found
+                    // while reading the Data Protection Keychain, then report
+                    // missing-entitlement while deleting the very same absent
+                    // item. In automatic mode that backend was not reachable,
+                    // so continue with the file-based Keychain. Never swallow
+                    // the error after a value was actually observed.
+                    continue
+                }
             }
         } catch {
             let primary = error
@@ -232,8 +252,22 @@ enum KeychainStoreError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .status(let status):
+            switch status {
+            case errSecMissingEntitlement:
+                return "Ossuno 当前安装包缺少钥匙串权限，请安装已签名的最新版本后重试（错误码 \(status)）"
+            case errSecInteractionNotAllowed:
+                return "macOS 钥匙串已锁定或当前不允许访问，请先解锁“登录”钥匙串后重试（错误码 \(status)）"
+            case errSecAuthFailed:
+                return "macOS 钥匙串拒绝了 Ossuno 的访问，请允许访问后重试（错误码 \(status)）"
+            case errSecNotAvailable:
+                return "macOS 钥匙串当前不可用，请确认“登录”钥匙串可用后重试（错误码 \(status)）"
+            case errSecUserCanceled:
+                return "钥匙串授权已取消，请重新操作并允许 Ossuno 访问（错误码 \(status)）"
+            default:
+                break
+            }
             let detail = SecCopyErrorMessageString(status, nil) as String? ?? "OSStatus \(status)"
-            return "无法访问 macOS 钥匙串：\(detail)"
+            return "无法访问 macOS 钥匙串（错误码 \(status)）：\(detail)"
         case .invalidData:
             return "钥匙串中的凭证格式无效"
         case .rollbackFailed(let primary, let rollback):
