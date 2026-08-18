@@ -39,7 +39,19 @@ for file in "${required_files[@]}"; do
   fi
 done
 
-xmllint --noout "$site_root/appcast.xml" "$site_root/sitemap.xml"
+python3 - "$site_root/appcast.xml" "$site_root/sitemap.xml" <<'PY'
+from pathlib import Path
+from xml.etree import ElementTree
+import sys
+
+
+for value in sys.argv[1:]:
+    path = Path(value)
+    try:
+        ElementTree.parse(path)
+    except ElementTree.ParseError as error:
+        raise SystemExit(f"Invalid XML in {path}: {error}") from error
+PY
 python3 -m json.tool "$site_root/site.webmanifest" >/dev/null
 if ! cmp -s "$repo_root/appcast.xml" "$site_root/appcast.xml"; then
   echo "Root and website appcasts differ." >&2
