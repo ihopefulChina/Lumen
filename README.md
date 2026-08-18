@@ -1,34 +1,34 @@
 <p align="center">
-  <img src="Lumen/Assets.xcassets/AppIcon.appiconset/Icon-v6-256.png" width="112" alt="Lumen 图标">
+  <img src="Ossuno/Assets.xcassets/AppIcon.appiconset/Icon-v6-256.png" width="112" alt="Ossuno 图标">
 </p>
 
-<h1 align="center">Lumen</h1>
+<h1 align="center">Ossuno</h1>
 
 <p align="center">
   在 Mac 上，像用访达一样用阿里云 OSS。
 </p>
 
 <p align="center">
-  <a href="https://ihopefulchina.github.io/Lumen/"><strong>官网</strong></a>
+  <a href="https://ihopefulchina.github.io/Ossuno/"><strong>官网</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.3.dmg"><strong>下载 Lumen 1.0.3</strong></a>
+  <a href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg"><strong>下载 Ossuno 1.0.0</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://ihopefulchina.github.io/Lumen/support.html">使用支持</a>
+  <a href="https://ihopefulchina.github.io/Ossuno/support.html">使用支持</a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/ihopefulChina/Lumen/releases">版本记录</a>
+  <a href="https://github.com/ihopefulChina/Ossuno/releases">版本记录</a>
 </p>
 
 <p align="center">Apple Silicon · macOS 15 或更高版本</p>
 
 <p align="center">
-  <img src="docs/browser.png" width="920" alt="Lumen 的对象浏览窗口">
+  <img src="docs/browser.png" width="920" alt="Ossuno 的对象浏览窗口">
 </p>
 
-Lumen 是一个原生的 macOS OSS 客户端。它不打算把控制台搬进桌面，只做日常最常用的事：查找、预览、整理、传输和恢复，都在一个安静、熟悉的 Mac 窗口里完成。
+Ossuno 是一个原生的 macOS OSS 客户端。它不打算把控制台搬进桌面，只做日常最常用的事：查找、预览、整理、传输和恢复，都在一个安静、熟悉的 Mac 窗口里完成。
 
 ## 从找到文件开始
 
-当前文件夹的搜索即时出结果；切到「当前 Bucket」后，Lumen 会分页扫描整个 Bucket 并显示进度。结果可以按类型、大小和修改日期筛选，双击回到所在文件夹，空格快速查看。
+当前文件夹的搜索即时出结果；切到「当前 Bucket」后，Ossuno 会分页扫描整个 Bucket 并显示进度。结果可以按类型、大小和修改日期筛选，双击回到所在文件夹，空格快速查看。
 
 常用的 OSS 文件夹可以收藏到侧边栏。
 
@@ -37,7 +37,7 @@ Lumen 是一个原生的 macOS OSS 客户端。它不打算把控制台搬进桌
 - 单击选中，Command 多选，Shift 连选，Return 原地重命名。
 - 网格与列表、路径栏、方向键、空格快速查看和 `⌘I` 信息窗口，都是熟悉的 Mac 操作。
 - 在 Bucket 内拖放、复制或移动文件夹；目标冲突可以询问、跳过或「保留两者」，已开启版本控制时还可安全替换。
-- 把对象或整个文件夹直接拖到访达。多选时会生成一个「Lumen 下载」文件夹，保留云端目录结构。
+- 把对象或整个文件夹直接拖到访达。多选时会生成一个「Ossuno 下载」文件夹，保留云端目录结构。
 - 复制后切换 Bucket 再粘贴，就能跨 Bucket 整理。同账号同地域走云端复制；其他情况会先说明清楚，再经由这台 Mac 中转。
 
 覆盖只在目标 Bucket 已开启版本控制、OSS 返回精确 `versionId` 时执行；未开启时可选择「保留两者」或跳过。移动永远先完成全部复制，再按精确 `versionId` 删除来源；只有来源和目标 Bucket 都开启版本控制、且能确认两个精确版本时才会自动删源。未开启、已暂停或无法读取版本状态时会安全取消移动，你仍可先复制并在 OSS 控制台核对后手动删除来源。
@@ -59,32 +59,32 @@ Lumen 是一个原生的 macOS OSS 客户端。它不打算把控制台搬进桌
 - 账号配置原子写入，并保留上一份可恢复副本。
 - 路径穿越、符号链接逃逸、不完整分页和目标冲突都会中止相关批量操作。
 - 诊断摘要不包含账号名、AccessKey ID、Bucket、对象键、本地路径、URL、请求 ID、Secret 或 Token。
-- 软件内更新通过 Sparkle 校验更新包；安装完成后自动退出并重新打开 Lumen。
+- 软件内更新通过 Sparkle 校验更新包；安装完成后自动退出并重新打开 Ossuno。
 
 ## 安装
 
-1. [下载 Lumen 1.0.3](https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.3.dmg)。
-2. 打开 DMG，把 Lumen 拖进「应用程序」。
+1. [下载 Ossuno 1.0.0](https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg)。
+2. 打开 DMG，把 Ossuno 拖进「应用程序」。
 3. 添加权限最小化的 RAM 子账号，选择地域，然后打开 Bucket。
 
-安装包目前是 ad-hoc 签名，首次打开若被 macOS 拦下，右键 Lumen 选择「打开」即可。
+安装包目前是 ad-hoc 签名，首次打开若被 macOS 拦下，右键 Ossuno 选择「打开」即可。
 
-装好带自动更新功能的版本后，可以在「Lumen → 检查更新…」直接升级，也可以在设置里开启自动检查。
+装好带自动更新功能的版本后，可以在「Ossuno → 检查更新…」直接升级，也可以在设置里开启自动检查。
 
 ### RAM 权限提示
 
-Lumen 1.0.3 在复制、移动、覆盖和撤销前会读取 Bucket 版本控制状态与对象 ACL，并在版本控制 Bucket 中按具体版本执行复制或清理。已有的自定义 RAM 策略除了列举、读取、上传、复制和删除对象等基础动作，还需要按使用场景加入：
+Ossuno 1.0.0 在复制、移动、覆盖和撤销前会读取 Bucket 版本控制状态与对象 ACL，并在版本控制 Bucket 中按具体版本执行复制或清理。已有的自定义 RAM 策略除了列举、读取、上传、复制和删除对象等基础动作，还需要按使用场景加入：
 
-- `oss:GetBucketVersioning`：确认 Bucket 是否能安全执行禁止覆盖、替换或删除；查询失败时 Lumen 会安全取消相关操作。
+- `oss:GetBucketVersioning`：确认 Bucket 是否能安全执行禁止覆盖、替换或删除；查询失败时 Ossuno 会安全取消相关操作。
 - `oss:GetObjectAcl`：复制或移动时读取并保留对象 ACL。RAM 动作名以 `Acl` 结尾，不是 API 名 `GetObjectACL` 的全大写写法。
 - `oss:GetObjectVersion`：版本控制 Bucket 中复制、恢复或中转指定版本时读取源版本。
 - `oss:DeleteObjectVersion`：撤销删除、清理精确版本或回滚已提交版本时使用。
 - `oss:GetObjectTagging` 与 `oss:PutObjectTagging`：复制时保留对象标签。
 
-若对象使用 SSE-KMS，还需要对应 KMS 密钥的 `kms:Decrypt` 与 `kms:GenerateDataKey` 权限。缺少安全检查所需的读取权限时，Lumen 不会静默降级为可能覆盖或误删数据的操作。
+若对象使用 SSE-KMS，还需要对应 KMS 密钥的 `kms:Decrypt` 与 `kms:GenerateDataKey` 权限。缺少安全检查所需的读取权限时，Ossuno 不会静默降级为可能覆盖或误删数据的操作。
 
 <p align="center">
-  <img src="docs/account.png" width="520" alt="在 Lumen 中添加 OSS 账号">
+  <img src="docs/account.png" width="520" alt="在 Ossuno 中添加 OSS 账号">
 </p>
 
 账号支持 STS Token、传输加速、自定义 Endpoint、CDN 域名和上传路径模板。模板支持 `{yyyy}`、`{MM}`、`{dd}`、`{HH}`、`{mm}`、`{ss}`、`{name}`、`{ext}` 与 `{filename}`。
@@ -105,50 +105,50 @@ Lumen 1.0.3 在复制、移动、覆盖和撤销前会读取 Bucket 版本控制
 
 ## 范围
 
-Lumen 专注对象浏览和传输，不创建 Bucket，也不管理 RAM、生命周期、CORS、跨区域复制策略或未完成分片等控制台资源。OSS 的「文件夹」是对象前缀；空文件夹通过占位对象表示。
+Ossuno 专注对象浏览和传输，不创建 Bucket，也不管理 RAM、生命周期、CORS、跨区域复制策略或未完成分片等控制台资源。OSS 的「文件夹」是对象前缀；空文件夹通过占位对象表示。
 
 单次聚合最多读取 30 页，通常约 3 万个对象。到边界时界面会明确标记结果不完整，并阻止可能遗漏对象的文件夹级危险操作。删除能不能恢复，取决于 Bucket 有没有开启版本控制。
 
 ## 从源码运行
 
 ```bash
-git clone git@github.com:ihopefulChina/Lumen.git
-cd Lumen
-open Lumen.xcodeproj
+git clone git@github.com:ihopefulChina/Ossuno.git
+cd Ossuno
+open Ossuno.xcodeproj
 ```
 
 也可以用命令行：
 
 ```bash
-xcodebuild -project Lumen.xcodeproj \
-  -scheme Lumen \
+xcodebuild -project Ossuno.xcodeproj \
+  -scheme Ossuno \
   -destination 'platform=macOS,arch=arm64' \
   -configuration Debug build
 ```
 
 项目使用 Swift 6、SwiftUI、AppKit、Swift Testing 和固定版本的 Sparkle，没有其他运行时依赖。
 
-## 让 AI 直接操作 OSS（lumen-mcp）
+## 让 AI 直接操作 OSS（ossuno-mcp）
 
-仓库内置一个独立的 MCP 服务器 `lumen-mcp`，配置到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接：
+仓库内置一个独立的 MCP 服务器 `ossuno-mcp`，配置到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端后，AI 就能用自然语言浏览 Bucket、上传下载文件、生成临时下载链接：
 
-> 把桌面上的 hero.png 上传到 lumen-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接。
+> 把桌面上的 hero.png 上传到 ossuno-assets 的 assets/2026/ 目录，再给我一个 24 小时有效的链接。
 
-服务器提供 5 个工具和 2 个提示词（OSS 专家模式、批量上传工作流），握手时自带 Agent 使用说明。凭证保存在 macOS 钥匙串，与 Lumen App 账号相互独立。快速开始（需 Node ≥ 18）：
+服务器提供 5 个工具和 2 个提示词（OSS 专家模式、批量上传工作流），握手时自带 Agent 使用说明。凭证保存在 macOS 钥匙串，与 Ossuno App 账号相互独立。npm 1.0.0 包尚未发布；发布后的快速开始命令如下（需 Node ≥ 18）：
 
 ```bash
-npx lumen-mcp auth     # 配置 OSS 凭证（钥匙串）
-npx lumen-mcp install  # 一键注册到本机已安装的 AI 客户端
+npx ossuno-mcp auth     # 配置 OSS 凭证（钥匙串）
+npx ossuno-mcp install  # 一键注册到本机已安装的 AI 客户端
 ```
 
-已发布到 npm（`lumen-mcp`，内置 macOS arm64/x64 预编译二进制）；也可从源码构建，详见 [docs/mcp.md](docs/mcp.md) 与[网站上的 AI · MCP 页面](https://ihopefulchina.github.io/Lumen/mcp.html)。
+`ossuno-mcp` 计划随 1.0.0 发布到 npm，并提供 macOS arm64/x64 预编译二进制。正式发布前请从源码构建；详见 [docs/mcp.md](docs/mcp.md) 与[网站上的 AI · MCP 页面](https://ihopefulchina.github.io/Ossuno/mcp.html)。
 
 ## 参与与支持
 
-问题和建议请提交到 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues/new/choose)。提交前可以从「帮助 → 复制诊断信息」拿到脱敏摘要；截图请使用虚拟数据或遮盖标识。安全问题请走 [Security Policy](SECURITY.md) 里的私密入口。
+问题和建议请提交到 [GitHub Issues](https://github.com/ihopefulChina/Ossuno/issues/new/choose)。提交前可以从「帮助 → 复制诊断信息」拿到脱敏摘要；截图请使用虚拟数据或遮盖标识。安全问题请走 [Security Policy](SECURITY.md) 里的私密入口。
 
-更多说明见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/)、[支持页面](https://ihopefulchina.github.io/Lumen/support.html) 和 [隐私说明](https://ihopefulchina.github.io/Lumen/privacy.html)。
+更多说明见 [Ossuno 官网](https://ihopefulchina.github.io/Ossuno/)、[支持页面](https://ihopefulchina.github.io/Ossuno/support.html) 和 [隐私说明](https://ihopefulchina.github.io/Ossuno/privacy.html)。
 
 ## License
 
-Lumen 采用 [MIT License](LICENSE) 开源。
+Ossuno 采用 [MIT License](LICENSE) 开源。

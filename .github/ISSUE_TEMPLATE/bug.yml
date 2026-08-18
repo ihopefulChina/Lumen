@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        感谢反馈。请勿粘贴 AccessKey、STS Token、签名 URL、Bucket 名、对象键、本地路径或请求 ID。可在 Lumen 的“帮助”菜单复制已脱敏诊断信息。
+        感谢反馈。请勿粘贴 AccessKey、STS Token、签名 URL、Bucket 名、对象键、本地路径或请求 ID。可在 Ossuno 的“帮助”菜单复制已脱敏诊断信息。
   - type: textarea
     id: summary
     attributes:

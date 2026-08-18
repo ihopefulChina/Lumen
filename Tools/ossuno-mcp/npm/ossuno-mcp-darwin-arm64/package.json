@@ -1,0 +1,16 @@
+{
+  "name": "ossuno-mcp-darwin-arm64",
+  "version": "1.0.0",
+  "description": "ossuno-mcp 的 macOS arm64 预编译二进制（由 ossuno-mcp 主包按平台自动安装）",
+  "license": "MIT",
+  "os": [
+    "darwin"
+  ],
+  "cpu": [
+    "arm64"
+  ],
+  "files": [
+    "bin/",
+    "README.md"
+  ]
+}

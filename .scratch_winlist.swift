@@ -9,7 +9,7 @@ guard let list = CGWindowListCopyWindowInfo(opts, kCGNullWindowID) as? [[String:
 }
 for w in list {
     let owner = w["kCGWindowOwnerName"] as? String ?? "?"
-    if owner == "Lumen" {
+    if owner == "Ossuno" {
         let num = w["kCGWindowNumber"] as? Int ?? -1
         let bounds = w["kCGWindowBounds"] as? [String: Any] ?? [:]
         let name = w["kCGWindowName"] as? String ?? ""

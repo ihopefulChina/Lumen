@@ -35,13 +35,13 @@
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>NSUserNotificationsUsageDescription</key>
-	<string>Lumen 在上传或下载完成时发送通知。</string>
+	<string>Ossuno 在上传或下载完成时发送通知。</string>
 	<key>NSSupportsSuddenTermination</key>
 	<true/>
 	<key>SUFeedURL</key>
-	<string>https://ihopefulchina.github.io/Lumen/appcast.xml</string>
+	<string>https://ihopefulchina.github.io/Ossuno/appcast.xml</string>
 	<key>SUPublicEDKey</key>
-	<string>t3G3muUZZk8E7GyTMKNQq5J3ggoNFSNndT+qCMXV26E=</string>
+	<string>wfB4SSBK7hTIJD6UydEYMtr5z922ovwPUBZWOxjAXro=</string>
 	<key>SUVerifyUpdateBeforeExtraction</key>
 	<true/>
 </dict>

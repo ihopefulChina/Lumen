@@ -2,11 +2,11 @@
 
 ## Supported versions
 
-安全修复只进入当前最新版本。请先升级到 [Releases](https://github.com/ihopefulChina/Lumen/releases/latest) 中的最新版，再验证问题是否仍然存在。
+安全修复只进入当前最新版本。请先升级到 [Releases](https://github.com/ihopefulChina/Ossuno/releases/latest) 中的最新版，再验证问题是否仍然存在。
 
 ## Privately report a vulnerability
 
-请通过 GitHub 的 [Private vulnerability reporting](https://github.com/ihopefulChina/Lumen/security/advisories/new) 提交尚未公开的安全问题，不要创建公开 Issue。
+请通过 GitHub 的 [Private vulnerability reporting](https://github.com/ihopefulChina/Ossuno/security/advisories/new) 提交尚未公开的安全问题，不要创建公开 Issue。
 
 报告中请说明：
 
@@ -19,4 +19,4 @@
 
 ## Product security boundaries
 
-Lumen 将 Secret 与 Token 保存在 macOS 钥匙串；本地账号偏好和传输历史不应包含凭证。应用内“复制诊断信息”生成的摘要经过字段白名单过滤。若发现这些边界被破坏，请按安全漏洞私密报告。
+Ossuno 将 Secret 与 Token 保存在 macOS 钥匙串；本地账号偏好和传输历史不应包含凭证。应用内“复制诊断信息”生成的摘要经过字段白名单过滤。若发现这些边界被破坏，请按安全漏洞私密报告。

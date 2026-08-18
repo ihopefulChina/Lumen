@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: 使用帮助
-    url: https://ihopefulchina.github.io/Lumen/support.html
+    url: https://ihopefulchina.github.io/Ossuno/support.html
     about: 先查看安装、连接、传输、恢复和更新说明。
   - name: 私密安全报告
-    url: https://github.com/ihopefulChina/Lumen/security/advisories/new
+    url: https://github.com/ihopefulChina/Ossuno/security/advisories/new
     about: 不要公开披露尚未修复的安全问题。

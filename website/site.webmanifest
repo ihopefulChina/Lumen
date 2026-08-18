@@ -1,6 +1,6 @@
 {
-  "name": "Lumen",
-  "short_name": "Lumen",
+  "name": "Ossuno",
+  "short_name": "Ossuno",
   "description": "用访达的方式打开阿里云 OSS。",
   "start_url": "./",
   "display": "standalone",
@@ -8,7 +8,7 @@
   "theme_color": "#f4f6f9",
   "icons": [
     {
-      "src": "assets/lumen-icon.png",
+      "src": "assets/ossuno-icon.png",
       "sizes": "512x512",
       "type": "image/png"
     }

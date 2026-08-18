@@ -3,7 +3,7 @@
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-project_file="$repo_root/Lumen.xcodeproj/project.pbxproj"
+project_file="$repo_root/Ossuno.xcodeproj/project.pbxproj"
 
 read_setting() {
     setting=$1

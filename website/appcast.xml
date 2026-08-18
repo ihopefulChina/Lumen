@@ -1,129 +1,46 @@
-<?xml version="1.0" standalone="yes"?>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
-        <title>Lumen</title>
-        <item>
-            <title>1.0.2</title>
-            <pubDate>Sun, 16 Aug 2026 17:13:06 +0800</pubDate>
-            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v1.0.2</link>
-            <sparkle:version>13</sparkle:version>
-            <sparkle:shortVersionString>1.0.2</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Lumen 1.0.2
-
-这是一个小修复版本，重点让「传输完成时显示通知」真的生效。
-
-## 修复
-
-- 设置里「全部完成时显示通知」的开关现在会和系统通知权限保持一致。
-  - 之前如果用户拒绝过系统的通知授权，开关仍可能显示「开」，但通知其实发不出来。
-  - 启动时会自动对齐状态；如果系统权限被拒，开关会自动回到「关」。
-  - 每次在设置里重新打开开关都会再尝试请求一次授权。
-- 前台运行时完成传输，通知横幅会正常弹出并可以带声音（之前会被折叠到通知中心）。
-- 通知投递失败会写入 `NSLog`，方便后续诊断。
-
-## 系统要求
-
-- macOS 15 或更高版本
-- Apple Silicon Mac
-
-> 目前安装包使用 ad-hoc 签名（暂未配置开发者证书）。首次打开如果被 macOS 拦下，在访达中右键 Lumen 选择「打开」即可；以后不会再提示。
-
-完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
-]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v1.0.2/Lumen-1.0.2.dmg" length="4578939" type="application/octet-stream" sparkle:edSignature="CEmQZwlLqnz0OgGZVR86CQXTwk5x/Hyc5w3tWZtneYR1SjEXhtn2gzitBypPPmCq/RT0AVv9iKFZ+LK/ely7AA=="/>
-        </item>
-        <item>
-            <title>1.0.1</title>
-            <pubDate>Sun, 16 Aug 2026 16:54:54 +0800</pubDate>
-            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v1.0.1</link>
-            <sparkle:version>12</sparkle:version>
-            <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Lumen 1.0.1
-
-这是一个修复版本。1.0.0 的软件更新源配置有误，导致「检查更新」始终失败。这一版把更新源迁移到 GitHub Pages，并同步了发版流程。
-
-## 修复
-
-- 软件更新源从 GitHub Release 资产切换到 GitHub Pages（`https://ihopefulchina.github.io/Lumen/appcast.xml`），解决更新检查 404 的问题。
-- 发版脚本 `package-dmg.sh` 现在会自动把生成的 `appcast.xml` 同步到 `website/` 目录，确保 GitHub Pages 上的更新源始终最新。
-- GitHub Pages 部署工作流在 `appcast.xml` 变更时自动重新部署。
-- 网站验证脚本增加了对 `website/appcast.xml` 的存在性检查。
-
-## 系统要求
-
-- macOS 15 或更高版本
-- Apple Silicon Mac
-
-> 目前安装包使用 ad-hoc 签名（暂未配置开发者证书）。首次打开如果被 macOS 拦下，在访达中右键 Lumen 选择「打开」即可；以后不会再提示。
-
-完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
-]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v1.0.1/Lumen-1.0.1.dmg" length="4580027" type="application/octet-stream" sparkle:edSignature="/Emp+8BkPUb5Kc0WjUefPh9/gjTzQLRC+MIOfkzm1eSEIQB3qcqqLz8mIUQKnuBrKbZO+wo9B+a+OAAZ8ZexCA=="/>
-        </item>
+        <title>Ossuno</title>
+        <link>https://ihopefulchina.github.io/Ossuno/</link>
+        <description>Ossuno 官方更新源。</description>
+        <language>zh-CN</language>
         <item>
             <title>1.0.0</title>
-            <pubDate>Sun, 16 Aug 2026 16:10:55 +0800</pubDate>
-            <link>https://github.com/ihopefulChina/Lumen/releases/tag/v1.0.0</link>
-            <sparkle:version>11</sparkle:version>
+            <pubDate>Tue, 18 Aug 2026 12:18:27 +0800</pubDate>
+            <link>https://github.com/ihopefulChina/Ossuno/releases/tag/v1.0.0</link>
+            <sparkle:version>1</sparkle:version>
             <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <description sparkle:format="markdown"><![CDATA[# Lumen 1.0.0
+            <description sparkle:format="markdown"><![CDATA[# Ossuno 1.0.0
 
-这是第一个正式版本。相比 0.0.9，这一版把浏览和整理的手感打磨了一遍，也修掉了一批会影响日常使用的稳定问题。
+Ossuno 的首个正式版本：一个面向阿里云 OSS 的原生 macOS 客户端，并附带可独立使用的 `ossuno-mcp`。
 
-## 浏览和选择
+## 主要能力
 
-- 网格和列表共用同一套点击逻辑：按下即选中，支持 Command 多选、Shift 连选，双击打开文件夹或快速查看文件，点空白处取消选择。
-- 列表模式下点名称列终于能选中了；双击任意一列都可以打开项目。
-- 修掉了列表模式里连续进入几层文件夹、再点后退时卡住或崩溃的问题（表格行更新时环境丢失导致的崩溃）。
-- 编辑文本时按 Command–V 现在会正常粘贴文本，不会误触发云端粘贴；对话框打开时也不再抢 Esc、回车、空格和方向键。
+- 浏览任意类型的 OSS 对象，支持文件夹、全 Bucket 搜索、排序、筛选、路径导航与空格快速查看。
+- 上传、下载、复制、移动、重命名和拖放均保留对象属性；大文件支持分片上传、断点续传与 CRC64 校验。
+- 对象属性可编辑 Content-Type、缓存策略、下载文件名、自定义元数据、ACL 与 OSS 标签。
+- Bucket 开启版本控制时，可撤销刚完成的删除、移动和重命名。
+- `ossuno-mcp` 提供 Bucket 浏览、上传、下载与临时签名链接，可一键注册到常见 MCP 客户端。
 
-## 传输
+## 安全与可靠性
 
-- 失败的上传会中止未完成的 multipart 上传，失败的下载会清理临时文件，不再在 OSS 和本地留下残留。
-- 暂停最后一个任务不再误报「全部完成」；取消排在队列里的任务也会正确结束。
-- 分片检查点改为按节拍写入，大文件传输时不再频繁整本重写日志。
-- 传输记录损坏或重复时也能正常恢复，不会崩溃。
-- 一批文件里有重名时，「覆盖」策略会改名而不是互相覆盖。
-- 拖到访达的导出遵守下载限速；清理旧导出缓存时单个损坏目录不会阻断新导出。
-- 下载到外置磁盘不再因为跨卷移动失败；已经下载完但没来得及清检查点的任务，续传时直接视为完成。
-- multipart 续传在服务端 uploadId 过期时会自动重新开始，而不是报错。
-
-## 整理和删除
-
-- 重命名或移动在「复制成功、删源失败」时，会刷新列表并明确提示，不再假装操作完全失败。
-- 拖拽移动时，已经在目标位置的项目会被跳过，不再拖累整批操作。
-- 删除确认框里的数量与实际删除范围一致。
-- 跨账号整理时，源 Bucket 从来源账号解析，不会再误用目标账号的同名 Bucket。
-- 剪贴板里只有图片时也可以「粘贴上传」；临时文件写失败不再留下悬空文件。
-
-## 其它
-
-- 首次传输后系统一直无法快速退出的问题（sudden termination 引用计数泄漏）。
-- 对象属性保存一半失败时，界面会如实反映已经写进去的部分。
-- Bucket 搜索的「停止」会真正取消请求；「最近 N 天」筛选不再命中过期缓存。
-- 重命名文件夹 `a` 不再误改 `ab/` 下的常用位置；只选中一个文件夹时按空格等于双击打开。
-- 小于 1 KB 的文件不再显示成「0 KB」；补全 heics、dib、cur、j2k 等内容类型。
-- 上传路径模板的 `{name}` / `{ext}` 按文件名计算，文件夹上传时不再把子路径拼进模板。
-- 自定义 Endpoint（路径式）会把 Bucket 放进 URL 路径；处理后的图片下载不再误报 CRC 校验失败。
-- 响应头大小写冲突、重复键等边界情况不再导致崩溃。
-- 设置里的并发数、外观等修复：Release 构建不再要求开发者团队（默认 ad-hoc 签名，发版流程使用自己的签名覆盖）。
+- 覆盖、移动和撤销会绑定精确的 ETag、大小与 `versionId`；对象在操作期间发生变化时安全取消，不覆盖或移动并发写入的新对象。
+- 云端移动先完成并验证复制，再按精确版本删除来源；无法确认提交结果时保留对象并提示人工检查。
+- 本地下载使用受控临时文件并原子发布，拒绝符号链接逃逸和静默覆盖。
+- MCP 默认拒绝覆盖远端同名对象，并把本地文件访问限制在明确允许的目录中；凭证只保存在 macOS 钥匙串。
+- 诊断信息经过字段白名单过滤，不包含 AccessKey、Secret、Token、Bucket、对象 Key 或本地路径。
 
 ## 系统要求
 
-- macOS 15 或更高版本
 - Apple Silicon Mac
+- macOS 15 或更高版本
 
-> 目前安装包使用 ad-hoc 签名（暂未配置开发者证书）。首次打开如果被 macOS 拦下，在访达中右键 Lumen 选择「打开」即可；以后不会再提示。
-
-完整说明与支持入口见 [Lumen 官网](https://ihopefulchina.github.io/Lumen/) 和 [GitHub Issues](https://github.com/ihopefulChina/Lumen/issues)。
+当前安装包采用 ad-hoc 签名。若 macOS 首次阻止打开，请在访达中右键 Ossuno，选择“打开”。
 ]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Lumen/releases/download/v1.0.0/Lumen-1.0.0.dmg" length="4579627" type="application/octet-stream" sparkle:edSignature="9Xxtn89fdhtYWLNqc4dKChjBhvghKlJRhklS0918AEjrRDP/y5WQjlyvYOkJKDYdPwxVecw6Ri0dU2EWR3ZNAA=="/>
+            <enclosure url="https://github.com/ihopefulChina/Ossuno/releases/download/v1.0.0/Ossuno-1.0.0.dmg" length="4830614" type="application/octet-stream" sparkle:edSignature="ri6SblQ4d8rjPeSyLLdxy1OTHxl5Xwep04NS84jjbRk/nUnYoTALlmv+01/tfnuMu+g+oqsrhY3y67okpBNrAg=="/>
         </item>
     </channel>
 </rss>

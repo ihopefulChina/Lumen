@@ -2,7 +2,7 @@ import AppKit
 import Vision
 import Foundation
 
-let path = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "/tmp/lumen_user_window.png"
+let path = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "/tmp/ossuno_user_window.png"
 guard let image = NSImage(contentsOfFile: path),
       let tiff = image.tiffRepresentation,
       let cg = NSBitmapImageRep(data: tiff)?.cgImage else {

@@ -1,7 +1,7 @@
 import AppKit
 
 // Scan for red-ish pixels (system red border) in the bottom band of a screenshot.
-let path = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "/tmp/lumen_border.png"
+let path = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "/tmp/ossuno_border.png"
 guard let image = NSImage(contentsOfFile: path),
       let tiff = image.tiffRepresentation,
       let rep = NSBitmapImageRep(data: tiff) else { print("no image"); exit(1) }

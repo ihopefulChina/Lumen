@@ -11,7 +11,7 @@ support="$site_root/support.html"
 mcp="$site_root/mcp.html"
 version_info="$("$repo_root/scripts/project-version.sh")"
 version="${version_info%% *}"
-download_url="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-$version.dmg"
+download_url="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-$version.dmg"
 
 required_files=(
   "$index"
@@ -24,8 +24,8 @@ required_files=(
   "$site_root/robots.txt"
   "$site_root/.nojekyll"
   "$site_root/appcast.xml"
-  "$site_root/assets/lumen-icon.png"
-  "$site_root/assets/lumen-favicon.png"
+  "$site_root/assets/ossuno-icon.png"
+  "$site_root/assets/ossuno-favicon.png"
   "$site_root/assets/browser.png"
   "$site_root/assets/browser-dark.png"
   "$site_root/assets/account.png"
@@ -39,10 +39,17 @@ for file in "${required_files[@]}"; do
   fi
 done
 
+xmllint --noout "$site_root/appcast.xml" "$site_root/sitemap.xml"
+python3 -m json.tool "$site_root/site.webmanifest" >/dev/null
+if ! cmp -s "$repo_root/appcast.xml" "$site_root/appcast.xml"; then
+  echo "Root and website appcasts differ." >&2
+  exit 1
+fi
+
 required_html=(
   'lang="zh-CN"'
   '<meta name="description"'
-  '<link rel="canonical" href="https://ihopefulchina.github.io/Lumen/"'
+  '<link rel="canonical" href="https://ihopefulchina.github.io/Ossuno/"'
   '<meta property="og:title"'
   '<link rel="manifest" href="site.webmanifest"'
   '<a class="skip-link" href="#main">'
@@ -53,8 +60,8 @@ required_html=(
   'id="start"'
   'id="faq"'
   '<details>'
-  'alt="在 Lumen 中浏览阿里云 OSS"'
-  'alt="在 Lumen 中添加阿里云 OSS 账号"'
+  'alt="在 Ossuno 中浏览阿里云 OSS"'
+  'alt="在 Ossuno 中添加阿里云 OSS 账号"'
   "$download_url"
   'href="privacy.html"'
   'href="support.html"'
@@ -71,9 +78,9 @@ for pattern in "${required_html[@]}"; do
 done
 
 for page_and_canonical in \
-  "$privacy|https://ihopefulchina.github.io/Lumen/privacy.html" \
-  "$support|https://ihopefulchina.github.io/Lumen/support.html" \
-  "$mcp|https://ihopefulchina.github.io/Lumen/mcp.html"; do
+  "$privacy|https://ihopefulchina.github.io/Ossuno/privacy.html" \
+  "$support|https://ihopefulchina.github.io/Ossuno/support.html" \
+  "$mcp|https://ihopefulchina.github.io/Ossuno/mcp.html"; do
   page="${page_and_canonical%%|*}"
   canonical="${page_and_canonical#*|}"
   for pattern in \
@@ -90,8 +97,16 @@ for page_and_canonical in \
   done
 done
 
-if grep -RFn --include='*.html' -- '0.0.8' "$site_root"; then
-  echo "Website still contains the previous version." >&2
+previous_brand="$(printf '\154\165\155\145\156')"
+if grep -RIni --include='*.html' -- "$previous_brand" "$site_root"; then
+  echo "Website still contains the previous brand." >&2
+  exit 1
+fi
+
+unexpected_versions="$(grep -RhoE --include='*.html' 'Ossuno [0-9]+\.[0-9]+\.[0-9]+' "$site_root" | grep -Fvx -- "Ossuno $version" || true)"
+if [[ -n "$unexpected_versions" ]]; then
+  echo "Website contains mismatched release versions:" >&2
+  echo "$unexpected_versions" >&2
   exit 1
 fi
 
@@ -100,7 +115,7 @@ if ! grep -Fq -- "$download_url" "$readme"; then
   exit 1
 fi
 
-unexpected_downloads="$(grep -RhoE --include='*.html' 'https://github\.com/ihopefulChina/Lumen/releases/latest/download/Lumen-[0-9.]+\.dmg' "$site_root" | grep -Fvx -- "$download_url" || true)"
+unexpected_downloads="$(grep -RhoE --include='*.html' 'https://github\.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-[0-9.]+\.dmg' "$site_root" | grep -Fvx -- "$download_url" || true)"
 if [[ -n "$unexpected_downloads" ]]; then
   echo "Website contains mismatched download URLs:" >&2
   echo "$unexpected_downloads" >&2

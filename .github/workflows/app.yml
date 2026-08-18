@@ -30,27 +30,31 @@ jobs:
       - name: Resolve pinned packages
         run: |
           xcodebuild -resolvePackageDependencies \
-            -project Lumen.xcodeproj \
-            -scheme Lumen \
+            -project Ossuno.xcodeproj \
+            -scheme Ossuno \
             -onlyUsePackageVersionsFromResolvedFile \
             -skipPackageUpdates
-          git diff --exit-code -- Lumen.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
+          git diff --exit-code -- Ossuno.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved
 
       - name: Run tests
         run: |
           xcodebuild \
-            -project Lumen.xcodeproj \
-            -scheme Lumen \
+            -project Ossuno.xcodeproj \
+            -scheme Ossuno \
             -destination 'platform=macOS,arch=arm64' \
             -onlyUsePackageVersionsFromResolvedFile \
             -skipPackageUpdates \
             test
 
+      - name: Run ossuno-mcp tests
+        working-directory: Tools/ossuno-mcp
+        run: swift test --disable-sandbox -Xswiftc -warnings-as-errors
+
       - name: Build Release
         run: |
           xcodebuild \
-            -project Lumen.xcodeproj \
-            -scheme Lumen \
+            -project Ossuno.xcodeproj \
+            -scheme Ossuno \
             -configuration Release \
             -destination 'platform=macOS,arch=arm64' \
             -onlyUsePackageVersionsFromResolvedFile \
@@ -61,8 +65,8 @@ jobs:
       - name: Analyze
         run: |
           xcodebuild \
-            -project Lumen.xcodeproj \
-            -scheme Lumen \
+            -project Ossuno.xcodeproj \
+            -scheme Ossuno \
             -configuration Debug \
             -destination 'platform=macOS,arch=arm64' \
             -onlyUsePackageVersionsFromResolvedFile \
@@ -75,5 +79,5 @@ jobs:
           scripts/validate-website.sh
           bash -n scripts/*.sh
           zsh -n scripts/*.sh
-          plutil -lint Info.plist Lumen/PrivacyInfo.xcprivacy
+          plutil -lint Info.plist Ossuno/PrivacyInfo.xcprivacy
           ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].each { |file| YAML.load_file(file, aliases: true) }'

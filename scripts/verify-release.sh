@@ -10,10 +10,10 @@ dmg_path="${1:A}"
 expected_version="$2"
 expected_build="$3"
 appcast_path="${4:A}"
-expected_team="${LUMEN_DEVELOPMENT_TEAM:-}"
-sign_update="${LUMEN_SPARKLE_SIGN_UPDATE:-}"
-sparkle_key_file="${LUMEN_SPARKLE_KEY_FILE:-}"
-adhoc="${LUMEN_ADHOC:-0}"
+expected_team="${OSSUNO_DEVELOPMENT_TEAM:-}"
+sign_update="${OSSUNO_SPARKLE_SIGN_UPDATE:-}"
+sparkle_key_file="${OSSUNO_SPARKLE_KEY_FILE:-}"
+adhoc="${OSSUNO_ADHOC:-0}"
 
 fail() {
     print -u2 "Release verification failed: $1"
@@ -23,19 +23,19 @@ fail() {
 [[ -f "$dmg_path" ]] || fail "DMG does not exist"
 [[ -f "$appcast_path" ]] || fail "appcast does not exist"
 if [[ "$adhoc" != "1" ]]; then
-    [[ -n "$expected_team" ]] || fail "LUMEN_DEVELOPMENT_TEAM is required"
+    [[ -n "$expected_team" ]] || fail "OSSUNO_DEVELOPMENT_TEAM is required"
 fi
-[[ -x "$sign_update" ]] || fail "LUMEN_SPARKLE_SIGN_UPDATE must point to sign_update"
-[[ -f "$sparkle_key_file" ]] || fail "LUMEN_SPARKLE_KEY_FILE is required"
+[[ -x "$sign_update" ]] || fail "OSSUNO_SPARKLE_SIGN_UPDATE must point to sign_update"
+[[ -f "$sparkle_key_file" ]] || fail "OSSUNO_SPARKLE_KEY_FILE is required"
 
-stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/lumen-verify-release.XXXXXX")"
+stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/ossuno-verify-release.XXXXXX")"
 mount_dir="$stage_dir/mount"
 mounted=0
 cleanup() {
     if [[ "$mounted" == "1" ]]; then
         hdiutil detach "$mount_dir" -quiet || true
     fi
-    if [[ "$stage_dir" == "${TMPDIR:-/tmp}"/lumen-verify-release.* ]]; then
+    if [[ "$stage_dir" == "${TMPDIR:-/tmp}"/ossuno-verify-release.* ]]; then
         rm -rf "$stage_dir"
     fi
 }
@@ -54,8 +54,8 @@ fi
 mkdir -p "$mount_dir"
 hdiutil attach "$dmg_path" -readonly -nobrowse -mountpoint "$mount_dir" >/dev/null
 mounted=1
-app_path="$mount_dir/Lumen.app"
-[[ -d "$app_path" ]] || fail "mounted DMG does not contain Lumen.app"
+app_path="$mount_dir/Ossuno.app"
+[[ -d "$app_path" ]] || fail "mounted DMG does not contain Ossuno.app"
 
 actual_version="$(plutil -extract CFBundleShortVersionString raw "$app_path/Contents/Info.plist")"
 actual_build="$(plutil -extract CFBundleVersion raw "$app_path/Contents/Info.plist")"
@@ -77,7 +77,7 @@ else
     print -r -- "$signature_details" | grep -Eq '^Authority=Developer ID Application:' \
         || fail "Developer ID Application authority is missing"
     print -r -- "$signature_details" | grep -Fq "TeamIdentifier=$expected_team" \
-        || fail "TeamIdentifier does not match LUMEN_DEVELOPMENT_TEAM"
+        || fail "TeamIdentifier does not match OSSUNO_DEVELOPMENT_TEAM"
     print -r -- "$signature_details" | grep -Eq '^flags=.*runtime' \
         || fail "Hardened Runtime flag is missing"
     print -r -- "$signature_details" | grep -Eq '^Timestamp=.+' \
@@ -96,4 +96,4 @@ short_version="$(xmllint --xpath "string(//*[local-name()='item' and *[local-nam
 [[ "$declared_length" == "$(stat -f %z "$dmg_path")" ]] || fail "appcast file length does not match DMG"
 "$sign_update" --verify --ed-key-file "$sparkle_key_file" "$dmg_path" "$signature"
 
-print "Release verification passed for Lumen $expected_version ($expected_build)."
+print "Release verification passed for Ossuno $expected_version ($expected_build)."

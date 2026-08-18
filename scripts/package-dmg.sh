@@ -7,12 +7,13 @@ mode="${1:-}"
 version_info="$("$repo_dir/scripts/project-version.sh")"
 version="${version_info%% *}"
 build_number="${version_info##* }"
-sparkle_account="studio.lumen.oss"
+sparkle_account="studio.ossuno.oss"
 version_slug="${version//./}"
 derived_dir="$repo_dir/.build/release-v$version_slug-$mode"
-app_path="$derived_dir/Build/Products/Release/Lumen.app"
+app_path="$derived_dir/Build/Products/Release/Ossuno.app"
 dist_dir="$repo_dir/dist"
 tracked_appcast_path="$repo_dir/appcast.xml"
+release_notes_path="$repo_dir/docs/releases/$version.md"
 
 usage() {
     print -u2 "Usage: scripts/package-dmg.sh <development|adhoc|release>"
@@ -25,38 +26,39 @@ fail() {
 }
 
 [[ "$mode" == "development" || "$mode" == "adhoc" || "$mode" == "release" ]] || usage
+[[ -f "$release_notes_path" ]] || fail "missing release notes: $release_notes_path"
 
 if [[ "$mode" == "development" ]]; then
-    artifact_name="Lumen-$version-development.dmg"
+    artifact_name="Ossuno-$version-development.dmg"
 else
-    artifact_name="Lumen-$version.dmg"
+    artifact_name="Ossuno-$version.dmg"
 fi
 output_path="$dist_dir/$artifact_name"
 [[ ! -e "$output_path" ]] || fail "refusing to overwrite $output_path"
 
-developer_identity="${LUMEN_DEVELOPER_ID_APPLICATION:-}"
-development_team="${LUMEN_DEVELOPMENT_TEAM:-}"
-notary_profile="${LUMEN_NOTARY_PROFILE:-}"
+developer_identity="${OSSUNO_DEVELOPER_ID_APPLICATION:-}"
+development_team="${OSSUNO_DEVELOPMENT_TEAM:-}"
+notary_profile="${OSSUNO_NOTARY_PROFILE:-}"
 
 # Release requirements are checked before the build or any tracked file changes.
 # Ad-hoc mode skips them on purpose: no Developer ID certificate is required,
 # the app is signed ad-hoc and Gatekeeper shows a right-click-open prompt.
 if [[ "$mode" == "release" ]]; then
-    [[ -n "$developer_identity" ]] || fail "LUMEN_DEVELOPER_ID_APPLICATION is required"
-    [[ -n "$development_team" ]] || fail "LUMEN_DEVELOPMENT_TEAM is required"
-    [[ -n "$notary_profile" ]] || fail "LUMEN_NOTARY_PROFILE is required"
+    [[ -n "$developer_identity" ]] || fail "OSSUNO_DEVELOPER_ID_APPLICATION is required"
+    [[ -n "$development_team" ]] || fail "OSSUNO_DEVELOPMENT_TEAM is required"
+    [[ -n "$notary_profile" ]] || fail "OSSUNO_NOTARY_PROFILE is required"
     security find-identity -v -p codesigning | grep -Fq "\"$developer_identity\"" \
         || fail "the configured Developer ID Application identity is unavailable"
     xcrun notarytool history --keychain-profile "$notary_profile" >/dev/null \
         || fail "the configured notarization profile is unavailable"
 fi
 
-stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/lumen-v$version_slug-dmg.XXXXXX")"
+stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/ossuno-v$version_slug-dmg.XXXXXX")"
 temp_dmg="$stage_dir/$artifact_name"
 appcast_dir="$stage_dir/appcast"
 private_key_path="$stage_dir/sparkle-signing.key"
 cleanup() {
-    if [[ "$stage_dir" == "${TMPDIR:-/tmp}"/lumen-v$version_slug-dmg.* ]]; then
+    if [[ "$stage_dir" == "${TMPDIR:-/tmp}"/ossuno-v$version_slug-dmg.* ]]; then
         rm -rf "$stage_dir"
     fi
 }
@@ -83,8 +85,8 @@ else
 fi
 
 xcodebuild \
-    -project Lumen.xcodeproj \
-    -scheme Lumen \
+    -project Ossuno.xcodeproj \
+    -scheme Ossuno \
     -configuration Release \
     -destination 'platform=macOS,arch=arm64' \
     -derivedDataPath "$derived_dir" \
@@ -118,14 +120,14 @@ if plutil -extract SUEnableInstallerLauncherService raw "$app_path/Contents/Info
 fi
 
 mkdir -p "$stage_dir/volume" "$dist_dir"
-ditto "$app_path" "$stage_dir/volume/Lumen.app"
+ditto "$app_path" "$stage_dir/volume/Ossuno.app"
 ln -s /Applications "$stage_dir/volume/Applications"
 if [[ "$mode" == "development" ]]; then
     print 'LOCAL DEVELOPMENT ARTIFACT — DO NOT PUBLISH' > "$stage_dir/volume/DEVELOPMENT-ONLY.txt"
 fi
 
 hdiutil create \
-    -volname "Lumen $version" \
+    -volname "Ossuno $version" \
     -srcfolder "$stage_dir/volume" \
     -format UDZO \
     -imagekey zlib-level=9 \
@@ -161,23 +163,23 @@ signing_public_key="$("$generate_keys" --account "$sparkle_account" -p)"
 chmod 600 "$private_key_path"
 
 mkdir -p "$appcast_dir"
-ditto "$temp_dmg" "$appcast_dir/Lumen-$version.dmg"
-ditto "$repo_dir/docs/releases/v$version.md" "$appcast_dir/Lumen-$version.md"
+ditto "$temp_dmg" "$appcast_dir/Ossuno-$version.dmg"
+ditto "$release_notes_path" "$appcast_dir/Ossuno-$version.md"
 if [[ -f "$tracked_appcast_path" ]]; then
     ditto "$tracked_appcast_path" "$appcast_dir/appcast.xml"
 fi
 "$generate_appcast" \
     --ed-key-file "$private_key_path" \
-    --download-url-prefix "https://github.com/ihopefulChina/Lumen/releases/download/v$version/" \
-    --link "https://github.com/ihopefulChina/Lumen/releases/tag/v$version" \
+    --download-url-prefix "https://github.com/ihopefulChina/Ossuno/releases/download/v$version/" \
+    --link "https://github.com/ihopefulChina/Ossuno/releases/tag/v$version" \
     --embed-release-notes \
     --maximum-deltas 0 \
     "$appcast_dir"
 
-LUMEN_SPARKLE_SIGN_UPDATE="$sign_update" \
-LUMEN_SPARKLE_KEY_FILE="$private_key_path" \
-LUMEN_DEVELOPMENT_TEAM="$development_team" \
-LUMEN_ADHOC="$([[ "$mode" == "adhoc" ]] && print 1 || print 0)" \
+OSSUNO_SPARKLE_SIGN_UPDATE="$sign_update" \
+OSSUNO_SPARKLE_KEY_FILE="$private_key_path" \
+OSSUNO_DEVELOPMENT_TEAM="$development_team" \
+OSSUNO_ADHOC="$([[ "$mode" == "adhoc" ]] && print 1 || print 0)" \
     "$script_dir/verify-release.sh" "$temp_dmg" "$version" "$build_number" "$appcast_dir/appcast.xml"
 
 # Only verified, notarized artifacts may now affect release outputs or the live appcast.
@@ -195,10 +197,10 @@ print "  1. Commit + push $tracked_appcast_path and website/appcast.xml -> main"
 print "     (feeds both GitHub Pages URL and future installs)"
 print "  2. Create a GitHub Release at tag v$version and UPLOAD BOTH:"
 print "       - $artifact_name"
-print "       - appcast.xml   <-- required so OLD installs using"
+print "       - appcast.xml   <-- required so installs using"
 print "                         releases/latest/download/appcast.xml"
 print "                         can still discover updates (404 otherwise)."
 print "     gh release upload v$version $output_path $tracked_appcast_path"
 print "  3. Mark the Release as non-draft so latest/ resolves to it."
-print "  4. If the lumen-mcp (MCP server) sources changed in this release,"
-print "     also publish the npm package: cd Tools/lumen-mcp && ./npm/publish.sh <version>"
+print "  4. If the ossuno-mcp (MCP server) sources changed in this release,"
+print "     also publish the npm package: cd Tools/ossuno-mcp && ./npm/publish.sh <version>"

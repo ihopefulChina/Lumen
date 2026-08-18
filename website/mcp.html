@@ -3,27 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AI 集成（MCP）— Lumen</title>
-  <meta name="description" content="lumen-mcp 是 Lumen 内置的 MCP 服务器。两行命令注册到 Codex、Claude Desktop、Cursor、Trae 等 AI 客户端，用一句话浏览 Bucket、上传下载文件、生成临时下载链接。凭证留在 macOS 钥匙串。">
+  <title>AI 集成（MCP）— Ossuno</title>
+  <meta name="description" content="ossuno-mcp 是 Ossuno 内置的 MCP 服务器。两行命令注册到 Codex、Claude Desktop、Cursor、Trae 等 AI 客户端，用一句话浏览 Bucket、上传下载文件、生成临时下载链接。凭证留在 macOS 钥匙串。">
   <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#101013" media="(prefers-color-scheme: dark)">
-  <link rel="canonical" href="https://ihopefulchina.github.io/Lumen/mcp.html">
-  <link rel="icon" type="image/png" href="assets/lumen-favicon.png">
+  <link rel="canonical" href="https://ihopefulchina.github.io/Ossuno/mcp.html">
+  <link rel="icon" type="image/png" href="assets/ossuno-favicon.png">
   <link rel="stylesheet" href="styles.css">
 
   <meta property="og:type" content="website">
-  <meta property="og:title" content="AI 集成（MCP）— Lumen">
+  <meta property="og:title" content="AI 集成（MCP）— Ossuno">
   <meta property="og:description" content="两行命令，让 Codex、Claude、Cursor 等 AI 直接操作你的阿里云 OSS。">
-  <meta property="og:url" content="https://ihopefulchina.github.io/Lumen/mcp.html">
+  <meta property="og:url" content="https://ihopefulchina.github.io/Ossuno/mcp.html">
   <meta property="og:locale" content="zh_CN">
 </head>
 <body class="document-page">
   <a class="skip-link" href="#main">跳到主要内容</a>
   <header class="site-header">
     <div class="header-inner">
-      <a class="brand" href="index.html" aria-label="返回 Lumen 首页">
-        <img src="assets/lumen-favicon.png" width="64" height="64" alt="">
-        <span>Lumen</span>
+      <a class="brand" href="index.html" aria-label="返回 Ossuno 首页">
+        <img src="assets/ossuno-favicon.png" width="64" height="64" alt="">
+        <span>Ossuno</span>
       </a>
       <nav class="main-nav" aria-label="主导航">
         <a href="index.html">首页</a>
@@ -31,7 +31,7 @@
         <a href="support.html">支持</a>
         <a href="privacy.html">隐私</a>
       </nav>
-      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.3.dmg">下载</a>
+      <a class="header-download" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg">下载</a>
     </div>
   </header>
 
@@ -40,12 +40,13 @@
     <section class="mcp-hero" aria-labelledby="mcp-hero-title">
       <p class="document-eyebrow" data-load style="--d: 40ms">AI · MCP</p>
       <h1 id="mcp-hero-title" data-load style="--d: 140ms">两行命令，<br>AI 接管你的 OSS。</h1>
-      <p class="document-lead" data-load style="--d: 260ms"><code>lumen-mcp</code> 是 Lumen 内置的 MCP（Model Context Protocol）服务器。注册之后，对你的 AI 助手说一句话，就能浏览 Bucket、上传下载文件、生成临时下载链接。</p>
+      <p class="document-lead" data-load style="--d: 260ms"><code>ossuno-mcp</code> 是 Ossuno 内置的 MCP（Model Context Protocol）服务器。注册之后，对你的 AI 助手说一句话，就能浏览 Bucket、上传下载文件、生成临时下载链接。</p>
+      <p data-load style="--d: 320ms"><strong>npm 1.0.0 包尚未发布。</strong>以下 <code>npx</code> 命令将在正式发布后可用；现在可从源码构建。</p>
 
-      <pre class="code-block" aria-label="安装 lumen-mcp 的两条命令" data-load style="--d: 380ms"><code><span class="c-prompt">$</span> npx lumen-mcp install
+      <pre class="code-block" aria-label="npm 发布后安装 ossuno-mcp 的两条命令" data-load style="--d: 380ms"><code><span class="c-prompt">$</span> npx ossuno-mcp install
 <span class="c-cm"># 检测到 Codex · Claude Desktop · Cursor · Trae — 已注册 ✓</span>
 
-<span class="c-prompt">$</span> npx lumen-mcp auth
+<span class="c-prompt">$</span> npx ossuno-mcp auth
 <span class="c-cm"># 一次性配置 AccessKey — 只存进 macOS 钥匙串</span></code></pre>
 
       <p class="mcp-hero-meta" data-load style="--d: 480ms">
@@ -59,8 +60,8 @@
     <section class="section on-dark" id="how" aria-labelledby="how-title">
       <div class="inner">
         <p class="kicker" data-reveal>工作原理</p>
-        <h2 class="section-title" id="how-title" data-reveal>AI + lumen-mcp <br>就是你的 OSS 助手。</h2>
-        <p class="section-lead" data-reveal>MCP 是 AI 客户端与外部工具之间的开放协议。lumen-mcp 把你的阿里云 OSS 变成 AI 的标准工具集：AI 发起指令，lumen-mcp 用钥匙串里的凭证调用 OSS，再把结果交回给 AI。</p>
+        <h2 class="section-title" id="how-title" data-reveal>AI + ossuno-mcp <br>就是你的 OSS 助手。</h2>
+        <p class="section-lead" data-reveal>MCP 是 AI 客户端与外部工具之间的开放协议。ossuno-mcp 把你的阿里云 OSS 变成 AI 的标准工具集：AI 发起指令，ossuno-mcp 用钥匙串里的凭证调用 OSS，再把结果交回给 AI。</p>
 
         <div class="flow" data-reveal>
           <div class="flow-node">
@@ -71,7 +72,7 @@
           <div class="flow-link" aria-hidden="true"><small>MCP · stdio</small></div>
           <div class="flow-node core">
             <small>钥匙串凭证 · 本机运行</small>
-            <strong>lumen-mcp</strong>
+            <strong>ossuno-mcp</strong>
             <span>浏览 · 上传 · 下载 · 签名链接 · OSS 专家提示词</span>
           </div>
           <div class="flow-link" aria-hidden="true"><small>HTTPS</small></div>
@@ -92,7 +93,7 @@
 
         <div class="say-grid" data-reveal-stagger>
           <article class="say-card">
-            <p class="say-prompt">「列出 lumen-assets 里所有超过 100 MB 的视频。」</p>
+            <p class="say-prompt">「列出 ossuno-assets 里所有超过 100 MB 的视频。」</p>
             <div class="say-tools"><code>list_buckets</code><code>list_objects</code></div>
             <p class="say-note">分页扫遍整个 Bucket，按类型、大小、时间筛选，再报给你。</p>
           </article>
@@ -135,7 +136,7 @@
               <tr><th scope="col">提示词</th><th scope="col">说明</th></tr>
             </thead>
             <tbody>
-              <tr><td>lumen-oss-expert</td><td>把 Agent 定位为 OSS 操作专家：先浏览再操作、删除前确认、私有桶自动给临时链接</td></tr>
+              <tr><td>ossuno-oss-expert</td><td>把 Agent 定位为 OSS 操作专家：先浏览再操作、删除前确认、私有桶自动给临时链接</td></tr>
               <tr><td>oss-batch-upload</td><td>批量上传工作流：确认目录 → 展示清单 → 逐个上传保留目录结构 → 汇总报告</td></tr>
             </tbody>
           </table>
@@ -151,7 +152,7 @@
         <h2 class="section-title" id="clients-title" data-reveal>主流客户端，<br>自动检测注册。</h2>
 
         <div class="mcp-prose" data-reveal>
-          <p>以下客户端可由 <code>npx lumen-mcp install</code> 自动检测并注册：</p>
+          <p>以下客户端可由 <code>npx ossuno-mcp install</code> 自动检测并注册：</p>
           <ul class="client-list">
             <li>Codex</li>
             <li>Claude Desktop</li>
@@ -163,15 +164,15 @@
           <p>其他支持 stdio 传输的客户端（VS Code Copilot、Cline、Qoder 等）可手动配置：</p>
           <pre class="code-block" aria-label="手动配置 JSON"><code>{
   <span class="c-cm">"mcpServers"</span>: {
-    "lumen": {
+    "ossuno": {
       "command": "npx",
-      "args": ["-y", "lumen-mcp"],
-      "env": { "LUMEN_MCP_DEFAULT_BUCKET": "my-bucket" }
+      "args": ["-y", "ossuno-mcp"],
+      "env": { "OSSUNO_MCP_DEFAULT_BUCKET": "my-bucket" }
     }
   }
 }</code></pre>
-          <p><code>env</code> 里的 <code>LUMEN_MCP_DEFAULT_BUCKET</code>（可选）设置默认 Bucket：设置后 <code>bucket</code> 参数对 AI 变为可选，桶名会直接出现在工具描述中，任何 AI 客户端都能看到；AI 仍可显式指定其他 Bucket。</p>
-          <p>各客户端的配置文件位置与差异见 <a href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">GitHub 上的完整 MCP 文档</a>。JSON 配置合并写入并保留 <code>.bak</code> 备份，不影响其他 MCP 服务器。</p>
+          <p><code>env</code> 里的 <code>OSSUNO_MCP_DEFAULT_BUCKET</code>（可选）设置默认 Bucket：设置后 <code>bucket</code> 参数对 AI 变为可选，桶名会直接出现在工具描述中，任何 AI 客户端都能看到；AI 仍可显式指定其他 Bucket。</p>
+          <p>各客户端的配置文件位置与差异见 <a href="https://github.com/ihopefulChina/Ossuno/blob/main/docs/mcp.md" rel="noopener">GitHub 上的完整 MCP 文档</a>。JSON 配置合并写入并保留 <code>.bak</code> 备份，不影响其他 MCP 服务器。</p>
         </div>
       </div>
     </section>
@@ -193,17 +194,17 @@
           <div class="adv-card">
             <h3>多账号管理</h3>
             <p>支持多个配置档案：列出、切换、删除、验证，适合同时管理多套凭证。</p>
-            <pre class="code-block" aria-label="多账号命令"><code><span class="c-prompt">$</span> npx lumen-mcp auth --list
+            <pre class="code-block" aria-label="多账号命令"><code><span class="c-prompt">$</span> npx ossuno-mcp auth --list
 <span class="c-cm"># --use &lt;名称&gt; 切换 / --remove 删除</span>
-<span class="c-prompt">$</span> npx lumen-mcp auth --test</code></pre>
+<span class="c-prompt">$</span> npx ossuno-mcp auth --test</code></pre>
           </div>
           <div class="adv-card">
             <h3>卸载与源码构建</h3>
             <p>移除注册一行命令。没有 Node 时，也可以克隆仓库用 Swift 构建（在 Terminal.app 中执行）。</p>
-            <pre class="code-block" aria-label="卸载与源码构建命令"><code><span class="c-prompt">$</span> npx lumen-mcp uninstall
+            <pre class="code-block" aria-label="卸载与源码构建命令"><code><span class="c-prompt">$</span> npx ossuno-mcp uninstall
 <span class="c-cm"># 源码构建：</span>
-<span class="c-prompt">$</span> git clone https://github.com/ihopefulChina/Lumen
-<span class="c-prompt">$</span> cd Tools/lumen-mcp &amp;&amp; swift build -c release</code></pre>
+<span class="c-prompt">$</span> git clone https://github.com/ihopefulChina/Ossuno
+<span class="c-prompt">$</span> cd Tools/ossuno-mcp &amp;&amp; swift build -c release</code></pre>
           </div>
         </div>
       </div>
@@ -218,7 +219,7 @@
         <div class="safety-grid" data-reveal-stagger>
           <article class="safety-card">
             <h3>凭证隔离</h3>
-            <p>AccessKey Secret 与 STS Token 只存 macOS 钥匙串，AI 客户端接触不到凭证本身，与 Lumen App 账号相互独立。</p>
+            <p>AccessKey Secret 与 STS Token 只存 macOS 钥匙串，AI 客户端接触不到凭证本身，与 Ossuno App 账号相互独立。</p>
           </article>
           <article class="safety-card">
             <h3>最小权限</h3>
@@ -230,7 +231,7 @@
           </article>
           <article class="safety-card">
             <h3>本地范围明确</h3>
-            <p>默认只访问桌面、文稿、下载和临时目录；可用 <code>LUMEN_MCP_ALLOWED_ROOTS</code> 精确增加目录，符号链接不能越界。</p>
+            <p>默认只访问桌面、文稿、下载和临时目录；可用 <code>OSSUNO_MCP_ALLOWED_ROOTS</code> 精确增加目录，符号链接不能越界。</p>
           </article>
         </div>
       </div>
@@ -245,13 +246,13 @@
         <div class="mcp-prose" data-reveal>
           <table>
             <tbody>
-              <tr><td>AI 提示「找不到配置档案」</td><td>先运行 <code>npx lumen-mcp auth</code> 完成凭证配置</td></tr>
-              <tr><td>连接失败</td><td>确认配置里 command 为 <code>npx</code>、args 包含 <code>-y lumen-mcp</code>；从源码运行时，检查二进制绝对路径与执行权限</td></tr>
+              <tr><td>AI 提示「找不到配置档案」</td><td>先运行 <code>npx ossuno-mcp auth</code> 完成凭证配置</td></tr>
+              <tr><td>连接失败</td><td>确认配置里 command 为 <code>npx</code>、args 包含 <code>-y ossuno-mcp</code>；从源码运行时，检查二进制绝对路径与执行权限</td></tr>
               <tr><td>弹出钥匙串授权窗口</td><td>重新编译后二进制签名变化所致，属正常现象，点一次「始终允许」即可</td></tr>
-              <tr><td>上传报签名错误</td><td>运行 <code>npx lumen-mcp auth --test</code> 验证凭证与地域是否匹配</td></tr>
-              <tr><td>本地路径被拒绝</td><td>使用桌面、文稿或下载目录，或配置 <code>LUMEN_MCP_ALLOWED_ROOTS</code> 后重启客户端</td></tr>
-              <tr><td>想换账号</td><td><code>npx lumen-mcp auth --use &lt;名称&gt;</code> 切换活动档案后重启 AI 客户端</td></tr>
-              <tr><td>移除注册</td><td><code>npx lumen-mcp uninstall</code>，或加 <code>--client</code> 指定客户端</td></tr>
+              <tr><td>上传报签名错误</td><td>运行 <code>npx ossuno-mcp auth --test</code> 验证凭证与地域是否匹配</td></tr>
+              <tr><td>本地路径被拒绝</td><td>使用桌面、文稿或下载目录，或配置 <code>OSSUNO_MCP_ALLOWED_ROOTS</code> 后重启客户端</td></tr>
+              <tr><td>想换账号</td><td><code>npx ossuno-mcp auth --use &lt;名称&gt;</code> 切换活动档案后重启 AI 客户端</td></tr>
+              <tr><td>移除注册</td><td><code>npx ossuno-mcp uninstall</code>，或加 <code>--client</code> 指定客户端</td></tr>
             </tbody>
           </table>
         </div>
@@ -262,22 +263,22 @@
     <section class="mcp-final" aria-labelledby="mcp-final-title">
       <h2 id="mcp-final-title" data-reveal>现在，<br>让 AI 试一下。</h2>
       <div class="mcp-final-links" data-reveal>
-        <a class="link-arrow" href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">完整 MCP 文档</a>
-        <a class="link-arrow" href="https://github.com/ihopefulChina/Lumen/issues" rel="noopener">问题反馈</a>
+        <a class="link-arrow" href="https://github.com/ihopefulChina/Ossuno/blob/main/docs/mcp.md" rel="noopener">完整 MCP 文档</a>
+        <a class="link-arrow" href="https://github.com/ihopefulChina/Ossuno/issues" rel="noopener">问题反馈</a>
       </div>
     </section>
   </main>
 
   <footer class="site-footer">
     <div class="footer-inner">
-      <div class="footer-brand"><img src="assets/lumen-favicon.png" width="64" height="64" alt=""><span>Lumen</span></div>
+      <div class="footer-brand"><img src="assets/ossuno-favicon.png" width="64" height="64" alt=""><span>Ossuno</span></div>
       <p>为 Mac 打造的阿里云 OSS 客户端 · 独立开源，非阿里云官方产品</p>
       <nav aria-label="页脚导航">
         <a href="index.html">首页</a>
         <a href="mcp.html">AI · MCP</a>
         <a href="support.html">支持</a>
         <a href="privacy.html">隐私</a>
-        <a href="https://github.com/ihopefulChina/Lumen" rel="noopener">GitHub</a>
+        <a href="https://github.com/ihopefulChina/Ossuno" rel="noopener">GitHub</a>
       </nav>
     </div>
   </footer>

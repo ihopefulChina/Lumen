@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://ihopefulchina.github.io/Lumen/
+Sitemap: https://ihopefulchina.github.io/Ossuno/sitemap.xml

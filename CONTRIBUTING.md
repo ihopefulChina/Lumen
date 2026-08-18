@@ -1,17 +1,17 @@
-# Contributing to Lumen
+# Contributing to Ossuno
 
-感谢你愿意改进 Lumen。先为行为变化创建 Issue，说明用户场景、预期结果和安全边界；小型修复可以直接提交 Pull Request。
+感谢你愿意改进 Ossuno。先为行为变化创建 Issue，说明用户场景、预期结果和安全边界；小型修复可以直接提交 Pull Request。
 
 ## Local setup
 
 需要 Apple Silicon Mac、macOS 15 或更高版本，以及当前稳定版 Xcode。依赖由仓库中的 `Package.resolved` 固定。
 
 ```bash
-git clone git@github.com:ihopefulChina/Lumen.git
-cd Lumen
+git clone git@github.com:ihopefulChina/Ossuno.git
+cd Ossuno
 xcodebuild -resolvePackageDependencies \
-  -project Lumen.xcodeproj \
-  -scheme Lumen \
+  -project Ossuno.xcodeproj \
+  -scheme Ossuno \
   -onlyUsePackageVersionsFromResolvedFile \
   -skipPackageUpdates
 ```
@@ -20,17 +20,19 @@ xcodebuild -resolvePackageDependencies \
 
 ```bash
 REAL_OSS_SMOKE=0 xcodebuild \
-  -project Lumen.xcodeproj \
-  -scheme Lumen \
+  -project Ossuno.xcodeproj \
+  -scheme Ossuno \
   -destination 'platform=macOS,arch=arm64' \
   -onlyUsePackageVersionsFromResolvedFile \
   -skipPackageUpdates \
   test
 
+(cd Tools/ossuno-mcp && swift test --disable-sandbox -Xswiftc -warnings-as-errors)
+
 scripts/validate-website.sh
 bash -n scripts/*.sh
 zsh -n scripts/*.sh
-plutil -lint Info.plist Lumen/PrivacyInfo.xcprivacy
+plutil -lint Info.plist Ossuno/PrivacyInfo.xcprivacy
 ```
 
 不要把真实 OSS 凭证交给测试或 CI。只有显式设置 `REAL_OSS_SMOKE=1` 时，真实 OSS 冒烟测试才会运行；公开 CI 永远不设置该值。

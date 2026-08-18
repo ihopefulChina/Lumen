@@ -3,21 +3,21 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>支持 — Lumen</title>
-  <meta name="description" content="Lumen 是阿里云 OSS 的 Mac 客户端。这里说明如何连接账号、传输文件、恢复对象和检查更新。">
+  <title>支持 — Ossuno</title>
+  <meta name="description" content="Ossuno 是阿里云 OSS 的 Mac 客户端。这里说明如何连接账号、传输文件、恢复对象和检查更新。">
   <meta name="theme-color" content="#f5f5f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#101013" media="(prefers-color-scheme: dark)">
-  <link rel="canonical" href="https://ihopefulchina.github.io/Lumen/support.html">
-  <link rel="icon" type="image/png" href="assets/lumen-favicon.png">
+  <link rel="canonical" href="https://ihopefulchina.github.io/Ossuno/support.html">
+  <link rel="icon" type="image/png" href="assets/ossuno-favicon.png">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="document-page">
   <a class="skip-link" href="#main">跳到主要内容</a>
   <header class="site-header">
     <div class="header-inner">
-      <a class="brand" href="index.html" aria-label="返回 Lumen 首页">
-        <img src="assets/lumen-favicon.png" width="64" height="64" alt="">
-        <span>Lumen</span>
+      <a class="brand" href="index.html" aria-label="返回 Ossuno 首页">
+        <img src="assets/ossuno-favicon.png" width="64" height="64" alt="">
+        <span>Ossuno</span>
       </a>
       <nav class="main-nav" aria-label="主导航">
         <a href="index.html">首页</a>
@@ -25,7 +25,7 @@
         <a href="support.html" aria-current="page">支持</a>
         <a href="privacy.html">隐私</a>
       </nav>
-      <a class="header-download" href="https://github.com/ihopefulChina/Lumen/releases/latest/download/Lumen-1.0.3.dmg">下载</a>
+      <a class="header-download" href="https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0.dmg">下载</a>
     </div>
   </header>
 
@@ -43,7 +43,7 @@
           <a class="topic-tile" href="#transfer"><strong>上传或下载失败<span class="topic-arrow" aria-hidden="true">→</span></strong><small>断点续传与自动重试</small></a>
           <a class="topic-tile" href="#recover"><strong>恢复删除的对象<span class="topic-arrow" aria-hidden="true">→</span></strong><small>版本控制与撤销</small></a>
           <a class="topic-tile" href="#update"><strong>更新没有出现<span class="topic-arrow" aria-hidden="true">→</span></strong><small>手动检查与代理网络</small></a>
-          <a class="topic-tile" href="#mcp"><strong>让 AI 操作 OSS<span class="topic-arrow" aria-hidden="true">→</span></strong><small>lumen-mcp 一键注册</small></a>
+          <a class="topic-tile" href="#mcp"><strong>让 AI 操作 OSS<span class="topic-arrow" aria-hidden="true">→</span></strong><small>ossuno-mcp 一键注册</small></a>
           <a class="topic-tile" href="#issue"><strong>提交反馈<span class="topic-arrow" aria-hidden="true">→</span></strong><small>诊断信息与安全报告</small></a>
         </div>
       </nav>
@@ -54,7 +54,7 @@
           <li>确认使用 RAM 子用户，而不是主账号 AccessKey；从仅允许访问所需 Bucket 的最小权限开始。</li>
           <li>检查 AccessKey ID、Secret、可选 STS Token 与地域是否匹配。临时 Token 过期后需要重新填写。</li>
           <li>使用自定义 Endpoint 时填写完整主机名；私有网络地址只有在当前 Mac 能访问对应网络时才可用。</li>
-          <li>如错误包含权限拒绝，请在阿里云控制台核对列举、读取、上传、删除或复制操作所需的 RAM 权限。1.0.3 的安全复制与回滚还会按场景使用 <code>oss:GetBucketVersioning</code>、<code>oss:GetObjectAcl</code>、<code>oss:GetObjectVersion</code> 和 <code>oss:DeleteObjectVersion</code>。</li>
+          <li>如错误包含权限拒绝，请在阿里云控制台核对列举、读取、上传、删除或复制操作所需的 RAM 权限。1.0.0 的安全复制与回滚还会按场景使用 <code>oss:GetBucketVersioning</code>、<code>oss:GetObjectAcl</code>、<code>oss:GetObjectVersion</code> 和 <code>oss:DeleteObjectVersion</code>。</li>
         </ol>
       </section>
 
@@ -71,42 +71,42 @@
 
       <section id="cross-bucket" data-reveal>
         <h2>跨 Bucket 操作为什么会经过这台 Mac</h2>
-        <p>同一账号、同一地域的 Bucket 使用 OSS 云端复制。跨地域或跨账号时，Lumen 会在确认页明确显示“通过这台 Mac 中转”，先下载到受控临时目录并校验，再上传到目标。安全覆盖要求目标 Bucket 已开启版本控制；未开启时请选择“保留两者”或跳过。移动仅在全部目标复制完成、来源与目标 Bucket 都开启版本控制且能按精确版本验证时清理来源；其他状态会安全取消，请改用复制后手动核对。</p>
+        <p>同一账号、同一地域的 Bucket 使用 OSS 云端复制。跨地域或跨账号时，Ossuno 会在确认页明确显示“通过这台 Mac 中转”，先下载到受控临时目录并校验，再上传到目标。安全覆盖要求目标 Bucket 已开启版本控制；未开启时请选择“保留两者”或跳过。移动仅在全部目标复制完成、来源与目标 Bucket 都开启版本控制且能按精确版本验证时清理来源；其他状态会安全取消，请改用复制后手动核对。</p>
       </section>
 
       <section id="accounts" data-reveal>
         <h2>账号配置异常</h2>
-        <p>Lumen 会保留上一份可读取的账号配置。主配置损坏时会尝试自动恢复并保留损坏文件；如果备份也不可读，请先不要覆盖本地应用数据，然后复制诊断信息并提交 Issue。</p>
+        <p>Ossuno 会保留上一份可读取的账号配置。主配置损坏时会尝试自动恢复并保留损坏文件；如果备份也不可读，请先不要覆盖本地应用数据，然后复制诊断信息并提交 Issue。</p>
       </section>
 
       <section id="update" data-reveal>
         <h2>更新没有出现</h2>
-        <p>在菜单栏选择“Lumen → 检查更新…”。自动检查可在“设置 → 通用”中开启。网络代理或无法访问 GitHub Releases 时，更新检查会失败，可从<a href="https://github.com/ihopefulChina/Lumen/releases" rel="noopener">发布页</a>手动下载最新版本。</p>
+        <p>在菜单栏选择“Ossuno → 检查更新…”。自动检查可在“设置 → 通用”中开启。网络代理或无法访问 GitHub Releases 时，更新检查会失败，可从<a href="https://github.com/ihopefulChina/Ossuno/releases" rel="noopener">发布页</a>手动下载最新版本。</p>
       </section>
 
       <section id="mcp" data-reveal>
         <h2>让 AI 操作 OSS（MCP）</h2>
-        <p>内置 MCP 服务器 <code>lumen-mcp</code>（已发布到 npm）。终端运行 <code>npx lumen-mcp install</code> 一键注册到 Codex、Claude Desktop、Claude Code、Cursor、Trae、Windsurf 等本机 AI 客户端，AI 就能浏览 Bucket、上传下载文件和生成临时下载链接，并自带 OSS 专家提示词。凭证保存在 macOS 钥匙串，与 App 账号相互独立。<a href="mcp.html">查看 AI · MCP 接入指南</a>，完整命令与客户端配置见 <a href="https://github.com/ihopefulChina/Lumen/blob/main/docs/mcp.md" rel="noopener">GitHub 文档</a>。</p>
+        <p>内置 MCP 服务器 <code>ossuno-mcp</code> 计划随 1.0.0 发布到 npm；发布后可运行 <code>npx ossuno-mcp install</code> 一键注册到 Codex、Claude Desktop、Claude Code、Cursor、Trae、Windsurf 等本机 AI 客户端。正式发布前请从源码构建。AI 可浏览 Bucket、上传下载文件和生成临时下载链接，并自带 OSS 专家提示词；凭证保存在 macOS 钥匙串，与 App 账号相互独立。<a href="mcp.html">查看 AI · MCP 接入指南</a>，完整命令与客户端配置见 <a href="https://github.com/ihopefulChina/Ossuno/blob/main/docs/mcp.md" rel="noopener">GitHub 文档</a>。</p>
       </section>
 
       <section id="issue" data-reveal>
         <h2>提交可复现的问题</h2>
-        <p>在 Lumen 中选择“帮助 → 复制诊断信息”，然后创建<a href="https://github.com/ihopefulChina/Lumen/issues/new/choose" rel="noopener">结构化 Issue</a>。附上最小复现步骤、实际结果与期望结果。</p>
-        <p>截图和录屏请使用虚拟数据，或遮盖账号、Bucket、对象名、路径与 URL。不要提交 AccessKey、Secret、Token 或签名 URL。安全漏洞应使用<a href="https://github.com/ihopefulChina/Lumen/security/advisories/new" rel="noopener">私密报告</a>。</p>
+        <p>在 Ossuno 中选择“帮助 → 复制诊断信息”，然后创建<a href="https://github.com/ihopefulChina/Ossuno/issues/new/choose" rel="noopener">结构化 Issue</a>。附上最小复现步骤、实际结果与期望结果。</p>
+        <p>截图和录屏请使用虚拟数据，或遮盖账号、Bucket、对象名、路径与 URL。不要提交 AccessKey、Secret、Token 或签名 URL。安全漏洞应使用<a href="https://github.com/ihopefulChina/Ossuno/security/advisories/new" rel="noopener">私密报告</a>。</p>
       </section>
     </div>
   </main>
 
   <footer class="site-footer">
     <div class="footer-inner">
-      <div class="footer-brand"><img src="assets/lumen-favicon.png" width="64" height="64" alt=""><span>Lumen</span></div>
+      <div class="footer-brand"><img src="assets/ossuno-favicon.png" width="64" height="64" alt=""><span>Ossuno</span></div>
       <p>为 Mac 打造的阿里云 OSS 客户端 · 独立开源，非阿里云官方产品</p>
       <nav aria-label="页脚导航">
         <a href="index.html">首页</a>
         <a href="mcp.html">AI · MCP</a>
         <a href="support.html">支持</a>
         <a href="privacy.html">隐私</a>
-        <a href="https://github.com/ihopefulChina/Lumen" rel="noopener">GitHub</a>
+        <a href="https://github.com/ihopefulChina/Ossuno" rel="noopener">GitHub</a>
       </nav>
     </div>
   </footer>
