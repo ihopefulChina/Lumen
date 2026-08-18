@@ -4,7 +4,7 @@
         <title>Ossuno</title>
         <item>
             <title>1.0.0</title>
-            <pubDate>Tue, 18 Aug 2026 14:26:21 +0800</pubDate>
+            <pubDate>Tue, 18 Aug 2026 14:43:32 +0800</pubDate>
             <link>https://github.com/ihopefulChina/Ossuno/releases/tag/v1.0.0</link>
             <sparkle:version>3</sparkle:version>
             <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
@@ -62,11 +62,11 @@ npx ossuno-mcp install
 
 仅在确认安装包来自本仓库的 GitHub Releases 时放行。详细背景见 [Apple 的安全打开说明](https://support.apple.com/zh-cn/102445)。
 ]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Ossuno/releases/download/v1.0.0/Ossuno-1.0.0-arm64.dmg" length="4457305" type="application/octet-stream" sparkle:edSignature="pm8hDPKv7drBGH+pVJQ/05UhDtSIr9tsz0G7GxyxFs9tOQd7U5EihI2PAPU+8rjW+NhAnHGMg/aDTOpEECEgCg=="/>
+            <enclosure url="https://github.com/ihopefulChina/Ossuno/releases/download/v1.0.0/Ossuno-1.0.0-arm64.dmg" length="4457360" type="application/octet-stream" sparkle:edSignature="6aoOvypAwtH7I0G1Fj+KEv0BxT6wSvesjyCpfWo6xgPJM7gp/KG0HGTYa5nwd1QTRjUoUGedIVmGhHuHNULTCg=="/>
         </item>
         <item>
             <title>1.0.0</title>
-            <pubDate>Tue, 18 Aug 2026 14:25:08 +0800</pubDate>
+            <pubDate>Tue, 18 Aug 2026 14:42:34 +0800</pubDate>
             <link>https://github.com/ihopefulChina/Ossuno/releases/tag/v1.0.0</link>
             <sparkle:version>2</sparkle:version>
             <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
@@ -123,7 +123,7 @@ npx ossuno-mcp install
 
 仅在确认安装包来自本仓库的 GitHub Releases 时放行。详细背景见 [Apple 的安全打开说明](https://support.apple.com/zh-cn/102445)。
 ]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Ossuno/releases/download/v1.0.0/Ossuno-1.0.0-x86_64.dmg" length="4620250" type="application/octet-stream" sparkle:edSignature="NypMrGdrh15Pep5DuwhUJlzSvh0X2GgcT4ZElWIWeUQF3UUQQQsRC9cS4iOReheLmpOKbJCCDEpAD8oBRZN/Cw=="/>
+            <enclosure url="https://github.com/ihopefulChina/Ossuno/releases/download/v1.0.0/Ossuno-1.0.0-x86_64.dmg" length="4620745" type="application/octet-stream" sparkle:edSignature="aD6EzeQAA5Mz9+SkEB0wCnWcRDq+k4BW0aP5AxBPasVwyAwGmqyXy6+mad1TZsLQXTwYzu3R3P0Lwqa59QLNBA=="/>
         </item>
     </channel>
 </rss>
