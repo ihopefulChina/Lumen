@@ -309,6 +309,17 @@ enum BrowserShortcutScope {
         }
     }
 
+    @discardableResult
+    static func focusBrowser(in window: NSWindow?) -> Bool {
+        guard let window,
+              let owner = registrations[ObjectIdentifier(window)]?.owner
+        else { return false }
+        // SwiftUI grid cells and their empty background are not native focusable
+        // controls. Use the invisible region probe as their first responder so
+        // the same browser shortcuts work in grid and table modes.
+        return window.makeFirstResponder(owner)
+    }
+
     static func shouldHandleCurrentResponder(in window: NSWindow?) -> Bool {
         guard let window else { return false }
         let key = ObjectIdentifier(window)
@@ -365,6 +376,8 @@ struct BrowserShortcutScopeProbe: NSViewRepresentable {
     }
 
     final class Probe: NSView {
+        override var acceptsFirstResponder: Bool { true }
+
         override func hitTest(_ point: NSPoint) -> NSView? {
             nil
         }

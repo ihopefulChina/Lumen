@@ -400,6 +400,7 @@ struct BrowserBackgroundMenuOverlay: NSViewRepresentable {
                     selectOnSingleClick: false
                 ) {
                 case .showMenu(let menuHit):
+                    BrowserShortcutScope.focusBrowser(in: window)
                     if let itemID = menuHit.itemID {
                         actions.onHighlight(itemID)
                         presentMenu(hit: menuHit, at: snapshot.locationInWindow, in: window, afterHighlight: true)
@@ -422,12 +423,15 @@ struct BrowserBackgroundMenuOverlay: NSViewRepresentable {
                     selectOnSingleClick: actions.viewMode == .grid
                 ) {
                 case .selectAndOpen(let itemID):
+                    BrowserShortcutScope.focusBrowser(in: window)
                     actions.onOpenItem(itemID)
                     return true
                 case .select(let itemID, let modifiers):
+                    BrowserShortcutScope.focusBrowser(in: window)
                     actions.onSelectItem(itemID, modifiers)
                     return false
                 case .clearSelection:
+                    BrowserShortcutScope.focusBrowser(in: window)
                     actions.onBackgroundClick()
                     return false
                 case .showMenu, .passThrough:

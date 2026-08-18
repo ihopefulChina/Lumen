@@ -69,16 +69,37 @@ struct GridInteractionProbeTests {
         #expect(harness.model.browser.selectedKeys.isEmpty, "empty click should clear the selection")
     }
 
+    @Test func gridItemAndEmptyClicksActivateBrowserShortcuts() throws {
+        let harness = makeHarness()
+        defer { harness.close() }
+        let folderMarker = "ossuno.folder:campaigns/2026-autumn/品牌规范/"
+
+        try harness.focusSidebar()
+        #expect(!harness.browserShortcutsAreActive)
+        let folderPoint = try harness.center(ofMarker: folderMarker)
+        try harness.click(at: folderPoint, count: 1)
+        #expect(harness.browserShortcutsAreActive, "grid item click should move keyboard focus into the browser")
+
+        try harness.focusSidebar()
+        #expect(!harness.browserShortcutsAreActive)
+        let empty = CGPoint(x: folderPoint.x, y: folderPoint.y - 420)
+        try harness.click(at: empty, count: 1)
+        #expect(harness.browserShortcutsAreActive, "grid background click should keep paste and other browser shortcuts active")
+    }
+
     @Test func listFolderSingleClickSelects() throws {
         let harness = makeHarness(mode: .list)
         defer { harness.close() }
         let folderKey = "campaigns/2026-autumn/品牌规范/"
         let row = harness.rowIndex(for: folderKey)
 
+        try harness.focusSidebar()
+        #expect(!harness.browserShortcutsAreActive)
         let point = try harness.centerOfTableRow(row)
         try harness.click(at: point, count: 1)
 
         #expect(harness.model.browser.selectedKeys == [folderKey], "list single click should select the folder row, got \(harness.model.browser.selectedKeys)")
+        #expect(harness.browserShortcutsAreActive, "list click should keep browser shortcuts active")
     }
 
     @Test func listFolderDoubleClickOpens() throws {
@@ -253,6 +274,19 @@ struct GridInteractionProbeTests {
             return all.firstIndex(of: key) ?? -1
         }
 
+        var browserShortcutsAreActive: Bool {
+            BrowserShortcutScope.shouldHandleCurrentResponder(in: window)
+        }
+
+        func focusSidebar() throws {
+            guard let sidebar = allTableViews(in: window.contentView)
+                .min(by: { $0.numberOfColumns < $1.numberOfColumns })
+            else { throw HarnessError.sidebarNotFound }
+            guard window.makeFirstResponder(sidebar) else {
+                throw HarnessError.focusFailed
+            }
+        }
+
         func centerOfTableRow(_ row: Int) throws -> CGPoint {
             guard let table = findTableView(in: window.contentView) else {
                 throw HarnessError.tableNotFound
@@ -320,12 +354,17 @@ struct GridInteractionProbeTests {
         }
 
         private func findTableView(in root: NSView?) -> NSTableView? {
-            guard let root else { return nil }
-            var tables: [NSTableView] = []
-            collectTables(in: root, into: &tables)
+            let tables = allTableViews(in: root)
             // The browser table has the most columns (名称/大小/种类/修改时间);
             // the sidebar List's underlying table has only one.
             return tables.max { $0.numberOfColumns < $1.numberOfColumns }
+        }
+
+        private func allTableViews(in root: NSView?) -> [NSTableView] {
+            guard let root else { return [] }
+            var tables: [NSTableView] = []
+            collectTables(in: root, into: &tables)
+            return tables
         }
 
         private func collectTables(in root: NSView?, into result: inout [NSTableView]) {
@@ -343,6 +382,8 @@ struct GridInteractionProbeTests {
         case tableNotFound
         case rowOutOfRange(Int)
         case rowViewMissing(Int)
+        case sidebarNotFound
+        case focusFailed
     }
 }
 #endif

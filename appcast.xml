@@ -1,15 +1,12 @@
-<?xml version="1.0" encoding="utf-8" standalone="yes"?>
+<?xml version="1.0" standalone="yes"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>Ossuno</title>
-        <link>https://ihopefulchina.github.io/Ossuno/</link>
-        <description>Ossuno 官方更新源。</description>
-        <language>zh-CN</language>
         <item>
             <title>1.0.0</title>
-            <pubDate>Tue, 18 Aug 2026 12:18:27 +0800</pubDate>
+            <pubDate>Tue, 18 Aug 2026 14:26:21 +0800</pubDate>
             <link>https://github.com/ihopefulChina/Ossuno/releases/tag/v1.0.0</link>
-            <sparkle:version>1</sparkle:version>
+            <sparkle:version>3</sparkle:version>
             <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
@@ -17,13 +14,30 @@
 
 Ossuno 的首个正式版本：一个面向阿里云 OSS 的原生 macOS 客户端，并附带可独立使用的 `ossuno-mcp`。
 
+## 下载 Ossuno 1.0.0
+
+- [Apple Silicon 版（M 系列芯片）](https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg)
+- [Intel 版（x86_64）](https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-x86_64.dmg)
+
+两个安装包都需要 macOS 15 或更高版本。不确定芯片类型时，可在苹果菜单的「关于本机」中查看“芯片”或“处理器”。
+
+## ossuno-mcp 1.0.0
+
+[`ossuno-mcp`](https://www.npmjs.com/package/ossuno-mcp/v/1.0.0) 已发布到 npm，可独立注册到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端：
+
+```bash
+npx ossuno-mcp auth
+npx ossuno-mcp install
+```
+
+它提供 Bucket 浏览、上传、下载与临时签名链接，凭证只保存在 macOS 钥匙串。
+
 ## 主要能力
 
 - 浏览任意类型的 OSS 对象，支持文件夹、全 Bucket 搜索、排序、筛选、路径导航与空格快速查看。
 - 上传、下载、复制、移动、重命名和拖放均保留对象属性；大文件支持分片上传、断点续传与 CRC64 校验。
 - 对象属性可编辑 Content-Type、缓存策略、下载文件名、自定义元数据、ACL 与 OSS 标签。
 - Bucket 开启版本控制时，可撤销刚完成的删除、移动和重命名。
-- `ossuno-mcp` 提供 Bucket 浏览、上传、下载与临时签名链接，可一键注册到常见 MCP 客户端。
 
 ## 安全与可靠性
 
@@ -35,12 +49,81 @@ Ossuno 的首个正式版本：一个面向阿里云 OSS 的原生 macOS 客户�
 
 ## 系统要求
 
-- Apple Silicon Mac
+- Apple Silicon 或 Intel Mac
 - macOS 15 或更高版本
 
-当前安装包采用 ad-hoc 签名。若 macOS 首次阻止打开，请在访达中右键 Ossuno，选择“打开”。
+## 分发方式与首次打开
+
+两个 DMG 均采用 ad-hoc 代码签名（没有开发者身份），不是 Developer ID 签名，且未经 Apple 公证。因此 macOS 无法验证开发者或确认安装包已经过 Apple 恶意软件检查，首次打开通常会触发 Gatekeeper。
+
+1. 打开 DMG，把 Ossuno 拖进「应用程序」，然后双击 Ossuno 尝试打开一次。
+2. 若 macOS 阻止运行，打开「系统设置 → 隐私与安全」，滚动到“安全性”，点击「仍要打开」。
+3. 在再次出现的警告中点击「打开」；系统可能要求密码或 Touch ID。以后可正常双击打开。
+
+仅在确认安装包来自本仓库的 GitHub Releases 时放行。详细背景见 [Apple 的安全打开说明](https://support.apple.com/zh-cn/102445)。
 ]]></description>
-            <enclosure url="https://github.com/ihopefulChina/Ossuno/releases/download/v1.0.0/Ossuno-1.0.0.dmg" length="4830614" type="application/octet-stream" sparkle:edSignature="ri6SblQ4d8rjPeSyLLdxy1OTHxl5Xwep04NS84jjbRk/nUnYoTALlmv+01/tfnuMu+g+oqsrhY3y67okpBNrAg=="/>
+            <enclosure url="https://github.com/ihopefulChina/Ossuno/releases/download/v1.0.0/Ossuno-1.0.0-arm64.dmg" length="4457305" type="application/octet-stream" sparkle:edSignature="pm8hDPKv7drBGH+pVJQ/05UhDtSIr9tsz0G7GxyxFs9tOQd7U5EihI2PAPU+8rjW+NhAnHGMg/aDTOpEECEgCg=="/>
+        </item>
+        <item>
+            <title>1.0.0</title>
+            <pubDate>Tue, 18 Aug 2026 14:25:08 +0800</pubDate>
+            <link>https://github.com/ihopefulChina/Ossuno/releases/tag/v1.0.0</link>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+            <description sparkle:format="markdown"><![CDATA[# Ossuno 1.0.0
+
+Ossuno 的首个正式版本：一个面向阿里云 OSS 的原生 macOS 客户端，并附带可独立使用的 `ossuno-mcp`。
+
+## 下载 Ossuno 1.0.0
+
+- [Apple Silicon 版（M 系列芯片）](https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-arm64.dmg)
+- [Intel 版（x86_64）](https://github.com/ihopefulChina/Ossuno/releases/latest/download/Ossuno-1.0.0-x86_64.dmg)
+
+两个安装包都需要 macOS 15 或更高版本。不确定芯片类型时，可在苹果菜单的「关于本机」中查看“芯片”或“处理器”。
+
+## ossuno-mcp 1.0.0
+
+[`ossuno-mcp`](https://www.npmjs.com/package/ossuno-mcp/v/1.0.0) 已发布到 npm，可独立注册到 Codex、Claude Desktop、Claude Code、Cursor 等支持 MCP 的 AI 客户端：
+
+```bash
+npx ossuno-mcp auth
+npx ossuno-mcp install
+```
+
+它提供 Bucket 浏览、上传、下载与临时签名链接，凭证只保存在 macOS 钥匙串。
+
+## 主要能力
+
+- 浏览任意类型的 OSS 对象，支持文件夹、全 Bucket 搜索、排序、筛选、路径导航与空格快速查看。
+- 上传、下载、复制、移动、重命名和拖放均保留对象属性；大文件支持分片上传、断点续传与 CRC64 校验。
+- 对象属性可编辑 Content-Type、缓存策略、下载文件名、自定义元数据、ACL 与 OSS 标签。
+- Bucket 开启版本控制时，可撤销刚完成的删除、移动和重命名。
+
+## 安全与可靠性
+
+- 覆盖、移动和撤销会绑定精确的 ETag、大小与 `versionId`；对象在操作期间发生变化时安全取消，不覆盖或移动并发写入的新对象。
+- 云端移动先完成并验证复制，再按精确版本删除来源；无法确认提交结果时保留对象并提示人工检查。
+- 本地下载使用受控临时文件并原子发布，拒绝符号链接逃逸和静默覆盖。
+- MCP 默认拒绝覆盖远端同名对象，并把本地文件访问限制在明确允许的目录中；凭证只保存在 macOS 钥匙串。
+- 诊断信息经过字段白名单过滤，不包含 AccessKey、Secret、Token、Bucket、对象 Key 或本地路径。
+
+## 系统要求
+
+- Apple Silicon 或 Intel Mac
+- macOS 15 或更高版本
+
+## 分发方式与首次打开
+
+两个 DMG 均采用 ad-hoc 代码签名（没有开发者身份），不是 Developer ID 签名，且未经 Apple 公证。因此 macOS 无法验证开发者或确认安装包已经过 Apple 恶意软件检查，首次打开通常会触发 Gatekeeper。
+
+1. 打开 DMG，把 Ossuno 拖进「应用程序」，然后双击 Ossuno 尝试打开一次。
+2. 若 macOS 阻止运行，打开「系统设置 → 隐私与安全」，滚动到“安全性”，点击「仍要打开」。
+3. 在再次出现的警告中点击「打开」；系统可能要求密码或 Touch ID。以后可正常双击打开。
+
+仅在确认安装包来自本仓库的 GitHub Releases 时放行。详细背景见 [Apple 的安全打开说明](https://support.apple.com/zh-cn/102445)。
+]]></description>
+            <enclosure url="https://github.com/ihopefulChina/Ossuno/releases/download/v1.0.0/Ossuno-1.0.0-x86_64.dmg" length="4620250" type="application/octet-stream" sparkle:edSignature="NypMrGdrh15Pep5DuwhUJlzSvh0X2GgcT4ZElWIWeUQF3UUQQQsRC9cS4iOReheLmpOKbJCCDEpAD8oBRZN/Cw=="/>
         </item>
     </channel>
 </rss>
