@@ -116,7 +116,7 @@ npx ossuno-mcp uninstall                # 移除注册
       "command": "npx",
       "args": ["-y", "ossuno-mcp"],
       "env": {
-        "OSSUNO_MCP_DEFAULT_BUCKET": "daniu-app-prod"
+        "OSSUNO_MCP_DEFAULT_BUCKET": "prod"
       }
     }
   }
@@ -131,13 +131,13 @@ command = "npx"
 args = ["-y", "ossuno-mcp"]
 
 [mcp_servers.ossuno.env]
-OSSUNO_MCP_DEFAULT_BUCKET = "daniu-app-prod"
+OSSUNO_MCP_DEFAULT_BUCKET = "prod"
 ```
 
 Claude Code 命令行注册时用：
 
 ```bash
-claude mcp add --scope user ossuno --env OSSUNO_MCP_DEFAULT_BUCKET=daniu-app-prod -- npx -y ossuno-mcp
+claude mcp add --scope user ossuno --env OSSUNO_MCP_DEFAULT_BUCKET=prod -- npx -y ossuno-mcp
 ```
 
 修改后重启客户端生效。AI 仍可显式传 `bucket` 操作其他桶，两者不冲突。

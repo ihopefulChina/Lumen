@@ -1,4 +1,5 @@
 {
+  "originHash" : "e615952149e7a1a00681c8243f17f381c5cc7bffc2837f77c22a649acdc360cf",
   "pins" : [
     {
       "identity" : "eventsource",
@@ -64,5 +65,5 @@
       }
     }
   ],
-  "version" : 2
+  "version" : 3
 }
